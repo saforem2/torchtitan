@@ -6,11 +6,20 @@
 
 import logging
 from dataclasses import dataclass, fields
-from typing import Any, cast
 
 from torchtitan.models.base.module import Module
 
-from torchtitan.models.common.dist_moe import DistMoeRoutedExperts
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    from torchtitan.models.common.dist_moe import DistMoeRoutedExperts
+
+try:
+    from torchtitan.models.common.dist_moe import DistMoeRoutedExperts as _DistMoeRoutedExperts  # noqa: F811
+    _HAS_DIST_MOE = _DistMoeRoutedExperts is not None
+except ImportError:
+    _DistMoeRoutedExperts = None  # type: ignore[no-redef]
+    _HAS_DIST_MOE = False
 from torchtitan.models.common.linear import GroupedLinear, Linear
 from torchtitan.models.common.lora import (
     get_lora_dist_moe_routed_experts,
@@ -140,11 +149,11 @@ def _make_grouped_linear_lora_config(
 
 
 def _make_dist_moe_lora_config(
-    cfg: DistMoeRoutedExperts.Config,
+    cfg: "DistMoeRoutedExperts.Config",
 ) -> Module.Config:
     """Wrap Dist-MoE so it consumes LoRA-enabled grouped projections."""
     owner = cfg._owner
-    if owner is not DistMoeRoutedExperts:
+    if not _HAS_DIST_MOE or owner is not _DistMoeRoutedExperts:
         owner_name = owner.__qualname__ if owner is not None else "None"
         raise ValueError(
             "Dist-MoE LoRA supports only DistMoeRoutedExperts configs, got "
@@ -262,7 +271,7 @@ class LoRATransform(ModelConfigTransform):
                         matched_targets.add(target)
                         is_target = True
 
-            if isinstance(cfg, DistMoeRoutedExperts.Config):
+            if _HAS_DIST_MOE and isinstance(cfg, _DistMoeRoutedExperts.Config):
                 # The fused path bypasses child forwards. Wrap the parent only
                 # when it must materialize an adapted child's effective weight.
                 lora_grouped_linear = get_lora_grouped_linear(GroupedLinear)
