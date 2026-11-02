@@ -47,11 +47,12 @@ source "${VENV}/bin/activate"
 
 if [ -f "${VENV}.tar.gz" ]; then
     echo "yeet: broadcasting ${VENV}.tar.gz"
-    ezpz yeet --src "${VENV}.tar.gz" 2>&1 | tail -3
+    ezpz yeet --src "${VENV}.tar.gz" 2>&1 | tail -5 || echo "yeet: warning (non-fatal, continuing with login venv)"
 else
-    echo "yeet: no ${VENV}.tar.gz, falling back to rsync"
-    ezpz yeet 2>&1 | tail -3
+    echo "yeet: no tarball, using login venv directly (2N, no broadcast needed)"
 fi
+# Validate that the venv is usable either way (login venv or broadcast /tmp copy)
+python -c "import ezpz; print('ezpz import OK after yeet stage')" 2>&1 | tail -2
 
 echo "===== ezpz sync smoke (sirius, CUDA, c4_test) ====="
 date
