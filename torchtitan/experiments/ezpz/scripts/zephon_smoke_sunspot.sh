@@ -178,7 +178,7 @@ for spec in "${CONFIGS[@]}"; do
     # shellcheck disable=SC2086
     # extra is an intentional word-split argument list.
     "${VENV}/bin/python" -c 'from ezpz.cli import main; main()' launch \
-        --nproc 24 --nproc_per_node 12 -- \
+        --nproc ${NGPUS:-12} --nproc_per_node 12 -- \
         "${VENV}/bin/python" -m torchtitan.experiments.ezpz.train \
         --module="${module}" \
         --config="${config}" \
