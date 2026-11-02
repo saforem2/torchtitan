@@ -439,16 +439,12 @@ def agpt_debugmodel_local() -> FaultTolerantTrainer.Config:
     cfg = agpt_debugmodel()
     cfg.hf_assets_path = "./tests/assets/tokenizer"
     cfg.tokenizer = EZPZTokenizer.Config(backend="hf")
-    # Grain (#4088) DELETED HuggingFaceTextDataLoader with no drop-in
-    # replacement -- the equivalent is a GrainDataLoader built from a
-    # SingleDatasetConfig(source=HuggingFaceStreamingSource, processor=
-    # TextProcessor), a different object graph rather than a rename. Ported
-    # lazily: raise where the config is USED so importing the registry (and
-    # therefore every blendcorpus production config) still works.
-    raise NotImplementedError(
-        "c4_test needs porting to GrainDataLoader after the 80th sync; see "
-        "torchtitan/components/data/dataset.py SingleDatasetConfig"
-    )
+    # Grain (#4088) deleted HuggingFaceTextDataLoader; c4_test now
+    # runs via GrainDataLoader + core DATASETS["c4_test"] (bundled
+    # tests/assets/c4_test, no network / no BlendCorpus / no /tegu).
+    from torchtitan.components.data.text_datasets import DATASETS
+
+    cfg.dataloader = GrainDataLoader.Config(dataset=DATASETS["c4_test"])
     cfg.validator.enable = False
     cfg.metrics.enable_wandb = False
     cfg.checkpointer = None
