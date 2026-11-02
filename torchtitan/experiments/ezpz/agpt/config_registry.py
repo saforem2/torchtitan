@@ -457,6 +457,48 @@ def agpt_debugmodel_local() -> FaultTolerantTrainer.Config:
     return cfg
 
 
+def agpt_debugmodel_mixed_local() -> FaultTolerantTrainer.Config:
+    """Offline weighted-mix demo: two local c4_test slices via DatasetMixConfig.
+
+    Both children read the bundled tests/assets/c4_test/data.json (no network,
+    no /tegu) as RandomAccess parquet. They are mixed weighted (0.75 / 0.25),
+    then concat-then-split packed -- the recommended path when weights should
+    count documents (see torchtitan/components/data/README.md).
+
+    This is the Grain weighted-HF-smoke baseline: it proves
+    SingleDatasetConfig + HuggingFaceRandomAccessSource + TextProcessor +
+    DatasetMixConfig/WeightedDataset + ConcatThenSplitPackingConfig +
+    GrainDataLoader compose end-to-end, without Zephon or any second corpus.
+    Two children point at the same backing file so the demo is copy-free;
+    the mix itself is what is under test (Grain weighted sampling, post-filter,
+    and packing). A real two-corpus job replaces the second child's data_files
+    with a second local parquet dir.
+    """
+    from torchtitan.components.data import DatasetMixConfig, WeightedDataset
+    from torchtitan.components.data.text_datasets import DATASETS as _DS
+
+    base = _DS["c4_test"]
+    mix = DatasetMixConfig(
+        datasets=(
+            WeightedDataset(dataset=base, weight=0.75),
+            WeightedDataset(dataset=base, weight=0.25),
+        ),
+    )
+    cfg = agpt_debugmodel()
+    cfg.hf_assets_path = "./tests/assets/tokenizer"
+    cfg.tokenizer = EZPZTokenizer.Config(backend="hf")
+    cfg.dataloader = GrainDataLoader.Config(
+        dataset=ConcatThenSplitPackingConfig(dataset=mix),
+    )
+    cfg.validator.enable = False
+    cfg.metrics.enable_wandb = False
+    cfg.checkpointer = None
+    cfg.training.steps = 10
+    cfg.training.max_context_length = 2048
+    cfg.training.num_tokens_per_microbatch_per_dp_rank = 8192
+    return cfg
+
+
 def agpt_debugmodel_qknorm_local() -> FaultTolerantTrainer.Config:
     """``agpt_debugmodel_local`` plus QK-Norm.
 
@@ -2314,6 +2356,75 @@ def agpt_10b_olmo3_polaris_smoke() -> FaultTolerantTrainer.Config:
         )
     )
     return cfg
+
+
+
+# ---------------------------------------------------------------------------
+# Zephon elastic dataloader (optional, requires `pip install zephon`)
+# ---------------------------------------------------------------------------
+# Uses torchtitan_recipes/zephon/dataloader.py (ported from
+# datologyai/torchtitan-zephon). The dataloader survives DP-size changes
+# across checkpoint/resume because Zephon checkpoints the whole pipeline,
+# not per-rank shards. Select with --config agpt_debugmodel_zephon or
+# agpt_2b_zephon_hf_mixture; the default BlendCorpus/Grain path is unchanged.
+
+
+def _zephon_config(
+    base_fn: str = "debugmodel",
+    *,
+    seq_len: int = 2048,
+    data_config: str = "examples/zephon/local_jsonl.toml",
+) -> "FaultTolerantTrainer.Config":
+    """Build an AGPT config with Zephon dataloader.
+
+    ``base_fn`` selects the model flavor (``debugmodel`` or ``2b`` etc.).
+    ``data_config`` is a Zephon TOML recipe path (relative to repo root).
+    ``ZEPHON_AGGREGATE_DIR`` / ``ZEPHON_RUN_ID`` env vars are forwarded to
+    Zephon for distributed checkpoint aggregation; without them Zephon runs
+    in single-rank mode.
+    """
+    import os as _os
+
+    cfg = agpt(base_fn, seq_len=seq_len)
+    try:
+        from torchtitan_recipes.zephon.dataloader import ZephonDataLoader
+    except ImportError as exc:
+        raise ImportError(
+            "Zephon is not installed. Install it with `pip install zephon` "
+            "or `pip install -e \".[zephon]\"` if the extra is declared."
+        ) from exc
+    aggregate_dir = _os.environ.get("ZEPHON_AGGREGATE_DIR") or None
+    cfg.dataloader = ZephonDataLoader.Config.from_toml(
+        data_config,
+        aggregate_dir=aggregate_dir,
+        aggregate_store=None if aggregate_dir else "torch://",
+        run_id=_os.environ.get("ZEPHON_RUN_ID"),
+    )
+    return cfg
+
+
+def agpt_debugmodel_zephon() -> "FaultTolerantTrainer.Config":
+    """Debug model with local Zephon dataloader (no cluster data needed).
+
+    Uses ``examples/zephon/local_jsonl.toml`` which points at the bundled
+    test assets. Useful for CPU smoke tests and single-node verification.
+    """
+    return _zephon_config("debugmodel", seq_len=2048, data_config="examples/zephon/local_jsonl.toml")
+
+
+def agpt_debugmodel_zephon_mixture() -> "FaultTolerantTrainer.Config":
+    """Debug model with weighted local mixture (2:1) via Zephon."""
+    return _zephon_config("debugmodel", seq_len=2048, data_config="examples/zephon/mixture.toml")
+
+
+def agpt_2b_zephon_hf_mixture() -> "FaultTolerantTrainer.Config":
+    """2B with weighted HF streaming mixture via Zephon.
+
+    Replace ``examples/zephon/mixture.toml`` sources with your own ``hf://``
+    URIs or local paths. Requires network access for HF streaming.
+    """
+    return _zephon_config("2b", seq_len=2048, data_config="examples/zephon/mixture.toml")
+
 
 
 # Competition speedrun configs — makes them discoverable via --config

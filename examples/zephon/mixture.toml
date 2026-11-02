@@ -1,0 +1,19 @@
+# Weighted HF streaming mixture example for Zephon.
+# Copy this file and replace the sources with your own hf:// or local paths.
+# Weights are relative token proportions (token-aware mixing is on by default
+# when there are multiple sources).
+
+text_field = "text"
+seed = 42
+chunk_size = 4096
+cache_limit_bytes = "50gb"
+
+[[sources]]
+name = "fineweb_edu"
+path = "hf://HuggingFaceTB/fineweb-edu/sample-10BT"
+weight = 2.0
+
+[[sources]]
+name = "starcoder"
+path = "hf://bigcode/starcoderdata"
+weight = 1.0
