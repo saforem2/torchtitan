@@ -3,7 +3,7 @@
 #PBS -N ezpz-sync-smoke-sirius
 #PBS -l walltime=00:30:00
 #PBS -l filesystems=home
-#PBS -l select=2
+#PBS -l select=1
 #PBS -q workq
 #PBS -j oe
 
