@@ -44,6 +44,7 @@ class TextProcessor(SampleProcessor):
     def __init__(self, config: Config, *, context: DatasetBuildContext) -> None:
         self._tokenizer = context.tokenizer
         self._text_fn = config.text_fn
+        self._max_context_length = context.max_context_length
 
     def __call__(
         self, sample: dict[str, Any], rng: np.random.Generator
@@ -54,6 +55,16 @@ class TextProcessor(SampleProcessor):
             dtype=np.int64,
         )
         if len(input_ids) < 2:
+            return None
+        # Drop rows that exceed max_context_length, mirroring ChatProcessor.
+        # Without this TextProcessor emits 59k-token rows that blow the
+        # TextCollator's num_tokens_per_microbatch check on c4_test.
+        if len(input_ids) - 1 > self._max_context_length:
+            logger.debug(
+                "Dropping sample: token count %d exceeds max_context_length=%d",
+                len(input_ids) - 1,
+                self._max_context_length,
+            )
             return None
         return TextSequence(
             input_ids=input_ids[:-1],

@@ -449,7 +449,10 @@ def agpt_debugmodel_local() -> FaultTolerantTrainer.Config:
     cfg.metrics.enable_wandb = False
     cfg.checkpointer = None
     cfg.training.steps = 10
-    cfg.training.max_context_length = 8192
+    # c4_test smoke: 2048-token context keeps most rows (TextProcessor drops
+    # only the >2048 outliers) and 8192 tokens/microbatch is 4 sequences.
+    # Model RoPE is 131072 so the cache is never a limiter here.
+    cfg.training.max_context_length = 2048
     cfg.training.num_tokens_per_microbatch_per_dp_rank = 8192
     return cfg
 
