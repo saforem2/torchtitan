@@ -48,7 +48,10 @@ source "${VENV}/bin/activate"
 
 if [ -f "${VENV}.tar.gz" ]; then
     echo "yeet: broadcasting ${VENV}.tar.gz"
-    ezpz yeet --src "${VENV}.tar.gz" 2>&1 | tail -5 || echo "yeet: warning (non-fatal, continuing with login venv)"
+    if ! ezpz yeet --src "${VENV}.tar.gz" 2>&1 | tee yeet.log | tail -5; then
+        echo "yeet: FAILED (non-fatal, continuing with login venv) -- see yeet.log"
+        cat yeet.log 2>&1 | tail -20
+    fi
 else
     echo "yeet: no tarball, using login venv directly (2N, no broadcast needed)"
 fi
