@@ -34,7 +34,10 @@ class EZPZTokenizer(BaseTokenizer):
                 "Choose one of: sptoken, sentencepiece, sp, spm, hf, huggingface"
             )
 
+        self.tokenizer_path = tokenizer_path
         self.eos_id = getattr(self._tokenizer, "eos_id", None)
+        self.bos_id = getattr(self._tokenizer, "bos_id", None)
+        self.pad_id = getattr(self._tokenizer, "pad_id", None)
 
     def encode(self, *args, **kwargs) -> list[int]:
         if isinstance(self._tokenizer, SPTokenizer):
