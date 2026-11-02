@@ -444,7 +444,11 @@ def agpt_debugmodel_local() -> FaultTolerantTrainer.Config:
     # tests/assets/c4_test, no network / no BlendCorpus / no /tegu).
     from torchtitan.components.data.text_datasets import DATASETS
 
-    cfg.dataloader = GrainDataLoader.Config(dataset=DATASETS["c4_test"])
+    c4 = DATASETS["c4_test"]
+    # c4_test has rows up to 59k tokens (p95 5.7k); the collator errors if a
+    # single row exceeds num_tokens_per_microbatch. Filter via post_filters.
+    c4 = c4.__class__(source=c4.source, processor=c4.processor, pre_filters=c4.pre_filters, post_filters=c4.post_filters + (lambda x: x is not None and len(x.input_ids) <= 8192,))
+    cfg.dataloader = GrainDataLoader.Config(dataset=c4)
     cfg.validator.enable = False
     cfg.metrics.enable_wandb = False
     cfg.checkpointer = None
