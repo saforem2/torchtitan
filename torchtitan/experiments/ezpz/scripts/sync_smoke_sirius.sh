@@ -46,18 +46,15 @@ if [[ ! -f "${VENV}/bin/activate" ]]; then
 fi
 source "${VENV}/bin/activate"
 
-if [ -f "${VENV}.tar.gz" ]; then
-    echo "yeet: broadcasting ${VENV}.tar.gz"
-    mkdir -p .ezpz-patch && printf "import ezpz.utils.yeet_env as _ye; _ye._maybe_apply_hsn_suffix=lambda n: n\n" > .ezpz-patch/sitecustomize.py
-    if ! PYTHONPATH=".ezpz-patch:${PYTHONPATH:-}" ezpz yeet --src "${VENV}.tar.gz" 2>&1 | tee yeet.log | tail -5; then
-        echo "yeet: FAILED (non-fatal, continuing with login venv) -- see yeet.log"
-        cat yeet.log 2>&1 | tail -20
-    fi
-else
-    echo "yeet: no tarball, using login venv directly (2N, no broadcast needed)"
-fi
-# Validate that the venv is usable either way (login venv or broadcast /tmp copy)
-python -c "import ezpz; print('ezpz import OK after yeet stage')" 2>&1 | tail -2
+# HOME is shared on sirius (filesystems=home), so $VENV on login is the same
+# path on compute -- no yeet broadcast needed. Ensure venv PATH propagates
+# via mpiexec --envall (PALS wraps python and may reset sys.path).
+VENV_ABS="$(cd "${VENV}" && pwd)"
+export PATH="${VENV_ABS}/bin:${PATH}"
+export VIRTUAL_ENV="${VENV_ABS}"
+hash -r
+python -c "import ezpz; print('ezpz import OK (HOME venv)')" 2>&1 | tail -2
+python -c "import sys; print(f'python: {sys.executable} prefix={sys.prefix}')" 2>&1 | tail -1
 
 echo "===== ezpz sync smoke (sirius, CUDA, c4_test) ====="
 date
