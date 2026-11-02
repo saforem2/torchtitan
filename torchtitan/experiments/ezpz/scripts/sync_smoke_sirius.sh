@@ -50,7 +50,6 @@ echo "yeet: skipped on sirius (HOME shared, compute SSH blocked port 65535)"
 VENV_ABS="$(cd "${VENV}" && pwd)"
 export PATH="${VENV_ABS}/bin:${PATH}"
 export VIRTUAL_ENV="${VENV_ABS}"
-export PYTHONHOME="${VENV_ABS}"
 hash -r
 python -c "import ezpz; print('ezpz import OK (HOME venv)')" 2>&1 | tail -2
 python -c "import sys; print(f'PYTHONHOME={sys.prefix} python={sys.executable}')" 2>&1 | tail -1
