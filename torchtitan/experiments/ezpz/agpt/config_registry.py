@@ -2409,7 +2409,12 @@ def agpt_debugmodel_zephon() -> "FaultTolerantTrainer.Config":
     Uses ``examples/zephon/local_jsonl.toml`` which points at the bundled
     test assets. Useful for CPU smoke tests and single-node verification.
     """
-    return _zephon_config("debugmodel", seq_len=2048, data_config="examples/zephon/local_jsonl.toml")
+    cfg = _zephon_config("debugmodel", seq_len=2048, data_config="examples/zephon/local_jsonl.toml")
+    # Zephon tokenizes with hf_assets_path; the default assets/hf/gemma-7b
+    # (vocab 256k) emits ids that OOB debugmodel (vocab 32k) on XPU.
+    # tests/assets/tokenizer (BPE 2k) fits inside 32k and is bundled.
+    cfg.hf_assets_path = "./tests/assets/tokenizer"
+    return cfg
 
 
 def agpt_debugmodel_zephon_mixture() -> "FaultTolerantTrainer.Config":
