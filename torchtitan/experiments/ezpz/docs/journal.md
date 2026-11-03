@@ -2,6 +2,22 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-11-02 (Sunspot) -- XPU throughput recovery
+
+Took over Codex thread `01a168eb` after its historical-throughput goal stalled.
+Per-block `torch.compile` (`EZPZ_AGPT_COMPILE_BLOCKS`) raises TT native
+DDP/ZeRO-1 from `75.84` to `79.42`-`80.20` model TFLOP/s/tile; TT is `2.3`-`2.6%`
+faster than the MDS SophiaG control in the same allocation. MDS reproduces its
+March `8dscnx65` rate (`89.76` vs `89.99`) at GBS `384`/accumulation `16`/AdamW.
+The TT anchor `6tc71of4` re-run on its own code and runtime gives `88.00` vs
+`93.75` in July. Local batch `> 1` was broken by the flat token layout (RoPE
+`cache[:T]`) and is fixed in the blendcorpus loader; native DDP at local batch
+`2` runs out of memory on FP32 logits. Jobs `12482111`, `12482112`, `12482114`,
+`12482126`, `12482127`. Next: the `6.1%` machine gap and native DDP local batch
+`2`. [Report](experiments/agpt/sunspot/2026-11-02-throughput-recovery.md).
+
+---
+
 ## 2026-11-01 (Sunspot) -- MDS/TT handoff audit and continuation
 
 Recovered Claude session `255a7e56-1404-4d91-be47-317b42c0aa0c` after its
