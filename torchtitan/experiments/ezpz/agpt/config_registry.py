@@ -812,7 +812,7 @@ def _agpt_2b_mds_mix_blend(
     from torchtitan.components.data.sources import HuggingFaceStreamingSource
     cfg = _agpt_2b_mds_mix_base()
     def _cpt_source(path, name=None, split="train"):
-        return SingleDatasetConfig(source=HuggingFaceStreamingSource.Config(path=path, name=name, split=split), processor=TextProcessor.Config())
+        return SingleDatasetConfig(source=HuggingFaceStreamingSource.Config(path=path, name=name, split=split), processor=TextProcessor.Config(), post_filters=(lambda s: s is not None,))
     from torchtitan.components.data.loader import GrainDataLoader
     cfg.dataloader = GrainDataLoader.Config(dataset=ConcatThenSplitPackingConfig(dataset=DatasetMixConfig(datasets=(
         WeightedDataset(dataset=_cpt_source("open-web-math/open-web-math"), weight=owm_weight),
