@@ -67,7 +67,7 @@ echo "--- 3-step weighted CPT smoke (owm 75% + finemath4plus 25%) ---" | tee -a 
     "${VENV}/bin/python" -m torchtitan.experiments.ezpz.train \
     --module ezpz.agpt --config agpt_2b_mds_mix_owm_edu_7525 \
     --training.steps=3 --debug.seed=42 --debug.deterministic \
-    --parallelism.data-parallel-shard-degree=1 --parallelism.data-parallel-replicate-degree=-1 \
+    --parallelism.data-parallel-shard-degree=1 --parallelism.data-parallel-replicate-degree=24 \
     --checkpoint.no-enable --compile.no-enable --validator.no-enable \
     activation-checkpoint:full \
     2>&1 | tee -a "${LOG_DIR}/train.log" | tee -a "${LOG}"
