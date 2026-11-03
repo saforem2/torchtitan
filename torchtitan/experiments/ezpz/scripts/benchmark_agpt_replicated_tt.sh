@@ -43,8 +43,8 @@ DEFAULT_COMPILE_MODE=none
 [[ "${ARM}" == *losscompile ]] && DEFAULT_COMPILE_MODE=loss
 COMPILE_MODE="${BENCH_COMPILE_MODE:-${DEFAULT_COMPILE_MODE}}"
 case "${COMPILE_MODE}" in
-    none|loss|model-regions-loss) ;;
-    *) echo "BENCH_COMPILE_MODE must be none, loss or model-regions-loss" >&2; exit 2;;
+    none|loss|model-regions-loss|blocks-loss) ;;
+    *) echo "BENCH_COMPILE_MODE must be none, loss, model-regions-loss or blocks-loss" >&2; exit 2;;
 esac
 case "${ARM}" in
     probe|probe-bf16)
@@ -58,6 +58,11 @@ case "${PPN}" in 8|12) ;; *) echo "PPN must be 8 or 12" >&2; exit 2;; esac
 NPROC=$((NODES * PPN))
 [[ "$(sort -u "${PBS_NODEFILE}" | wc -l)" -eq "${NODES}" ]] || exit 97
 export BENCH_EXPECTED_WORLD_SIZE="${NPROC}"
+# Two sequences per rank per update, as microbatch 1 x accumulation 2 or
+# microbatch 2 x accumulation 1. Tokens per update are the same either way.
+MICROBATCH="${BENCH_MICROBATCH:-1}"
+case "${MICROBATCH}" in 1|2) ;; *) echo "BENCH_MICROBATCH must be 1 or 2" >&2; exit 2;; esac
+GAS=$((2 / MICROBATCH))
 GBS=$((NPROC * 2))
 TOKENS=$((GBS * 8192))
 JOB="${PBS_JOBID%%.*}"
@@ -79,7 +84,7 @@ export WANDB_DIR="${OUT}/wandb"
 export WANDB_TAGS="agpt-replicated,sunspot,${ARM},${NODES}nodes,compile-${COMPILE_MODE}"
 export WANDB_RUN_TAGS="${WANDB_TAGS}"
 export AGPT_BENCH_BATCH_HASH_DIR="${OUT}/input-hashes"
-export AGPT_BENCH_BATCH_MICROBATCHES="$((STEPS * 2))"
+export AGPT_BENCH_BATCH_MICROBATCHES="$((STEPS * GAS))"
 export TORCHTITAN_AGPT_DTYPE_PROBE=1
 VENV="${BENCH_VENV:-/lus/tegu/projects/datascience/foremans/venvs/xpu-torch214-fixedlr-v2-20260927}"
 source "${ROOT}/torchtitan/experiments/ezpz/scripts/load_pinned_ezpz_utils.sh"
@@ -134,12 +139,14 @@ module -t list 2> "${OUT}/provenance/modules.txt"
 echo "BEGIN $(date -Is) host=$(hostname -s) job=${PBS_JOBID} sha=${EXPECTED}"
 echo "BENCH_TAG=${BENCH_TAG:-} CCL_OP_SYNC=${CCL_OP_SYNC} fsdp_reshard=${BENCH_FSDP_RESHARD:-default} fsdp_reduce=${BENCH_FSDP_REDUCE_DTYPE:-float32} fsdp_defer=${BENCH_FSDP_DEFER:-0} deterministic=${BENCH_DETERMINISTIC:-0} reduce_probe=${BENCH_REDUCE_PROBE:-0}"
 echo "ddp_zero1=${BENCH_DDP_ZERO1:-0} ddp_bucket_mb=${DDP_BUCKET_MB:-25} ddp_bucket_first=${BENCH_DDP_BUCKET_FIRST:-0}"
-echo "ARM=${ARM} nodes=${NODES} world=${NPROC} ppn=${PPN} gbs=${GBS} microbatch=1 gas=2 seq=8192 steps=${STEPS}"
+echo "ARM=${ARM} nodes=${NODES} world=${NPROC} ppn=${PPN} gbs=${GBS} microbatch=${MICROBATCH} gas=${GAS} seq=8192 steps=${STEPS}"
 case "${COMPILE_MODE}" in
     none) echo "compile_mode=none components=none" ;;
     loss) echo "compile_mode=loss components=loss" ;;
     model-regions-loss)
         echo "compile_mode=model-regions-loss components=fused_binary_activation,loss full_model_graph=false" ;;
+    blocks-loss)
+        echo "compile_mode=blocks-loss components=loss per_block_compile=fullgraph" ;;
 esac
 echo "W&B https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/${WANDB_RUN_ID}"
 
@@ -226,6 +233,12 @@ else
         model-regions-loss)
             COMPILE=(--compile.enable --compile.components=fused_binary_activation,loss)
             ;;
+        blocks-loss)
+            # agpt/parallelize.py compiles each TransformerBlock (fullgraph),
+            # as the historical components=[model, loss] runs did.
+            COMPILE=(--compile.enable --compile.components=loss)
+            export EZPZ_AGPT_COMPILE_BLOCKS="${EZPZ_AGPT_COMPILE_BLOCKS:-default}"
+            ;;
     esac
     PROFILE=()
     if [[ "${BENCH_PROFILE:-1}" == 1 && "${STEPS}" -ge 21 ]]; then
@@ -277,7 +290,7 @@ else
         --benchmark-module="${TRAIN_MODULE}" --
         --module=ezpz.agpt --config=agpt_2b_replicated_benchmark
         --training.steps="${STEPS}" --training.max-context-length=8192
-        --training.num-tokens-per-microbatch-per-dp-rank=8192
+        --training.num-tokens-per-microbatch-per-dp-rank=$((MICROBATCH * 8192))
         --training.num-tokens-per-train-step="${TOKENS}"
         "${PARALLEL[@]}" --dataloader.dataset=blendcorpus
         --dataloader.dataset-path="${ROOT}/torchtitan/experiments/ezpz/data-lists/sunspot/books.txt"

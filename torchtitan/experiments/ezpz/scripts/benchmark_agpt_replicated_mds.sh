@@ -65,6 +65,10 @@ print(f"xpu_count={torch.xpu.device_count()}")
 PY
 
 MDS_ZERO_STAGE="${MDS_ZERO_STAGE:-0}"
+# Gradient accumulation steps (microbatch 1). 2 matches the TT arms and the
+# Aurora production batch per rank; 16 reproduces the historical GBS-384 run.
+MDS_GAS="${MDS_GAS:-2}"
+[[ "${MDS_GAS}" =~ ^[1-9][0-9]*$ ]] || { echo "MDS_GAS must be a positive integer" >&2; exit 98; }
 MDS_OPTIMIZER="${MDS_OPTIMIZER:-sophiag}"
 case "${MDS_ZERO_STAGE}" in 0|1) ;; *) echo "MDS_ZERO_STAGE must be 0 or 1" >&2; exit 98 ;; esac
 case "${MDS_OPTIMIZER}" in
@@ -94,7 +98,9 @@ case "${MDS_ZERO0_PATH}" in
 esac
 ZERO0_TAG=""
 [[ "${MDS_ZERO0_PATH}" == runtime ]] || ZERO0_TAG="-${MDS_ZERO0_PATH}"
-RUN_KIND="${RUN_KIND:-zero${MDS_ZERO_STAGE}${ZERO0_TAG}-${MDS_OPTIMIZER}}"
+GAS_TAG=""
+[[ "${MDS_GAS}" == 2 ]] || GAS_TAG="-gas${MDS_GAS}"
+RUN_KIND="${RUN_KIND:-zero${MDS_ZERO_STAGE}${ZERO0_TAG}-${MDS_OPTIMIZER}${GAS_TAG}}"
 GRAD_POLICY="${GRAD_POLICY:-production}"
 case "${GRAD_POLICY}" in
     production|fp32_wire) ;;
@@ -117,7 +123,7 @@ if ((ALLOCATED_NODES != NODES)); then
 fi
 NPROC=$((NODES * NPROC_PER_NODE))
 export BENCH_EXPECTED_WORLD_SIZE="${NPROC}"
-GLOBAL_BATCH_SIZE=$((NPROC * 2))
+GLOBAL_BATCH_SIZE=$((NPROC * MDS_GAS))
 PROFILE="${PROFILE:-0}"
 if [[ "${PROFILE}" != 0 && "${PROFILE}" != 1 ]]; then
     echo "PROFILE must be 0 or 1" >&2
@@ -155,7 +161,7 @@ LOG_FILE="${LOG_DIR}/train.log"
 DS_CONFIG="${OUTPUT_DIR}/deepspeed-config.json"
 PROVENANCE_DIR="${OUTPUT_DIR}/provenance"
 export AGPT_BENCH_BATCH_HASH_DIR="${OUTPUT_DIR}/input-hashes"
-export AGPT_BENCH_BATCH_MICROBATCHES="$((STEPS * 2))"
+export AGPT_BENCH_BATCH_MICROBATCHES="$((STEPS * MDS_GAS))"
 export AGPT_BENCH_BATCH_HELPER="${TT_ROOT}/torchtitan/experiments/ezpz/scripts/agpt_batch_witness.py"
 mkdir -p "${PROVENANCE_DIR}"
 if [[ -n "${MDS_CLI_OVERLAY}" ]]; then
@@ -188,16 +194,16 @@ for metadata in "${LOAD_ROOT}"/lr_state_dict_*.yaml; do
 done
 
 # Derive a job-unique ZeRO config; the model checkpoint supplies no optimizer state.
-"${EZPZ_HELPER_ENV}/bin/python" - "${DS_CONFIG_TEMPLATE}" "${DS_CONFIG}" "${GLOBAL_BATCH_SIZE}" "${GRAD_POLICY}" "${DS_ZERO_STAGE}" "${DS_GRAD_ACCUM_DTYPE}" <<'PYCONFIG' || exit 96
+"${EZPZ_HELPER_ENV}/bin/python" - "${DS_CONFIG_TEMPLATE}" "${DS_CONFIG}" "${GLOBAL_BATCH_SIZE}" "${GRAD_POLICY}" "${DS_ZERO_STAGE}" "${DS_GRAD_ACCUM_DTYPE}" "${MDS_GAS}" <<'PYCONFIG' || exit 96
 import json
 import sys
 
-template_path, config_path, global_batch_size, grad_policy, zero_stage, grad_accum_dtype = sys.argv[1:]
+template_path, config_path, global_batch_size, grad_policy, zero_stage, grad_accum_dtype, gas = sys.argv[1:]
 with open(template_path, encoding="utf-8") as stream:
     config = json.load(stream)
 config["train_batch_size"] = int(global_batch_size)
 config["train_micro_batch_size_per_gpu"] = 1
-config["gradient_accumulation_steps"] = 2
+config["gradient_accumulation_steps"] = int(gas)
 config["zero_optimization"] = {"stage": int(zero_stage)}
 config["flops_profiler"]["enabled"] = False
 config["comms_logger"]["enabled"] = False
@@ -211,7 +217,7 @@ if grad_policy == "fp32_wire":
 with open(config_path, "x", encoding="utf-8") as stream:
     json.dump(config, stream, indent=2)
     stream.write("\n")
-print(f"ds_config={config_path} gbs={global_batch_size} microbatch=1 gas=2 zero_stage={zero_stage} grad_accum_dtype={grad_accum_dtype} grad_policy={grad_policy}")
+print(f"ds_config={config_path} gbs={global_batch_size} microbatch=1 gas={gas} zero_stage={zero_stage} grad_accum_dtype={grad_accum_dtype} grad_policy={grad_policy}")
 PYCONFIG
 cp -- "${DS_CONFIG}" "${PROVENANCE_DIR}/deepspeed-config.json"
 
@@ -256,7 +262,7 @@ esac
     echo "mds_head=$(git -C "${MDS_ROOT}" rev-parse HEAD) mds_base_head=${MDS_BASE_HEAD}"
     echo "mds_source_root=${MDS_ROOT} campaign_root=${CAMPAIGN_ROOT}"
     echo "load_root=${LOAD_ROOT} load_tag=global_step138650"
-    echo "data_list=${BOOKS_LIST} split=95,5,0 gbs=${GLOBAL_BATCH_SIZE} gas=2 microbatch=1 seq=8192"
+    echo "data_list=${BOOKS_LIST} split=95,5,0 gbs=${GLOBAL_BATCH_SIZE} gas=${MDS_GAS} microbatch=1 seq=8192"
     echo "zero_stage=${MDS_ZERO_STAGE} zero0_path=${MDS_ZERO0_PATH} ds_zero_stage=${DS_ZERO_STAGE} ds_grad_accum_dtype=${DS_GRAD_ACCUM_DTYPE} expected_ds_optimizer=${BENCH_EXPECTED_DS_OPTIMIZER_WRAPPER:-unchecked}"
     echo "megatron_zero_stage=${MDS_ZERO_STAGE} optimizer=${MDS_OPTIMIZER} args=${OPT_ARGS[*]} weight_decay=.1 clip_grad=1.0"
     echo "grad_policy=${GRAD_POLICY} local_accumulation=legacy_default_runtime_unverified"
