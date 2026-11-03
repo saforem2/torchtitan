@@ -21,6 +21,7 @@ export ftp_proxy="${ftp_proxy:-http://proxy.alcf.anl.gov:3128}"
 VENV="/lus/tegu/projects/datascience/foremans/venvs/xpu-torch216-sync-5a7a622f16"
 VENV="$(readlink -f "${VENV}")"
 SUBMIT_DIR="${PBS_O_WORKDIR:-$(pwd)}"
+export MDS_ANNEAL_BASE=/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan/outputs/checkpoints/agpt-2b-mds-gs138650/step-0
 source "${SUBMIT_DIR}/torchtitan/experiments/ezpz/scripts/load_pinned_ezpz_utils.sh"
 load_pinned_ezpz_utils || exit $?
 ezpz_setup_job
