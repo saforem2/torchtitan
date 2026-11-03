@@ -626,6 +626,14 @@ def agpt_2b_replicated_benchmark() -> FaultTolerantTrainer.Config:
     return cfg
 
 
+def agpt_2b_replicated_benchmark_adamw() -> FaultTolerantTrainer.Config:
+    """agpt_2b_replicated_benchmark with AdamW (lr 2e-6, betas 0.9/0.95, wd 0.1),
+    matching the MDS ``MDS_OPTIMIZER=adamw`` arm of the replicated benchmark."""
+    cfg = agpt_2b_replicated_benchmark()
+    cfg.optim.optimizer = default_adamw(lr=2e-6, betas=(0.9, 0.95), weight_decay=0.1)
+    return cfg
+
+
 def agpt_2b_mds_anneal_wsd() -> FaultTolerantTrainer.Config:
     """ARM B (treatment): fork MDS gs138650, WSD decay-to-0 anneal.
 

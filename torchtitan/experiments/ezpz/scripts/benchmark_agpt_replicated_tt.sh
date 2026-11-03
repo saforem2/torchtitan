@@ -60,6 +60,12 @@ NPROC=$((NODES * PPN))
 export BENCH_EXPECTED_WORLD_SIZE="${NPROC}"
 # Two sequences per rank per update, as microbatch 1 x accumulation 2 or
 # microbatch 2 x accumulation 1. Tokens per update are the same either way.
+OPTIMIZER="${BENCH_OPTIMIZER:-sophiag}"
+case "${OPTIMIZER}" in
+    sophiag) TT_CONFIG=agpt_2b_replicated_benchmark; WITNESS=(--benchmark-sophia-witness) ;;
+    adamw) TT_CONFIG=agpt_2b_replicated_benchmark_adamw; WITNESS=() ;;
+    *) echo "BENCH_OPTIMIZER must be sophiag or adamw" >&2; exit 2;;
+esac
 MICROBATCH="${BENCH_MICROBATCH:-1}"
 case "${MICROBATCH}" in 1|2) ;; *) echo "BENCH_MICROBATCH must be 1 or 2" >&2; exit 2;; esac
 GAS=$((2 / MICROBATCH))
@@ -139,7 +145,7 @@ module -t list 2> "${OUT}/provenance/modules.txt"
 echo "BEGIN $(date -Is) host=$(hostname -s) job=${PBS_JOBID} sha=${EXPECTED}"
 echo "BENCH_TAG=${BENCH_TAG:-} CCL_OP_SYNC=${CCL_OP_SYNC} fsdp_reshard=${BENCH_FSDP_RESHARD:-default} fsdp_reduce=${BENCH_FSDP_REDUCE_DTYPE:-float32} fsdp_defer=${BENCH_FSDP_DEFER:-0} deterministic=${BENCH_DETERMINISTIC:-0} reduce_probe=${BENCH_REDUCE_PROBE:-0}"
 echo "ddp_zero1=${BENCH_DDP_ZERO1:-0} ddp_bucket_mb=${DDP_BUCKET_MB:-25} ddp_bucket_first=${BENCH_DDP_BUCKET_FIRST:-0}"
-echo "ARM=${ARM} nodes=${NODES} world=${NPROC} ppn=${PPN} gbs=${GBS} microbatch=${MICROBATCH} gas=${GAS} seq=8192 steps=${STEPS}"
+echo "ARM=${ARM} nodes=${NODES} world=${NPROC} ppn=${PPN} optimizer=${OPTIMIZER} gbs=${GBS} microbatch=${MICROBATCH} gas=${GAS} seq=8192 steps=${STEPS}"
 case "${COMPILE_MODE}" in
     none) echo "compile_mode=none components=none" ;;
     loss) echo "compile_mode=loss components=loss" ;;
@@ -286,9 +292,9 @@ else
     COMMAND=(ezpz launch --nproc "${NPROC}" --nproc_per_node "${PPN}" --
         "${VENV}/bin/python" "${OUT}/provenance/benchmark_agpt_entrypoint.py"
         --benchmark-output="${OUT}/rank-diagnostics"
-        --benchmark-sophia-witness "${TIMING[@]}" "${INITIAL_AUDIT[@]}"
+        "${WITNESS[@]}" "${TIMING[@]}" "${INITIAL_AUDIT[@]}"
         --benchmark-module="${TRAIN_MODULE}" --
-        --module=ezpz.agpt --config=agpt_2b_replicated_benchmark
+        --module=ezpz.agpt --config="${TT_CONFIG}"
         --training.steps="${STEPS}" --training.max-context-length=8192
         --training.num-tokens-per-microbatch-per-dp-rank=$((MICROBATCH * 8192))
         --training.num-tokens-per-train-step="${TOKENS}"
