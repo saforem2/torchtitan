@@ -6,7 +6,7 @@
 #PBS -l select=2
 #PBS -q workq
 #PBS -j oe
-# Gentle-LR CPT 10-step smoke on Sunspot XPU 2N (24 ranks, 12/tile FLAT).
+# Gentle-LR CPT 10-step smoke on Sunspot XPU 2N (16 ranks (8/node, 11008%16==0), 12/tile FLAT).
 # Forks 256N olmo-mix step-92859 at 2e-6 constant (warmup 20). House pattern.
 # Data: blendcorpus/books override (HF delegate removed in 80th sync).
 set -o pipefail
@@ -44,7 +44,7 @@ JOBID_SHORT="${PBS_JOBID%%.*}"
 LOG_DIR="logs/cpt-gentle-smoke-${JOBID_SHORT:-$(date +%Y%m%d-%H%M%S)}"
 mkdir -p "${LOG_DIR}"
 LOG="${LOG_DIR}/run.log"
-echo "===== cpt-gentle-smoke (2N Sunspot, 24 ranks) =====" | tee "${LOG}"
+echo "===== cpt-gentle-smoke (2N Sunspot, 16 ranks (8/node, 11008%16==0)) =====" | tee "${LOG}"
 date | tee -a "${LOG}"
 echo "node0:  $(hostname)" | tee -a "${LOG}"
 echo "venv:   ${VENV}" | tee -a "${LOG}"
@@ -64,13 +64,13 @@ echo "--- 10-step gentle-LR CPT smoke (fork step-92859 @ 2e-6, blendcorpus/books
 # agpt_2b_olmo_anneal_flat uses HF delegate (open-web-math) removed in 80th sync.
 # Override dataloader to blendcorpus/books on the CLI (same family, local).
 "${VENV}/bin/python" -c 'from ezpz.cli import main; main()' launch \
-    --nproc 24 --nproc_per_node 12 -- \
+    --nproc 16 --nproc_per_node 8 -- \
     "${VENV}/bin/python" -m torchtitan.experiments.ezpz.train \
     --module ezpz.agpt --config agpt_2b_olmo_anneal_flat \
     --training.steps=10 \
     --dataloader.dataset=blendcorpus \
     --dataloader.dataset-path=torchtitan/experiments/ezpz/data-lists/sunspot/books.txt \
-    --checkpoint.no-enable --compile.no-enable --validator.no-enable \
+    --checkpointer.interval=1000000 --compile.no-enable --training.disable-accelerator-graphs --validator.no-enable \
     2>&1 | tee -a "${LOG_DIR}/train.log" | tee -a "${LOG}"
 rc=${PIPESTATUS[0]}
 echo "train rc=${rc}" | tee -a "${LOG}"
