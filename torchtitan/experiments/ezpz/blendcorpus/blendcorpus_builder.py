@@ -496,6 +496,17 @@ class BlendCorpusDataLoader(BaseDataLoader):
             positions = (
                 self._document_positions(input_ids) if self._emit_positions else None
             )
+            if positions is None and input_ids.shape[0] > 1:
+                # The flat [T] layout below makes RoPE read cache[:T], which
+                # only covers one sequence. Restart positions at 0 per row so
+                # local batch > 1 rotates every row exactly as local batch 1
+                # does (no per-document reset, as with positions=None).
+                positions = (
+                    torch.arange(input_ids.shape[1], device=input_ids.device)
+                    .unsqueeze(0)
+                    .expand_as(input_ids)
+                    .contiguous()
+                )
             # Fold [B, L] -> [T]. Upstream #4121 ("fold batch dim", 80th sync)
             # moved the LM stack to a flat token layout: QKVLinear reads
             # num_tokens = x.shape[0] then x.view(num_tokens, -1, head_dim),
