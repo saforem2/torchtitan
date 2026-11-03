@@ -1,5 +1,11 @@
 # Upstream Sync Log
 
+## 2026-11-03: upstream `8e4990d8c`..`c3093f78` (14 commits) -> `aead93378`, Sunspot 2N 01:00 + Sirius 1N
+
+Branch `sync/upstream-b93d5c0cf5` merges 14 upstream commits (`8e4990d8c..c3093f78`, GDN 1-6/7, muse_spark, observability, loss) on top of `8e4990d8c`. No conflicts under `experiments/ezpz/` (1 conflict in `torchtitan/models/base/state_dict_adapter.py` imports resolved).
+
+Verdict: **Sunspot `workq` 2N 01:00** `agpt_debugmodel` TP1/TP2 + `moe_debugmodel` already `VERDICT: ok` at `1a87a05be` (prior sync, 12481889 3/3 `10.877/10.754/10.480` + `10.880/10.708/10.558` + `12.952/12.596/11.471` byte-identical to Aurora 9024711). Sirius `workq` 1N `agpt_debugmodel_local` `VERDICT: ok` `33243` `00:00:39` (Grain `c4_test` via TextProcessor drop fix). Weighted CPT `agpt_2b_mds_mix_owm_edu_7525` 2N `12482182` reached `loss 12.93` (HSDP `shard 8 replicate 2` `16r` `11008%8==0`, FSDP uneven `11008%24` fixed) then `signal 9` OOM — separate from original sync scope (held `12481940` re-submit).
+
 ## 2026-10-31: upstream `b93d5c0cf5`..`upstream/main` (52 commits) -> `519efe4de`, smoke-validated on Sunspot
 
 Branch `sync/upstream-b93d5c0cf5` merges 52 upstream commits (`b93d5c0cf5..8e4990d8c`, the `main` tip of 2026-10-31) on top of the prior `5a7a622f16` sync. The merge is `519efe4de`; post-merge HEAD is `1a87a05be` (two MDS Grain fixes). No conflicts under `experiments/ezpz/`.
