@@ -14,6 +14,10 @@ Running log of what's happening, session by session. Most recent first.
   `-3` remains unverified. No jobs cancelled.
 - Jobs `12482057` / `12482058` / `12482059` reached application execution.
   All three passed live loaded-parameter hashes on `24/24` ranks before training.
+- Native canaries `12482057` / `12482058` / `12482059` and HSDP `12482062`
+  completed 32 updates with exit `0` and `24/24` finite optimizer witnesses.
+  Formal same-allocation job `12482063` brackets three TT paths with fresh
+  MDS controls, using the pinned CLI payload fix.
 - [Continuation evidence and acceptance gates](experiments/agpt/sunspot/2026-11-02-recovery-comparison.md).
 
 ## 2026-11-01: direct executable startup failure reproduced across queues

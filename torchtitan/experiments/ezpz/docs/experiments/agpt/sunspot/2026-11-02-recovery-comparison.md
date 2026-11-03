@@ -138,3 +138,31 @@ base. Borrowed MDS source remains `9f407ed9e8e30920e28272daf8cb7db36c211e21`.
 The formal run will bracket TT eager, TT loss compilation, and native DDP
 ZeRO-1 with MDS controls on the same two allocated nodes. Raw traces are
 rank-local; they do not establish all-rank causal communication stalls.
+
+## Same-allocation job `12482063`
+
+Submitted through mandatory preflight after both all-rank canaries completed.
+Source: [`4831cd2d9`](https://github.com/saforem2/torchtitan/commit/4831cd2d94ad1dca29f1956d5b40e2fee45bdc12).
+Workdir: `/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan-agpt-pair-resume-20261102`.
+Parent evidence: `outputs/agpt-replicated-pair-12482063/run.log`.
+
+| Phase | Path | Layout / precision | Compilation |
+|---|---|---|---|
+| Before | MDS historical-wrapper compatibility | `BF16_Optimizer`, FP32 local accumulation, BF16 wire | None |
+| TT `hs12eager` | HSDP | `dp_replicate=12`, `dp_shard=2`, never reshard, FP32 deferred reduction | None |
+| TT `hs12loss` | HSDP | Same as eager | Loss region |
+| TT `ddpz1` | Native DDP / ZeRO-1 | FP32 local accumulation, BF16 wire and weight all-gather, `100 MiB` bucket | Loss region |
+| After | MDS historical-wrapper compatibility | Same as before | None |
+
+All phases use two nodes, `12` FLAT ranks/node, sequence `8192`, microbatch
+`1`, accumulation `2`, GBS `48`, `32` updates, seed `42`, fresh SophiaG state,
+and no activation checkpointing. W&B remains online. Profiler capture is
+at update `12`; the steady window is `21-32`. The TT variants share a
+job-local compiler cache, so later compile times are not independent cold
+starts. Loading audits are disabled in this performance job after passing
+separately; HSDP audit materialization cannot inflate its memory peaks.
+
+Status at submission: awaiting application/phase completion. No new winner
+is recorded. MDS uses Torch `2.10.0a0+git449b176` / DeepSpeed `0.18.5`; TT
+uses Torch `2.14.0+xpu`. This is a framework-path comparison with explicit
+runtime differences, not runtime identity or production-scale parity.
