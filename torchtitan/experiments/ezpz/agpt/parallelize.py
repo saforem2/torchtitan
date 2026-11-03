@@ -54,6 +54,28 @@ from torchtitan.experiments.ezpz.logging import logger
 from torchtitan.models.llama3.model import Llama3Model
 
 
+# [ezpz] Per-block torch.compile, opt-in via EZPZ_AGPT_COMPILE_BLOCKS.
+# Upstream replaced apply_compile (one fullgraph torch.compile per
+# TransformerBlock, the historical components=[model, loss] path) with named
+# @local_compile regions, which leave most of the block eager. This restores
+# the old per-block compile, after AC and before FSDP/native DDP, without
+# touching core. "default"/"1" -> mode=None; any other value is passed as the
+# torch.compile mode (e.g. "max-autotune").
+def _maybe_compile_transformer_blocks(model: nn.Module) -> None:
+    mode = os.environ.get("EZPZ_AGPT_COMPILE_BLOCKS", "").strip()
+    if mode in ("", "0", "false", "none"):
+        return
+    compile_mode = None if mode in ("1", "true", "default") else mode
+    for _, transformer_block in model.layers.named_children():
+        transformer_block.compile(
+            backend="inductor", fullgraph=True, mode=compile_mode
+        )
+    logger.info(
+        "Compiled each TransformerBlock with torch.compile (fullgraph, mode=%s)",
+        compile_mode,
+    )
+
+
 def parallelize_llama(
     model: Llama3Model,
     *,
@@ -116,6 +138,8 @@ def parallelize_llama(
     # ``apply`` checkpoints every transformer block in ``model.layers``.
     if activation_remat is not None:
         activation_remat.apply(model)
+
+    _maybe_compile_transformer_blocks(model)
 
     # Native DDP is installed by the ezpz trainer after parameters leave the
     # meta device. Apply TP/AC/compile here, but do not also install FSDP.
