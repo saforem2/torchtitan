@@ -44,7 +44,7 @@ JOBID_SHORT="${PBS_JOBID%%.*}"
 LOG_DIR="logs/cpt-weighted-smoke-${JOBID_SHORT:-$(date +%Y%m%d-%H%M%S)}"
 mkdir -p "${LOG_DIR}"
 LOG="${LOG_DIR}/run.log"
-echo "===== cpt-weighted-smoke agpt_2b_mds_mix_owm_edu_7525 (2N Sunspot, 24 ranks) =====" | tee "${LOG}"
+echo "===== cpt-weighted-smoke agpt_2b_mds_mix_owm_edu_7525 (2N Sunspot, 24 ranks HSDP) =====" | tee "${LOG}"
 date | tee -a "${LOG}"
 echo "node0:  $(hostname)" | tee -a "${LOG}"
 echo "venv:   ${VENV}" | tee -a "${LOG}"
@@ -63,11 +63,13 @@ print('IMPORT_OK', cfg.dataloader.dataset.__class__.__name__)
 if ! grep -q "IMPORT_OK" "${LOG}"; then echo "VERDICT: import_failed" | tee -a "${LOG}"; exit 1; fi
 echo "--- 3-step weighted CPT smoke (owm 75% + finemath4plus 25%) ---" | tee -a "${LOG}"
 "${VENV}/bin/python" -c 'from ezpz.cli import main; main()' launch \
-    --nproc 16 --nproc_per_node 8 -- \
+    --nproc 24 --nproc_per_node 12 -- \
     "${VENV}/bin/python" -m torchtitan.experiments.ezpz.train \
     --module ezpz.agpt --config agpt_2b_mds_mix_owm_edu_7525 \
     --training.steps=3 --debug.seed=42 --debug.deterministic \
+    --parallelism.data-parallel-shard-degree=1 --parallelism.data-parallel-replicate-degree=-1 \
     --checkpoint.no-enable --compile.no-enable --validator.no-enable \
+    --activation-checkpoint.mode=full --optimizer.offload-gradients=True \
     2>&1 | tee -a "${LOG_DIR}/train.log" | tee -a "${LOG}"
 rc=${PIPESTATUS[0]}
 echo "train rc=${rc}" | tee -a "${LOG}"
