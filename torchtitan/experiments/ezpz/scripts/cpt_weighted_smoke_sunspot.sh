@@ -63,11 +63,11 @@ print('IMPORT_OK', cfg.dataloader.dataset.__class__.__name__)
 if ! grep -q "IMPORT_OK" "${LOG}"; then echo "VERDICT: import_failed" | tee -a "${LOG}"; exit 1; fi
 echo "--- 3-step weighted CPT smoke (owm 75% + finemath4plus 25%) ---" | tee -a "${LOG}"
 "${VENV}/bin/python" -c 'from ezpz.cli import main; main()' launch \
-    --nproc 24 --nproc_per_node 12 -- \
+    --nproc 16 --nproc_per_node 8 -- \
     "${VENV}/bin/python" -m torchtitan.experiments.ezpz.train \
     --module ezpz.agpt --config agpt_2b_mds_mix_owm_edu_7525 \
     --training.steps=3 --debug.seed=42 --debug.deterministic \
-    --parallelism.data-parallel-shard-degree=12 --parallelism.data-parallel-replicate-degree=2 \
+    --parallelism.data-parallel-shard-degree=8 --parallelism.data-parallel-replicate-degree=2 \
     --checkpoint.no-enable --compile.no-enable --validator.no-enable \
     activation-checkpoint:full \
     2>&1 | tee -a "${LOG_DIR}/train.log" | tee -a "${LOG}"
