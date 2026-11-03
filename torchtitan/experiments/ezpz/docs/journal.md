@@ -2,6 +2,20 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-11-02: Sunspot execution recovered; restart live-parameter gate
+
+- Verified `12481979`: one start, exit `0`, both 10-step debug arms returned
+  `0`, `VERDICT mixed_demo rc=0`.
+- Resumed from clean pinned `a4057f84e` in a new project-filesystem checkout.
+  Config parsing and submission preflight passed. Online W&B remains enabled.
+- Initial duplicate submissions `12482057` / `12482058` hit exit processing
+  and retried. Their shared PBS stdout parent was missing; corrected that
+  verified submission defect before the next canary. Cause of scheduler
+  `-3` remains unverified. No jobs cancelled.
+- Jobs `12482057` / `12482058` / `12482059` reached application execution.
+  All three passed live loaded-parameter hashes on `24/24` ranks before training.
+- [Continuation evidence and acceptance gates](experiments/agpt/sunspot/2026-11-02-recovery-comparison.md).
+
 ## 2026-11-01: direct executable startup failure reproduced across queues
 
 - Submitted direct `/bin/hostname` controls `12481943` / `12481944` /
