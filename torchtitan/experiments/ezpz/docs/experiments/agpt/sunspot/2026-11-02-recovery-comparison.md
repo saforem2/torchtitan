@@ -166,3 +166,23 @@ Status at submission: awaiting application/phase completion. No new winner
 is recorded. MDS uses Torch `2.10.0a0+git449b176` / DeepSpeed `0.18.5`; TT
 uses Torch `2.14.0+xpu`. This is a framework-path comparison with explicit
 runtime differences, not runtime identity or production-scale parity.
+
+## First comparison terminal outcome
+
+`12482063` finished with scheduler exit `1`. Both MDS controls, HSDP loss
+compilation, and native DDP/ZeRO-1 completed `32` updates. Eager HSDP failed
+in backward after its first completed update: XPU requested `7.81 GiB` with
+`5.58 GiB` free on a `63.98 GiB` tile. The launcher returned `143` after
+another rank's OOM, not after a user cancellation or a PBS pre-run failure.
+Its partial output does not supply steady-state performance.
+
+The eager W&B run is labelled `finished` despite the application OOM.
+Application exit status, raw traceback, and evidence summary take precedence
+when judging success. The failed run is retained with the completed arms.
+
+A follow-up keeps sequence `8192`, microbatch `1`, accumulation `2`, GBS `48`,
+`32` updates, SophiaG, and `24` FLAT ranks, and changes both eager and compiled
+HSDP to `dp_shard=6`, `dp_replicate=4`. MDS controls again bracket the two TT
+arms on the same allocated nodes. Both TT arms will audit loaded parameters;
+materialization-audit memory peaks will be flagged as non-comparable. This
+isolates sharding layout while keeping the workload fixed.
