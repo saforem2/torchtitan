@@ -67,6 +67,11 @@ def _maybe_compile_transformer_blocks(model: nn.Module) -> None:
         return
     compile_mode = None if mode in ("1", "true", "default") else mode
     for _, transformer_block in model.layers.named_children():
+        # A traced backward cannot add into weight.grad in place; the
+        # regular AccumulateGrad path gives the same sum.
+        for module in transformer_block.modules():
+            if getattr(module, "inplace_wgrad_accum", False):
+                module.inplace_wgrad_accum = False
         transformer_block.compile(
             backend="inductor", fullgraph=True, mode=compile_mode
         )
