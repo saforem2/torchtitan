@@ -1,4 +1,48 @@
-# Sunspot recovery and MDS/TT continuation
+# AuroraGPT-2B: recovered Sunspot MDS/TT comparison
+
+<!-- measured-results:start -->
+## Measured results: job `12482063`
+
+Updates `21-32`, twelve samples after 32-update runs. `R/S` means data-parallel replica/shard degree. One device below is one selected `FLAT` tile/rank.
+
+| Path | Mean s/update | tok/s/tile | Model TFLOP/s/tile | MFU % | Peak allocated / reserved GiB | Outer compile timer max s |
+|---|---:|---:|---:|---:|---:|---:|
+| MDS before, BF16_Optimizer compatibility | 2.364592 | 6928.9 | 77.51 | 25.99 | 46.396 / 50.613 | none |
+| TT HSDP R12/S2 eager | OOM after 1 update | -- | -- | -- | incomplete | none |
+| TT HSDP R12/S2 loss compile | 2.595684 | 6312.0 | 70.61 | 23.68 | 40.662 / 47.855 | 14.273 |
+| TT native DDP/ZeRO-1, 100 MiB buckets | 2.444031 | 6703.7 | 74.99 | 25.15 | 49.064 / 56.820 | 3.013 |
+| MDS after, same control | 2.363333 | 6932.6 | 77.55 | 26.01 | 46.396 / 50.613 | none |
+
+Native TT DDP/ZeRO-1 is `3.39%` slower than the mean of the bracketing MDS controls. The MDS before/after timing drift is `-0.053%`. This is one allocation, not a production-scale or independent-repeat equivalence claim.
+
+All completed arms have `24/24` completed rank diagnostics and 32 finite optimizer steps. All `1,536` consumed input/label/raw-token hash records match across completed arms. The eager failure has `96` matching records and `1,440` missing records; its partial data is not a complete-run comparison.
+
+TT uses adjacent full-precision global-loss event wall times, cross-checked against synchronized per-rank training-step records. MDS uses its native iteration timer. Those framework boundaries are not proven identical. TFLOPs use `11,186,515,968 FLOPs/token`; MFU uses the existing report normalization of `298.1888 TFLOP/s/FLAT tile`. These are useful-model-work estimates, not hardware counters.
+
+Compilation is loss-region compilation only. The outer timer is `_compile.compile_inner`; nested timers are not summed. TT variants share a job cache, so the later DDP compiler timer is not an independent cold-start measurement. Memory is the maximum process-lifetime allocated/reserved high-water mark across all 24 ranks, not a steady-window average.
+
+### Loss agreement
+
+Full 32-update loss differences versus MDS-before: HSDP loss compile max absolute `0.951191`, RMS `0.249758`; native DDP max absolute `0.304562`, RMS `0.123824`. MDS before/after itself has max absolute loss difference `0.756085` and RMS `0.148977`. No numerical-equivalence tolerance is silently applied.
+
+The native DDP recipe uses autocast with FP32 embedding, RMSNorm, and residual tensors. That differs from uniform BF16 model compute. The loaded-weight audits establish exact initial parameter values, not identical forward/backward arithmetic or optimizer updates. Numerical equivalence and representative convergence remain open.
+
+### Collective visibility
+
+| Path | Trace coverage | Rank-0 exposed collective-kernel ms | Rank-0 device-idle ms | TT exposed min / median / max ms |
+|---|---:|---:|---:|---:|
+| MDS before, BF16_Optimizer compatibility | 1/24 ranks | 89.416 | 118.398 | -- |
+| TT HSDP R12/S2 loss compile | 24/24 ranks | 221.650 | 210.645 | 167.402 / 214.802 / 256.602 |
+| TT native DDP/ZeRO-1, 100 MiB buckets | 24/24 ranks | 187.461 | 85.213 | 101.226 / 168.960 / 204.614 |
+| MDS after, same control | 1/24 ranks | 88.223 | 125.029 | -- |
+
+These are interval unions from captured update 12. Device activity includes kernels, copies, and memsets. Recognized collective names contain `oneCCL` or `ccl::`; exposure subtracts overlap with other device activity. Each rank is analyzed independently; ranks are not summed or merged into an unsynchronized global timeline. CPU collective annotations are not added to GPU time. This is not a causal stall estimate or a complete network-transfer measurement.
+
+The captured rank-0 non-collective device-activity union is similar for MDS and HSDP. HSDP has more exposed collective activity and idle time. This supports testing communication granularity and scheduling before attributing the gap to attention kernels alone. Native DDP removes the per-layer parameter all-gather pattern but still issues more reduction annotations than MDS. Larger DDP buckets are the next isolated variable.
+
+[Numerical series, all-rank summaries, and methods](2026-11-02-pair-12482063-evidence.json).
+
+<!-- measured-results:end -->
 
 ## Recovery evidence
 
@@ -16,14 +60,11 @@ issues remained. The response supplies no diagnosis or repair details.
 The next gate is the live loaded-parameter audit before the first 2B update.
 It checks all `111` adapted parameter keys (`1,986,054,144` elements) against
 the pinned native/DCP audit, independently on all `24` ranks.
-The expected audit JSON SHA256 is
-`b1584ff72d8b2fd4f53594cd1bba7b12efb0f6a102bda8407cd315a00fe6bad6`.
+The pinned audit manifest and checksum are retained in the linked W&B evidence.
 
-Source is pinned to `a4057f84ebce1a46a42409d20eb6aee2aa7a0cf6` in
-`/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan-agpt-resume-20261102`.
+Source is pinned to `a4057f84ebce1a46a42409d20eb6aee2aa7a0cf6` in an isolated project-filesystem checkout.
 The checkout is separate from the shared training and earlier campaign trees.
-The runtime remains
-`/lus/tegu/projects/datascience/foremans/venvs/xpu-torch214-fixedlr-v2-20260927`.
+The runtime remains the pinned Torch `2.14.0+xpu` environment. Exact paths and runtime manifests are retained in W&B.
 Exact-runtime config parsing and mandatory dependency/asset preflight passed.
 The launcher is `scripts/benchmark_agpt_replicated_tt.sh`, using `ezpz launch`.
 
@@ -106,8 +147,7 @@ and complete input hashes therefore do not establish repeatable loss
 trajectories with this configuration (`debug.deterministic=false`). The
 cause of the later differences remains unresolved.
 
-Raw terminal canary evidence was fetched with SHA256
-`34cab1b4494df4e5a5e7aeff95b8ec5de6a47b34b464ce139722d04b231f11dd`.
+Raw terminal canary evidence, fetch manifests, and checksums are retained in W&B.
 The online W&B runs retain the linked campaign-evidence artifacts.
 
 ## HSDP audit and MDS launcher gate
@@ -123,9 +163,7 @@ parameters, momentum, and Hessian state.
 MDS login preflight found that its borrowed helper environment's Click
 `8.3.1` installation is missing `click/core.py`. The same Click version was
 installed with no dependencies into the isolated campaign overlay
-`.cache/mds-cli-overlay`. Neither borrowed runtime was modified. The
-replacement `click/core.py` SHA256 is
-`53a05fc6df06923343ab22741ea5ef96e247b72678b18e54480bccd4276aee64`.
+`.cache/mds-cli-overlay`. Neither borrowed runtime was modified. The complete replacement package and checksum are retained in W&B.
 The old nested-separator command failed the exact installed Click CLI dry-run:
 its forwarded payload began at `--finetune`, dropping Python and the benchmark
 entrypoint. Removing the inner separator passed the same dry-run with MPI
@@ -143,7 +181,7 @@ rank-local; they do not establish all-rank causal communication stalls.
 
 Submitted through mandatory preflight after both all-rank canaries completed.
 Source: [`4831cd2d9`](https://github.com/saforem2/torchtitan/commit/4831cd2d94ad1dca29f1956d5b40e2fee45bdc12).
-Workdir: `/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan-agpt-pair-resume-20261102`.
+Workdir: the clean isolated project-filesystem comparison checkout; its exact path is retained in W&B.
 Parent evidence: `outputs/agpt-replicated-pair-12482063/run.log`.
 
 | Phase | Path | Layout / precision | Compilation |
@@ -186,3 +224,16 @@ HSDP to `dp_shard=6`, `dp_replicate=4`. MDS controls again bracket the two TT
 arms on the same allocated nodes. Both TT arms will audit loaded parameters;
 materialization-audit memory peaks will be flagged as non-comparable. This
 isolates sharding layout while keeping the workload fixed.
+
+## Follow-up `12482081` terminal status
+
+All four phases completed with `PAIR_COMPLETE rc=0` and scheduler exit `0`:
+MDS before, HSDP R4/S6 eager, HSDP R4/S6 loss compilation, and MDS after.
+Full source artifacts and all-rank loaded-parameter audits are being analyzed.
+The six-shard eager configuration passed the memory-fit gate that failed at
+two shards. Both layouts remain explicit variables in the comparison.
+
+The next isolated test keeps the native DDP/ZeRO-1 recipe fixed and varies
+`native_ddp_bucket_cap_mb` through `100`, `2048`, and `8192`, with the same
+before/after MDS controls. It tests whether reduction granularity accounts
+for the remaining measured gap; no result is assumed.
