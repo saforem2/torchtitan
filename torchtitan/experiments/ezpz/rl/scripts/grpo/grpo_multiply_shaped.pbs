@@ -1,0 +1,85 @@
+#!/bin/bash --login
+#PBS -A datascience
+#PBS -l walltime=01:00:00
+#PBS -l filesystems=tegu:home
+#PBS -l select=2
+#PBS -q workq
+#PBS -j oe
+#
+# GRPO smoke: multiply_shaped task (dense digit-proximity reward) on Qwen3-0.6B
+# 2N = 24 ranks, 100 steps, lr=1e-6, bf16
+# Tests ceiling-attack hypothesis: componentized reward gives smoother gradient.
+
+set -o pipefail
+
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export CCL_PROCESS_LAUNCHER=pmix
+export CCL_OP_SYNC=1
+export ONEAPI_DEVICE_SELECTOR="opencl:gpu;level_zero:gpu"
+export TORCH_CPP_LOG_LEVEL=ERROR
+export PALS_RPC_TIMEOUT="${PALS_RPC_TIMEOUT:-600}"
+export http_proxy="${http_proxy:-http://proxy.alcf.anl.gov:3128}"
+export https_proxy="${https_proxy:-http://proxy.alcf.anl.gov:3128}"
+
+VENV="${SMOKE_VENV:-/lus/tegu/projects/datascience/foremans/venvs/xpu-torch216-sync-5a7a622f16}"
+VENV="$(readlink -f "${VENV}")"
+
+SUBMIT_DIR="${PBS_O_WORKDIR:-$(pwd)}"
+source "${SUBMIT_DIR}/torchtitan/experiments/ezpz/scripts/load_pinned_ezpz_utils.sh"
+load_pinned_ezpz_utils || exit $?
+ezpz_setup_job
+ezpz_load_modules
+cd "${SUBMIT_DIR}" || exit 2
+
+# LD fix for xpu-torch216 SYCL (mirrors zephon smoke jobs 12481003/12481004)
+if [[ "${SMOKE_VENV_LD_FIRST:-1}" == "1" && -d "${VENV}/lib" ]]; then
+    _ld_first="${SUBMIT_DIR}/.cache/xpu-ld-first/$(basename "${VENV}")"
+    if [[ ! -e "${_ld_first}/.complete" ]]; then
+        mkdir -p "${_ld_first}"
+        for _lib in "${VENV}"/lib/libur_* "${VENV}"/lib/libsycl.so* \
+                    "${VENV}"/lib/libumf* "${VENV}"/lib/libtcm*; do
+            [[ -e "${_lib}" ]] && ln -sf "${_lib}" "${_ld_first}/"
+        done
+        touch "${_ld_first}/.complete"
+    fi
+    export LD_LIBRARY_PATH="${_ld_first}:${LD_LIBRARY_PATH:-}"
+fi
+
+export VIRTUAL_ENV="${VENV}"
+export PATH="${VENV}/bin:/opt/pbs/bin:${PATH}"
+export PYTHONPATH="${SUBMIT_DIR}:${PYTHONPATH:-}"
+hash -r
+[[ "$(command -v python)" == "${VENV}/bin/python" ]] || exit 93
+
+MODEL="Qwen/Qwen3-0.6B"
+JOBID_SHORT="${PBS_JOBID%%.*}"
+CKPT_DIR="outputs/grpo/qwen06b-multiply-shaped-${JOBID_SHORT:-manual}"
+LOG_DIR="logs/grpo-qwen06b-multiply-shaped-${JOBID_SHORT:-manual}"
+mkdir -p "${CKPT_DIR}" "${LOG_DIR}"
+
+echo "=== GRPO shaped: Qwen3-0.6B x multiply_shaped (digit-proximity), 100 steps, 2N ===" | tee "${LOG_DIR}/run.log"
+echo "Model: ${MODEL}  Task: multiply_shaped  Steps: 100  Ranks: 24" | tee -a "${LOG_DIR}/run.log"
+git log -1 --oneline -- torchtitan/experiments/ezpz/rl/train_grpo.py torchtitan/experiments/ezpz/rl/tasks/multiply_shaped.py 2>&1 | tee -a "${LOG_DIR}/run.log"
+echo "" | tee -a "${LOG_DIR}/run.log"
+
+"${VENV}/bin/python" -c 'from ezpz.cli import main; main()' launch --np 24 -ppn 12 -- \
+    "${VENV}/bin/python" -m torchtitan.experiments.ezpz.rl.train_grpo \
+    --task multiply_shaped \
+    --model_name_or_path "${MODEL}" \
+    --output_dir "${CKPT_DIR}" \
+    --per_device_train_batch_size 1 \
+    --per_device_eval_batch_size 1 \
+    --num_generations 4 \
+    --max_completion_length 64 \
+    --temperature 0.7 \
+    --max_steps 100 \
+    --learning_rate 1e-6 \
+    --beta 0.0 \
+    --bf16 --fsdp full_shard \
+    --logging_steps 1 \
+    --save_strategy no \
+    --report_to wandb \
+    2>&1 | tee -a "${LOG_DIR}/run.log" || true
+
+echo "" | tee -a "${LOG_DIR}/run.log"
+echo "=== DONE: log in ${LOG_DIR}/ ===" | tee -a "${LOG_DIR}/run.log"
