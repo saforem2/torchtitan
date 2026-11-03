@@ -2,13 +2,60 @@
 
 ## Results
 
-Fresh `Sunspot` runs completed on `2026-11-02`. Native TT DDP/ZeRO-1 reaches **2.418 s/update** versus **2.344 s/update** for same-allocation MDS controls: about **3.2% slower**. Increasing DDP buckets from `100` to `2048` or `8192 MiB` does not remove that gap.
+Fresh `Sunspot` runs completed on `2026-11-02`. **Earlier absolute XPU throughput has not been recovered**; see the [historical reconciliation](#reconciliation-with-earlier-xpu-throughput). Native TT DDP/ZeRO-1 reaches **2.418 s/update** versus **2.344 s/update** for same-allocation MDS controls: about **3.2% slower**. Increasing DDP buckets from `100` to `2048` or `8192 MiB` does not remove that gap.
 
 At the matched HSDP layout (`R4/S6`), loss compilation reduces step time from `2.908` to `2.730 s`, a `6.10%` reduction. Eager HSDP at `R12/S2` runs out of memory; eager at `R4/S6` completes. Only the loss region is compiled in these experiments.
 
 Initial TT parameters and complete consumed token batches are audited. Loss trajectories differ across frameworks and between MDS repeats. **Throughput is close; numerical equivalence remains unproven.** These are short runs on two nodes, not production-scale equivalence.
 
 ![Fresh paired MDS and TorchTitan performance](2026-11-02-recovery-comparison.svg)
+
+## Reconciliation with earlier XPU throughput
+
+The recovered pair does **not** recover earlier absolute throughput. Its `3.2%` gap compares two specific low-accumulation paths. It does not establish that TT has reached the earlier MDS performance target.
+
+Complete W&B histories confirm the earlier TT rates. The following three rows are recomputed with this report's common `11,186,515,968 FLOPs/token` and `298.1888 TFLOP/s/tile` normalization. They are historical configurations, not a matched A/B with the November 2 pair.
+
+| Historical run | Hardware / ranks | Window | tok/s/tile | Common model TFLOP/s/tile | MFU % |
+|---|---|---|---:|---:|---:|
+| [TT `6tc71of4`](https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/6tc71of4) | Sunspot / `12` | Updates `9-20`, all `20` rows retained | 8380.58 | **93.75** | 31.44 |
+| [TT `xcs4xrqe`](https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/xcs4xrqe) | Sunspot / `48` | Updates `86-97`, all `97` rows retained | 8121.40 | **90.85** | 30.47 |
+| [MDS 2B `8dscnx65`](https://wandb.ai/aurora_gpt/AuroraGPT/runs/8dscnx65) | Sunspot / `24` | Updates `21-32`, all `76` throughput rows retained | 8044.21 | **89.99** | 30.18 |
+
+The old TT numerator is `11,188,088,832 FLOPs/token`, only `0.0141%` above the current numerator because of vocabulary padding. The table removes that difference. Its higher TT throughput cannot be explained away as FLOP accounting.
+
+Historical TT `time_metrics/end_to_end(s)` is a per-update duration in these two runs, not a cumulative counter. Summing the twelve durations and dividing the consumed-token increment by ranks reproduces the rates above. Each selected update independently satisfies `logged_tps * elapsed_seconds = tokens/tile/update`. The latest campaign uses its separately validated timing method; counter semantics are not transferred between versions.
+
+### What changed
+
+| Variable | Earlier TT examples | November 2 TT paths |
+|---|---|---|
+| Compiler coverage | `components=[model, loss]` | `components=[loss]` |
+| Local microbatch | `2` and `5` | `1`, accumulated twice |
+| Runtime | Torch `2.13.0a0+gitcf30153` | Torch `2.14.0+xpu` |
+| Optimizer | `AdamW` | `SophiaG` |
+| Layout | Global FSDP at `12` ranks; HSDP R4/S12 at `48` ranks | Native DDP/ZeRO-1 at `24` ranks, or the listed HSDP layouts |
+| Parameter dtype in config | FP32, mixed-precision BF16 parameters / FP32 reduction | Native DDP FP32 weights with autocast, or the listed HSDP precision |
+
+Both older TT examples use sequence `8192` and FP32 training dtype. They are not the older all-BF16 production path with its separate RMSNorm-training caveat. Model-plus-loss compilation is a configured model compilation path; this does not assert that the entire model executes as one graph.
+
+The older Sunspot MDS 2B run uses GBS `384`, microbatch `1`, accumulation `16`, `AdamW`, and DeepSpeed ZeRO-1. The latest control uses GBS `48`, microbatch `1`, accumulation `2`, `SophiaG`, and the historical BF16-wrapper compatibility path. Both record Torch `2.10.0a0+git449b176`, so a different recorded PyTorch version is not an explanation for this particular MDS difference. Both disable activation checkpointing. Increasing accumulation amortizes update-level work; changing optimizer/wrapper changes that work. Their individual costs have not been isolated.
+
+The older audited native-checkpoint experiment also has higher rates than the recovered pair: MDS `88.42` and loss-compiled TT `81.81-84.69 model TFLOP/s/tile`, with accumulation `24` and `16` selected ranks. See its [complete throughput table](2026-10-29-native-checkpoint-closure.md#tokenssec-model-tflops-and-mfu).
+
+### MDS near 120 on XPU
+
+MDS does have sustained XPU records near `120 TFLOP/s`. [Aurora run `audeuhea`](https://wandb.ai/aurora_gpt/AuroraGPT/runs/audeuhea) has median native `throughput/tflops=125.35` over updates `54829-54840` (`40` complete history rows retained). Its config is `32` layers, hidden size `4096`, sequence `4096`, vocabulary `32000`, `24` ranks, GBS `384`, microbatch `1`, `AdamW`, ZeRO-1, and activation checkpointing disabled. Its model-FLOP metric is `130.44` over the same window. This is a larger model than the `12`-layer, hidden-size-`2048` AuroraGPT-2B used here.
+
+[Aurora run `yxlx7m0n`](https://wandb.ai/aurora_gpt/AuroraGPT/runs/yxlx7m0n) records median native `116.18` over updates `142-153`; it enables activation checkpointing and records a separate model-FLOP metric of `78.68`. Native recomputation-inclusive TFLOPs and model TFLOPs must remain separate.
+
+The exact historical **2B XPU** window behind the recollection of `120` remains unidentified. The search inspected metadata for `535` Aurora/Sunspot `12 x 2048` runs in `aurora_gpt/AuroraGPT`; summary metadata is not a complete scan of every history window or every project. It cannot exclude that result. The unrelated Polaris example in the earlier report does not settle the XPU question.
+
+### Performance gate remains open
+
+The next controlled performance experiment must restore model-plus-loss compiler coverage and compare microbatch `2` against microbatch `1` plus accumulation at fixed tokens/update. MDS also needs its earlier higher-accumulation ZeRO-1 control alongside the compatibility path, with optimizer held fixed. The latest two-node pair and bucket trial do not substitute for those measurements. Loss/gradient agreement remains a separate unresolved gate.
+
+[Complete sanitized histories, timing calculations, and selected configs](2026-11-02-historical-xpu-throughput-evidence.json).
 
 ## Common workload and measurement
 

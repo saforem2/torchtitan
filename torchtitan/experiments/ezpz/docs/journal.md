@@ -2,6 +2,20 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-11-02: historical XPU throughput reconciliation
+
+- Recompute older Sunspot TT histories with the new report's exact model
+  FLOPs convention: `6tc71of4` gives `93.75`, `xcs4xrqe` gives `90.85`
+  TFLOP/s/tile. These use model-plus-loss compilation and larger microbatches.
+- Recompute Sunspot MDS 2B `8dscnx65`: `89.99` TFLOP/s/tile, GBS `384`,
+  accumulation `16`, AdamW, ZeRO-1. The latest compatibility control changes
+  accumulation to `2`, optimizer to SophiaG, and wrapper implementation.
+- Confirm Aurora MDS `audeuhea` records sustained native `125.35` TFLOP/s
+  on a larger `32 x 4096` model. The exact 2B XPU `120` window remains
+  unidentified; the previous Polaris example does not resolve that question.
+- Correct the [report's scope](experiments/agpt/sunspot/2026-11-02-recovery-comparison.md#reconciliation-with-earlier-xpu-throughput):
+  the fresh `3.2%` relative gap does not recover earlier absolute performance.
+
 ## 2026-11-02: recovered Sunspot comparison and bucket experiment
 
 - Recovery proof `12481979` and four 32-update canaries pass. Each canary
