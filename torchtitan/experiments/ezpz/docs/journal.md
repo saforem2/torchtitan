@@ -2,6 +2,42 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-11-02: historical XPU throughput reconciliation
+
+- Recompute older Sunspot TT histories with the new report's exact model
+  FLOPs convention: `6tc71of4` gives `93.75`, `xcs4xrqe` gives `90.85`
+  TFLOP/s/tile. These use model-plus-loss compilation and larger microbatches.
+- Recompute Sunspot MDS 2B `8dscnx65`: `89.99` TFLOP/s/tile, GBS `384`,
+  accumulation `16`, AdamW, ZeRO-1. The latest compatibility control changes
+  accumulation to `2`, optimizer to SophiaG, and wrapper implementation.
+- Confirm Aurora MDS `audeuhea` records sustained native `125.35` TFLOP/s
+  on a larger `32 x 4096` model. The exact 2B XPU `120` window remains
+  unidentified; the previous Polaris example does not resolve that question.
+- Correct the [report's scope](experiments/agpt/sunspot/2026-11-02-recovery-comparison.md#reconciliation-with-earlier-xpu-throughput):
+  the fresh `3.2%` relative gap does not recover earlier absolute performance.
+
+## 2026-11-02: recovered Sunspot comparison and bucket experiment
+
+- Recovery proof `12481979` and four 32-update canaries pass. Each canary
+  has exact loaded-parameter audits and finite optimizer witnesses on `24/24`
+  ranks. The earlier site startup failure's root cause remains unverified.
+- Repair the experimental MDS launcher in `4831cd2d9`: preserve its Python
+  payload across the legacy Click CLI and use an isolated same-version
+  Click overlay. Both borrowed training environments remain unchanged.
+- `12482063` records fresh MDS controls, HSDP loss compilation, and native
+  DDP/ZeRO-1. Eager HSDP R12/S2 fails with OOM after one update; the other
+  four arms complete all `32` updates. The failed evidence is retained.
+- `12482081` completes matched HSDP R4/S6 eager and loss compilation:
+  `2.908` versus `2.730 s/update`, a `6.10%` time reduction.
+- `12482090` completes MDS controls and native DDP buckets `100`, `2048`,
+  and `8192 MiB`. Actual bucket counts are `25`, `3`, and `1`; all TT
+  settings remain near `2.418 s/update` versus `2.344 s` MDS. Larger buckets
+  reduce recognized collective exposure without a useful throughput gain.
+- Complete input hashes match. Loss trajectories do not establish numerical
+  equivalence. TFLOPs/MFU are normalized useful work per FLAT tile.
+- Publish the [measured report, figure, and numerical evidence](experiments/agpt/sunspot/2026-11-02-recovery-comparison.md).
+  Complete raw campaign evidence is archived in online W&B.
+
 ## 2026-11-01: direct executable startup failure reproduced across queues
 
 - Submitted direct `/bin/hostname` controls `12481943` / `12481944` /
