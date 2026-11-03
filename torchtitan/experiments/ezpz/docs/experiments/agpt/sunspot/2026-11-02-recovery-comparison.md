@@ -1,269 +1,190 @@
 # AuroraGPT-2B: recovered Sunspot MDS/TT comparison
 
-<!-- measured-results:start -->
-## Measured results: job `12482063`
+## Results
 
-Updates `21-32`, twelve samples after 32-update runs. `R/S` means data-parallel replica/shard degree. One device below is one selected `FLAT` tile/rank.
+Fresh `Sunspot` runs completed on `2026-11-02`. Native TT DDP/ZeRO-1 reaches **2.418 s/update** versus **2.344 s/update** for same-allocation MDS controls: about **3.2% slower**. Increasing DDP buckets from `100` to `2048` or `8192 MiB` does not remove that gap.
 
-| Path | Mean s/update | tok/s/tile | Model TFLOP/s/tile | MFU % | Peak allocated / reserved GiB | Outer compile timer max s |
-|---|---:|---:|---:|---:|---:|---:|
-| MDS before, BF16_Optimizer compatibility | 2.364592 | 6928.9 | 77.51 | 25.99 | 46.396 / 50.613 | none |
-| TT HSDP R12/S2 eager | OOM after 1 update | -- | -- | -- | incomplete | none |
-| TT HSDP R12/S2 loss compile | 2.595684 | 6312.0 | 70.61 | 23.68 | 40.662 / 47.855 | 14.273 |
-| TT native DDP/ZeRO-1, 100 MiB buckets | 2.444031 | 6703.7 | 74.99 | 25.15 | 49.064 / 56.820 | 3.013 |
-| MDS after, same control | 2.363333 | 6932.6 | 77.55 | 26.01 | 46.396 / 50.613 | none |
+At the matched HSDP layout (`R4/S6`), loss compilation reduces step time from `2.908` to `2.730 s`, a `6.10%` reduction. Eager HSDP at `R12/S2` runs out of memory; eager at `R4/S6` completes. Only the loss region is compiled in these experiments.
 
-Native TT DDP/ZeRO-1 is `3.39%` slower than the mean of the bracketing MDS controls. The MDS before/after timing drift is `-0.053%`. This is one allocation, not a production-scale or independent-repeat equivalence claim.
-
-All completed arms have `24/24` completed rank diagnostics and 32 finite optimizer steps. All `1,536` consumed input/label/raw-token hash records match across completed arms. The eager failure has `96` matching records and `1,440` missing records; its partial data is not a complete-run comparison.
-
-TT uses adjacent full-precision global-loss event wall times, cross-checked against synchronized per-rank training-step records. MDS uses its native iteration timer. Those framework boundaries are not proven identical. TFLOPs use `11,186,515,968 FLOPs/token`; MFU uses the existing report normalization of `298.1888 TFLOP/s/FLAT tile`. These are useful-model-work estimates, not hardware counters.
-
-Compilation is loss-region compilation only. The outer timer is `_compile.compile_inner`; nested timers are not summed. TT variants share a job cache, so the later DDP compiler timer is not an independent cold-start measurement. Memory is the maximum process-lifetime allocated/reserved high-water mark across all 24 ranks, not a steady-window average.
-
-### Loss agreement
-
-Full 32-update loss differences versus MDS-before: HSDP loss compile max absolute `0.951191`, RMS `0.249758`; native DDP max absolute `0.304562`, RMS `0.123824`. MDS before/after itself has max absolute loss difference `0.756085` and RMS `0.148977`. No numerical-equivalence tolerance is silently applied.
-
-The native DDP recipe uses autocast with FP32 embedding, RMSNorm, and residual tensors. That differs from uniform BF16 model compute. The loaded-weight audits establish exact initial parameter values, not identical forward/backward arithmetic or optimizer updates. Numerical equivalence and representative convergence remain open.
-
-### Collective visibility
-
-| Path | Trace coverage | Rank-0 exposed collective-kernel ms | Rank-0 device-idle ms | TT exposed min / median / max ms |
-|---|---:|---:|---:|---:|
-| MDS before, BF16_Optimizer compatibility | 1/24 ranks | 89.416 | 118.398 | -- |
-| TT HSDP R12/S2 loss compile | 24/24 ranks | 221.650 | 210.645 | 167.402 / 214.802 / 256.602 |
-| TT native DDP/ZeRO-1, 100 MiB buckets | 24/24 ranks | 187.461 | 85.213 | 101.226 / 168.960 / 204.614 |
-| MDS after, same control | 1/24 ranks | 88.223 | 125.029 | -- |
-
-These are interval unions from captured update 12. Device activity includes kernels, copies, and memsets. Recognized collective names contain `oneCCL` or `ccl::`; exposure subtracts overlap with other device activity. Each rank is analyzed independently; ranks are not summed or merged into an unsynchronized global timeline. CPU collective annotations are not added to GPU time. This is not a causal stall estimate or a complete network-transfer measurement.
-
-The captured rank-0 non-collective device-activity union is similar for MDS and HSDP. HSDP has more exposed collective activity and idle time. This supports testing communication granularity and scheduling before attributing the gap to attention kernels alone. Native DDP removes the per-layer parameter all-gather pattern but still issues more reduction annotations than MDS. Larger DDP buckets are the next isolated variable.
-
-[Numerical series, all-rank summaries, and methods](2026-11-02-pair-12482063-evidence.json).
-
-## Matched eager/compiled results: job `12482081`
-
-Both HSDP paths use `dp_replicate=4`, `dp_shard=6`, identical workload, and per-arm `24/24` exact loaded-parameter audits. All four arms completed 32 updates with scheduler exit `0`.
-
-| Path | Mean s/update | tok/s/tile | Model TFLOP/s/tile | MFU % | Peak allocated / reserved GiB | Outer compile timer max s |
-|---|---:|---:|---:|---:|---:|---:|
-| MDS before, BF16_Optimizer compatibility | 2.363642 | 6931.7 | 77.54 | 26.00 | 46.396 / 50.613 | none |
-| TT HSDP R4/S6 eager | 2.907580 | 5634.9 | 63.04 | 21.14 | 52.896 / 58.064* | none |
-| TT HSDP R4/S6 loss compile | 2.730256 | 6000.9 | 67.13 | 22.51 | 37.271 / 42.439* | 15.450 |
-| MDS after, same control | 2.364875 | 6928.1 | 77.50 | 25.99 | 46.396 / 50.613 | none |
-
-Loss compilation reduces mean step time by `6.10%` at this common layout. Both TT rows include the opt-in parameter-materialization audit; their lifetime memory peaks are marked `*` and are not clean measurements of memory change due only to compilation. The audit's current allocated memory returned to its pre-audit value, but allocator-cache effects remain possible.
-
-The observed allocated-memory difference is `15.62494 GiB`, close to two full FP32 vocabulary tensors of shape `[8192, 256000]` (`15.625 GiB`). Eager cross-entropy upcasts predictions to FP32; compiling the loss fuses those casts into the loss kernels. This is consistent with the measured memory difference and the failed `7.81 GiB` allocation in R12/S2 eager. It does not prove that every allocation in the measured peak belongs to those two intermediates. See the pinned [`cross_entropy_loss` implementation](https://github.com/saforem2/torchtitan/blob/4831cd2d94ad1dca29f1956d5b40e2fee45bdc12/torchtitan/components/loss.py).
-
-All `1,536` consumed input hash records match. Eager loss versus MDS-before has max absolute difference `0.685070` and RMS `0.160800`; loss compilation has max absolute difference `1.803082` and RMS `0.332989`. MDS before/after has max absolute difference `0.646588` and RMS `0.128427`. Numerical equivalence remains unproven.
-
-R12/S2 and R4/S6 were measured in separate allocations with bracketing MDS controls. The eager/compiled toggle within R4/S6 is a same-allocation comparison; the cross-layout timing difference is not a same-node A/B.
-
-[Complete sanitized numerical series and all-rank summaries](2026-11-02-pair-12482081-evidence.json).
+Initial TT parameters and complete consumed token batches are audited. Loss trajectories differ across frameworks and between MDS repeats. **Throughput is close; numerical equivalence remains unproven.** These are short runs on two nodes, not production-scale equivalence.
 
 ![Fresh paired MDS and TorchTitan performance](2026-11-02-recovery-comparison.svg)
 
-<!-- measured-results:end -->
+## Common workload and measurement
 
-## Recovery evidence
-
-`12481979` started once on two `Sunspot` nodes on `2026-11-02` and finished
-with scheduler exit `0`. Its full stdout records two 10-step debug arms,
-`1-baseline rc=0`, `2-mixed rc=0`, and `VERDICT mixed_demo rc=0`.
-This establishes application execution after the November 1 startup incident.
-It does not establish the site's root cause or validate the 2B comparison.
-
-`REQ-17196` received a support response at `17:55 UTC` asking whether PBS
-issues remained. The response supplies no diagnosis or repair details.
-
-## Pending application gate
-
-The next gate is the live loaded-parameter audit before the first 2B update.
-It checks all `111` adapted parameter keys (`1,986,054,144` elements) against
-the pinned native/DCP audit, independently on all `24` ranks.
-The pinned audit manifest and checksum are retained in the linked W&B evidence.
-
-Source is pinned to `a4057f84ebce1a46a42409d20eb6aee2aa7a0cf6` in an isolated project-filesystem checkout.
-The checkout is separate from the shared training and earlier campaign trees.
-The runtime remains the pinned Torch `2.14.0+xpu` environment. Exact paths and runtime manifests are retained in W&B.
-Exact-runtime config parsing and mandatory dependency/asset preflight passed.
-The launcher is `scripts/benchmark_agpt_replicated_tt.sh`, using `ezpz launch`.
+`R/S` denotes data-parallel replica/shard degree. One device in every throughput, TFLOPs, and MFU value is **one selected FLAT tile/rank**, not a physical two-tile GPU package.
 
 | Setting | Value |
 |---|---|
-| Nodes / ranks per node | `2 / 12`, `FLAT` |
-| Model / optimizer | `AuroraGPT-2B / SophiaG` |
-| Native DDP / optimizer sharding | `24` replicas / ZeRO-1 |
-| Local accumulation / wire / weight all-gather | FP32 / BF16 / BF16 |
+| Nodes / ranks per node / total ranks | `2 / 12 / 24`, `FLAT` for MDS and TT |
+| Model / optimizer | `AuroraGPT-2B / SophiaG`, fresh optimizer state |
 | Sequence / microbatch / accumulation / GBS | `8192 / 1 / 2 / 48` |
+| Tokens per update / per tile | `393216 / 16384` |
 | Updates / seed / activation checkpointing | `32 / 42 / none` |
-| Compilation | Loss region only |
-| Gradient bucket | `100 MiB` |
-| Profiling | Disabled for the live-parameter canary |
+| Timing window | Updates `21-32`, twelve samples |
+| Profiler capture | Update `12` |
+| TT native DDP | FP32 local gradient accumulation, BF16 wire and weight all-gather, ZeRO-1 optimizer state |
+| HSDP | No reshard after forward, FP32 deferred gradient reduction |
+| TT compilation | None or loss region only; no full-model compile result |
+| TT runtime | Torch `2.14.0+xpu` |
+| MDS runtime | Torch `2.10.0a0+git449b176`, DeepSpeed `0.18.5` |
 | W&B | Online, `aurora_gpt/torchtitan.ezpz.train` |
 
-## Restart attempts
+The MDS control selects the historical `BF16_Optimizer` wrapper: Megatron nominal stage `0`, DeepSpeed config stage `1`, FP32 gradient accumulation, and sharded FP32 master/state storage. The run names retain `ds0175`, but the measured DeepSpeed runtime is `0.18.5`. This is a compatibility path, not a literal DeepSpeed `0.17.5` installation or an unqualified modern ZeRO-1 baseline.
 
-The first login preflight returned after a delay while a second invocation
-was in progress. Both submitted: `12482057` and `12482058`. Their training
-output paths and W&B run IDs contain the unique PBS job ID. Their initial
-PBS stdout destination was mistakenly shared and its parent did not exist.
-Both entered scheduler exit processing with `Exit_status=-3`, then retried.
-The missing stdout parent is a verified submission defect; its role in the
-scheduler exit is an unverified inference pending the corrected run.
-No training output existed in the first snapshot.
+All three allocations use immutable TT source [`4831cd2d9`](https://github.com/saforem2/torchtitan/commit/4831cd2d94ad1dca29f1956d5b40e2fee45bdc12) and MDS source `9f407ed9e8e30920e28272daf8cb7db36c211e21`. Launchers use `ezpz launch`. Mandatory dependency/asset and exact-runtime config preflight passed. Runtime, workdir, checkpoint, launcher, source snapshots, and full provenance are archived in W&B. Borrowed runtime environments were not modified.
 
-The stdout parent was created, and corrected job `12482059` uses PBS's
-job-specific default stdout path. Both original jobs subsequently reached
-application execution on their second attempts; `12482059` started on its
-first attempt. All three produced `24/24` live-parameter audit JSONs with
-`status=passed` and `all_ranks_passed=true`. Every rank matched all `111`
-expected parameter hashes before training. These files establish live
-loaded-parameter identity for this native DDP path, not full-model numerical
-equivalence across frameworks. All three then completed `32` updates with scheduler exit `0` and complete
-`24/24` rank diagnostics. Every rank recorded `32` successful optimizer calls,
-`32` ZeRO-1 all-gathers, and finite parameter, momentum, and Hessian state.
-No jobs were cancelled.
+### Timing, FLOPs, compilation, and memory
 
-| Job | Audit rank coverage | Initial live parameters | W&B |
-|---|---:|---|---|
-| `12482057` | `24/24` | All exact | [Run](https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/agpt-replicated-ddp-bf16-losscompile-live-resume-12482057) |
-| `12482058` | `24/24` | All exact | [Run](https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/agpt-replicated-ddp-bf16-losscompile-live-resume-12482058) |
-| `12482059` | `24/24` | All exact | [Run](https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/agpt-replicated-ddp-bf16-losscompile-live-resume-io-12482059) |
+TT timing uses adjacent full-precision global-loss TensorBoard event wall times. Independent synchronized per-rank step records cross-check it. MDS uses native `elapsed_time_per_iteration_ms`. Those framework timer boundaries are not proven identical.
 
-The initial stdout-directory defect is distinct from the November 1 failure:
-these jobs now have real `stime` and application output. The site repair
-mechanism remains unverified.
+`tok/s/tile = 16384 / mean_step_seconds`. Useful-model TFLOPs use `11,186,515,968 FLOPs/token`; MFU divides by the existing report normalization of `298.1888 TFLOP/s/FLAT tile`. These are normalized model-work estimates, not hardware counters. Older production runs with different token budgets, accumulation, rank counts, or FLOP/device conventions require separate normalization; their seconds/update are not directly interchangeable with this workload.
 
-## Next comparison
+The compiler value is the maximum outer `_compile.compile_inner` timer across ranks. Nested timers and different ranks are not summed. It does not include complete process startup or data loading. TT arms within a job share a compiler cache, so later arms are not independent cold starts. Memory is the maximum process-lifetime allocated/reserved high-water mark across all 24 ranks, not an average over the steady window.
 
-After the live audit and optimizer-step witnesses pass, rerun the controlled
-MDS/TT pair. Preserve complete input hashes, loss histories, rank diagnostics,
-steady-state timing, compilation timers, peak memory, and raw profiler traces
-in online W&B. Derive TFLOPs, MFU, and tokens/sec/device using the existing
-report's common FLOP and hardware normalization. All arms must finish before
-reporting a comparative result.
+## Initial paired run: `12482063`
 
-- [Recovered comparison and numerical limits](2026-11-01-handoff-audit.md)
-- [Same-allocation comparison protocol](2026-11-01-paired-performance.md)
-- [Original startup incident](2026-11-01-startup-incident.md)
+| Path / online W&B | Mean s/update | tok/s/tile | Model TFLOP/s/tile | MFU % | Peak allocated / reserved GiB | Outer compile timer max s |
+|---|---:|---:|---:|---:|---:|---:|
+| [MDS before, historical BF16 wrapper](https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/agpt-mds-zero0-ds0175-sophiag-pair-before-production-acnone-n2x12-12482063) | 2.364592 | 6928.9 | 77.51 | 25.99 | 46.396 / 50.613 | none |
+| [TT HSDP R12/S2 eager](https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/agpt-replicated-hsdp-eager-hs12eager-12482063) | OOM after 1 update | -- | -- | -- | incomplete | none |
+| [TT HSDP R12/S2 loss compile](https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/agpt-replicated-hsdp-losscompile-hs12loss-12482063) | 2.595684 | 6312.0 | 70.61 | 23.68 | 40.662 / 47.855 | 14.273 |
+| [TT native DDP/ZeRO-1, 100 MiB](https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/agpt-replicated-ddp-bf16-losscompile-ddpz1-12482063) | 2.444031 | 6703.7 | 74.99 | 25.15 | 49.064 / 56.820 | 3.013 |
+| [MDS after, same control](https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/agpt-mds-zero0-ds0175-sophiag-pair-after-production-acnone-n2x12-12482063) | 2.363333 | 6932.6 | 77.55 | 26.01 | 46.396 / 50.613 | none |
 
-## Native DDP canary results
+Native DDP/ZeRO-1 is `3.39%` slower than the mean bracketing MDS control. MDS before/after timing drift is `-0.053%`.
 
-These are loading/runtime canaries, not a new MDS/TT performance comparison.
-Every rank has `32` successful synchronized step records. The timing window
-is updates `21-32`, using the synchronized training-step timer rather than
-cumulative throughput printed during warmup.
+The parent job exits `1` because eager HSDP fails during backward after one completed update. XPU requests `7.81 GiB` with `5.58 GiB` free on a `63.98 GiB` tile. The launcher returns `143` after the rank OOM. No user cancellation or PBS pre-run failure caused this result. Its partial run has no steady-state estimate.
 
-| Job | Rank-0 mean s/update | Largest per-rank mean s/update | Peak allocated GiB | Peak reserved GiB |
+The eager W&B run is labelled `finished` despite that OOM. Its `application/status=failed_oom`, application exit, and raw traceback take precedence. Both MDS controls and the other two TT paths complete all `32` updates, with `24/24` finite optimizer witnesses.
+
+All `1,536` consumed input/label/raw-token hash records match across completed arms. Failed eager has `96` matching records and `1,440` missing records. Loaded-parameter audits were disabled in this first performance job after separate canaries passed; its HSDP memory peaks exclude audit materialization.
+
+### Collective visibility
+
+| Path | Trace coverage | Rank-0 exposed collective-kernel ms | Rank-0 idle ms | TT exposed min / median / max ms |
 |---|---:|---:|---:|---:|
-| `12482057` | `2.541401` | `2.542011` | `49.0643` | `56.8203` |
-| `12482058` | `2.540682` | `2.540782` | `49.0643` | `56.8203` |
-| `12482059` | `2.541382` | `2.541563` | `49.0643` | `56.8203` |
+| MDS before, historical BF16 wrapper | 1/24 ranks | 89.416 | 118.398 | -- |
+| TT HSDP R12/S2 loss compile | 24/24 ranks | 221.650 | 210.645 | 167.402 / 214.802 / 256.602 |
+| TT native DDP/ZeRO-1, 100 MiB | 24/24 ranks | 187.461 | 85.213 | 101.226 / 168.960 / 204.614 |
+| MDS after, same control | 1/24 ranks | 88.223 | 125.029 | -- |
 
-All `1,536` input/label/raw-token hash records match across all three runs.
-The initial logged loss rounds to `17.75424` in each run, but update-32
-losses are `11.82221`, `11.37010`, and `11.40153`. Identical live parameters
-and complete input hashes therefore do not establish repeatable loss
-trajectories with this configuration (`debug.deterministic=false`). The
-cause of the later differences remains unresolved.
+HSDP has more recognized exposed collective activity and idle time than MDS in this capture. Native DDP removes the per-layer parameter all-gather pattern. This supports testing communication layout and scheduling before attributing the entire gap to attention kernels.
 
-Raw terminal canary evidence, fetch manifests, and checksums are retained in W&B.
-The online W&B runs retain the linked campaign-evidence artifacts.
+### Loss differences versus MDS before
 
-## HSDP audit and MDS launcher gate
+| Path | Max absolute loss difference | RMS loss difference |
+|---|---:|---:|
+| TT HSDP R12/S2 loss compile | 0.951191 | 0.249758 |
+| TT native DDP/ZeRO-1, 100 MiB | 0.304562 | 0.123824 |
+| MDS after versus MDS before | 0.756085 | 0.148977 |
 
-`12482062` runs the separate HSDP audit with `dp_replicate=12`,
-`dp_shard=2`, no reshard after forward, FP32 reduction, and deferred gradient
-reduction. Its materialization audit can affect lifetime memory peaks;
-those peaks will not be used as clean performance measurements. The job
-finished with exit `0`, `24/24` exact live-parameter audits, `24/24` completed
-rank diagnostics, `32` successful SophiaG calls on every rank, and finite
-parameters, momentum, and Hessian state.
+[Complete sanitized numerical series and all-rank summaries](2026-11-02-pair-12482063-evidence.json).
 
-MDS login preflight found that its borrowed helper environment's Click
-`8.3.1` installation is missing `click/core.py`. The same Click version was
-installed with no dependencies into the isolated campaign overlay
-`.cache/mds-cli-overlay`. Neither borrowed runtime was modified. The complete replacement package and checksum are retained in W&B.
-The old nested-separator command failed the exact installed Click CLI dry-run:
-its forwarded payload began at `--finetune`, dropping Python and the benchmark
-entrypoint. Removing the inner separator passed the same dry-run with MPI
-execution mocked. The benchmark entrypoint forwards training flags through
-`parse_known_args`, so the inner separator is unnecessary.
+## Matched eager/compiled run: `12482081`
 
-The narrow fix and explicit overlay support are pinned in
-`4831cd2d94ad1dca29f1956d5b40e2fee45bdc12`. TT code remains at the audited
-base. Borrowed MDS source remains `9f407ed9e8e30920e28272daf8cb7db36c211e21`.
-The formal run will bracket TT eager, TT loss compilation, and native DDP
-ZeRO-1 with MDS controls on the same two allocated nodes. Raw traces are
-rank-local; they do not establish all-rank causal communication stalls.
+Both TT arms use `dp_replicate=4`, `dp_shard=6`. All four phases complete `32` updates, parent exit `0`, with `24/24` finite optimizer witnesses. Each TT arm also passes its own `24/24` exact loaded-parameter audit. All `1,536` consumed input hash records match.
 
-## Same-allocation job `12482063`
+| Path / online W&B | Mean s/update | tok/s/tile | Model TFLOP/s/tile | MFU % | Peak allocated / reserved GiB | Outer compile timer max s |
+|---|---:|---:|---:|---:|---:|---:|
+| [MDS before, historical BF16 wrapper](https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/agpt-mds-zero0-ds0175-sophiag-pair-before-production-acnone-n2x12-12482081) | 2.363642 | 6931.7 | 77.54 | 26.00 | 46.396 / 50.613 | none |
+| [TT HSDP R4/S6 eager](https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/agpt-replicated-hsdp-eager-hs4eager-12482081) | 2.907580 | 5634.9 | 63.04 | 21.14 | 52.896 / 58.064* | none |
+| [TT HSDP R4/S6 loss compile](https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/agpt-replicated-hsdp-losscompile-hs4loss-12482081) | 2.730256 | 6000.9 | 67.13 | 22.51 | 37.271 / 42.439* | 15.450 |
+| [MDS after, same control](https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/agpt-mds-zero0-ds0175-sophiag-pair-after-production-acnone-n2x12-12482081) | 2.364875 | 6928.1 | 77.50 | 25.99 | 46.396 / 50.613 | none |
 
-Submitted through mandatory preflight after both all-rank canaries completed.
-Source: [`4831cd2d9`](https://github.com/saforem2/torchtitan/commit/4831cd2d94ad1dca29f1956d5b40e2fee45bdc12).
-Workdir: the clean isolated project-filesystem comparison checkout; its exact path is retained in W&B.
-Parent evidence: `outputs/agpt-replicated-pair-12482063/run.log`.
+Loss compilation reduces mean step time by `6.10%` at this common layout. MDS timing drift is `+0.052%`.
 
-| Phase | Path | Layout / precision | Compilation |
-|---|---|---|---|
-| Before | MDS historical-wrapper compatibility | `BF16_Optimizer`, FP32 local accumulation, BF16 wire | None |
-| TT `hs12eager` | HSDP | `dp_replicate=12`, `dp_shard=2`, never reshard, FP32 deferred reduction | None |
-| TT `hs12loss` | HSDP | Same as eager | Loss region |
-| TT `ddpz1` | Native DDP / ZeRO-1 | FP32 local accumulation, BF16 wire and weight all-gather, `100 MiB` bucket | Loss region |
-| After | MDS historical-wrapper compatibility | Same as before | None |
+`*` Both TT rows include an opt-in DTensor materialization audit. Their lifetime peaks are not clean measurements of memory change due only to compilation. Current allocated memory returns to its pre-audit value, but allocator-cache effects remain possible.
 
-All phases use two nodes, `12` FLAT ranks/node, sequence `8192`, microbatch
-`1`, accumulation `2`, GBS `48`, `32` updates, seed `42`, fresh SophiaG state,
-and no activation checkpointing. W&B remains online. Profiler capture is
-at update `12`; the steady window is `21-32`. The TT variants share a
-job-local compiler cache, so later compile times are not independent cold
-starts. Loading audits are disabled in this performance job after passing
-separately; HSDP audit materialization cannot inflate its memory peaks.
+The allocated-memory difference is `15.62494 GiB`, close to two FP32 vocabulary tensors of shape `[8192, 256000]` (`15.625 GiB`). Eager cross-entropy upcasts predictions to FP32; compiling the loss permits fusion of those casts into loss kernels. This is consistent with the measured difference and the failed `7.81 GiB` allocation in two-shard eager. Attribution of every peak allocation to these tensors remains unverified. See the pinned [`cross_entropy_loss` implementation](https://github.com/saforem2/torchtitan/blob/4831cd2d94ad1dca29f1956d5b40e2fee45bdc12/torchtitan/components/loss.py).
 
-Status at submission: awaiting application/phase completion. No new winner
-is recorded. MDS uses Torch `2.10.0a0+git449b176` / DeepSpeed `0.18.5`; TT
-uses Torch `2.14.0+xpu`. This is a framework-path comparison with explicit
-runtime differences, not runtime identity or production-scale parity.
+R12/S2 and R4/S6 were measured in separate allocations. The eager/compiled toggle within R4/S6 is a same-allocation comparison; cross-layout timing is not a same-node A/B.
 
-## First comparison terminal outcome
+### Loss differences versus MDS before
 
-`12482063` finished with scheduler exit `1`. Both MDS controls, HSDP loss
-compilation, and native DDP/ZeRO-1 completed `32` updates. Eager HSDP failed
-in backward after its first completed update: XPU requested `7.81 GiB` with
-`5.58 GiB` free on a `63.98 GiB` tile. The launcher returned `143` after
-another rank's OOM, not after a user cancellation or a PBS pre-run failure.
-Its partial output does not supply steady-state performance.
+| Path | Max absolute loss difference | RMS loss difference |
+|---|---:|---:|
+| TT HSDP R4/S6 eager | 0.685070 | 0.160800 |
+| TT HSDP R4/S6 loss compile | 1.803082 | 0.332989 |
+| MDS after versus MDS before | 0.646588 | 0.128427 |
 
-The eager W&B run is labelled `finished` despite the application OOM.
-Application exit status, raw traceback, and evidence summary take precedence
-when judging success. The failed run is retained with the completed arms.
+[Complete sanitized numerical series and all-rank summaries](2026-11-02-pair-12482081-evidence.json).
 
-A follow-up keeps sequence `8192`, microbatch `1`, accumulation `2`, GBS `48`,
-`32` updates, SophiaG, and `24` FLAT ranks, and changes both eager and compiled
-HSDP to `dp_shard=6`, `dp_replicate=4`. MDS controls again bracket the two TT
-arms on the same allocated nodes. Both TT arms will audit loaded parameters;
-materialization-audit memory peaks will be flagged as non-comparable. This
-isolates sharding layout while keeping the workload fixed.
+## Controlled DDP bucket experiment: `12482090`
 
-## Follow-up `12482081` terminal status
+Only `native_ddp_bucket_cap_mb` varies between the TT arms. All use native DDP/ZeRO-1 and loss compilation. All five phases complete `32` updates, parent exit `0`, with `24/24` finite optimizer witnesses. Each TT arm passes its own CPU-only `24/24` loaded-parameter audit. All `1,536` input hash records match across all five arms.
 
-All four phases completed with `PAIR_COMPLETE rc=0` and scheduler exit `0`:
-MDS before, HSDP R4/S6 eager, HSDP R4/S6 loss compilation, and MDS after.
-Full source artifacts and all-rank loaded-parameter audits are being analyzed.
-The six-shard eager configuration passed the memory-fit gate that failed at
-two shards. Both layouts remain explicit variables in the comparison.
+| Path / online W&B | Mean s/update | tok/s/tile | Model TFLOP/s/tile | MFU % | Peak allocated / reserved GiB | Outer compile timer max s |
+|---|---:|---:|---:|---:|---:|---:|
+| [MDS before, historical BF16 wrapper](https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/agpt-mds-zero0-ds0175-sophiag-pair-before-production-acnone-n2x12-12482090) | 2.344350 | 6988.7 | 78.18 | 26.22 | 46.396 / 50.613 | none |
+| [TT native DDP/ZeRO-1, 100 MiB](https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/agpt-replicated-ddp-bf16-losscompile-ddpb100-12482090) | 2.418743 | 6773.8 | 75.77 | 25.41 | 49.064 / 56.820 | 16.890 |
+| [TT native DDP/ZeRO-1, 2048 MiB](https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/agpt-replicated-ddp-bf16-losscompile-ddpb2048-12482090) | 2.417755 | 6776.5 | 75.81 | 25.42 | 49.064 / 56.820 | 3.102 |
+| [TT native DDP/ZeRO-1, 8192 MiB](https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/agpt-replicated-ddp-bf16-losscompile-ddpb8192-12482090) | 2.418387 | 6774.8 | 75.79 | 25.42 | 49.065 / 52.914 | 2.430 |
+| [MDS after, same control](https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/agpt-mds-zero0-ds0175-sophiag-pair-after-production-acnone-n2x12-12482090) | 2.343933 | 6990.0 | 78.19 | 26.22 | 46.396 / 50.613 | none |
 
-The next isolated test keeps the native DDP/ZeRO-1 recipe fixed and varies
-`native_ddp_bucket_cap_mb` through `100`, `2048`, and `8192`, with the same
-before/after MDS controls. It tests whether reduction granularity accounts
-for the remaining measured gap; no result is assumed.
+Mean MDS control time is `2.344142 s`. The three TT gaps are `3.182%`, `3.140%`, and `3.167%`. The fastest observed setting improves over `100 MiB` by only `0.041%`, less than `1 ms/update`. Within-window step-time standard deviations are `3.62`, `3.89`, and `3.36 ms`. This single sequential trial establishes no meaningful throughput benefit from larger buckets; it is not an independent-repeat confidence estimate. MDS timing drift is `-0.0178%`.
 
-## Bucket-granularity follow-up `12482090`
+DDP logging confirms identical layouts on all `24` ranks:
 
-This same-allocation job runs MDS controls before/after native DDP/ZeRO-1
-with `100`, `2048`, and `8192 MiB` bucket caps. Other workload, precision,
-optimizer, and loss-compilation settings are fixed. Each TT arm runs the
-native loaded-parameter audit before training. The test is in progress.
+| Configured cap | Actual rebuilt buckets | FP32 gradient payload bytes, summed across buckets |
+|---|---:|---:|
+| `100 MiB` | `25` | `7944216576` |
+| `2048 MiB` | `3` | `7944216576` |
+| `8192 MiB` | `1` | `7944216576` |
+
+The cap does not split an individual parameter tensor. Actual rebuilt buckets can therefore exceed the configured cap. These are local FP32 bucket sizes; the BF16 communication hook changes the wire dtype. At `8192 MiB`, reserved memory falls by `3.906 GiB` relative to `100 MiB`, while allocated peaks stay near `49.064 GiB`.
+
+### Collective visibility
+
+| Path | Trace coverage | Rank-0 exposed collective-kernel ms | Rank-0 idle ms | TT exposed min / median / max ms |
+|---|---:|---:|---:|---:|
+| MDS before, historical BF16 wrapper | 1/24 ranks | 71.643 | 91.855 | -- |
+| TT native DDP/ZeRO-1, 100 MiB | 24/24 ranks | 132.565 | 108.282 | 95.738 / 137.802 / 178.760 |
+| TT native DDP/ZeRO-1, 2048 MiB | 24/24 ranks | 103.473 | 65.164 | 76.766 / 98.612 / 145.450 |
+| TT native DDP/ZeRO-1, 8192 MiB | 24/24 ranks | 98.117 | 66.467 | 76.657 / 99.813 / 142.302 |
+| MDS after, same control | 1/24 ranks | 70.926 | 92.900 | -- |
+
+Median recognized exposed collective-kernel time falls from `137.802` to `98.612` / `99.813 ms`, while steady-state update time stays near `2.418 s`. Bucket granularity alone therefore does not explain the remaining gap. The captured profiler update is outside the timing window, and interval overlap is not a causal attribution of the update-time difference.
+
+The remaining measured difference is about `74 ms/update`. Compute arithmetic, optimizer scheduling, weight synchronization, and the different PyTorch runtimes remain variables. This experiment does not identify which one accounts for that difference. A phase-level compute/optimizer comparison under matched arithmetic is the next discriminating experiment.
+
+### Loss differences versus MDS before
+
+| Path | Max absolute loss difference | RMS loss difference |
+|---|---:|---:|
+| TT native DDP/ZeRO-1, 100 MiB | 1.622599 | 0.322823 |
+| TT native DDP/ZeRO-1, 2048 MiB | 1.076362 | 0.202200 |
+| TT native DDP/ZeRO-1, 8192 MiB | 0.343705 | 0.098852 |
+| MDS after versus MDS before | 0.631402 | 0.210264 |
+
+Changing bucket grouping can change floating-point reduction order. These loss differences neither establish nor disprove convergence equivalence. No equivalence tolerance has been applied.
+
+[Complete sanitized numerical series, bucket layouts, and all-rank summaries](2026-11-02-pair-12482090-evidence.json).
+
+## Numerical and profiling limits
+
+Native TT DDP uses autocast with FP32 embedding, RMSNorm, and residual tensors. That differs from uniform BF16 model compute. Exact initial parameter values and matching consumed batches do not prove identical forward/backward arithmetic, gradients, or optimizer updates.
+
+MDS before/after loss trajectories also differ, despite stable timing. The canaries use `debug.deterministic=false`; seed `42` alone does not establish repeatability. Bitwise loss/gradient agreement and representative convergence remain unresolved.
+
+All TT completed arms have raw traces from `24/24` ranks; MDS captures rank `0` only. Each rank is analyzed independently. Device activity includes kernels, copies, and memsets. Recognized collective names contain `oneCCL` or `ccl::`; exposure is their interval union minus overlap with other device activity. CPU collective annotations are not added to device time. Unsynchronized ranks are never merged into a global timeline. These metrics are not complete wire/network measurements or causal stall estimates.
+
+## Recovery and launch repairs
+
+`12481979` starts once on two Sunspot nodes and completes two 10-step debug arms with scheduler exit `0`. This proves application execution after the November 1 incident. Support ticket `REQ-17196` supplies no site root cause or repair details.
+
+Native canaries `12482057`, `12482058`, and `12482059`, followed by HSDP canary `12482062`, each complete `32` updates with `24/24` finite optimizer witnesses. Every TT rank exactly matches all `111` adapted parameter keys (`1,986,054,144` elements) before training. HSDP uses a separate materialization audit; native DDP audits loaded CPU values before device transfer.
+
+The first two canaries were duplicate submissions after delayed login preflight. Their missing shared PBS stdout parent was corrected; both then reached application execution on their second attempts. The third uses job-specific PBS stdout and starts once. The stdout defect is verified; the precise cause of scheduler `-3` remains unverified. No jobs were cancelled.
+
+MDS preflight finds missing `click/core.py` in its borrowed helper environment's Click `8.3.1`. An isolated no-dependency overlay installs the same version. The exact installed Click CLI dry-run also reproduces the dropped Python/entrypoint payload at a nested `--`. Removing the inner separator preserves the payload; real MDS training then completes in all six controls. Source commit `4831cd2d9` contains the narrow experimental launcher fix and overlay provenance capture. The source branch is published for review and is not merged into `ezpz`.
+
+## Evidence
+
+Every performance table links to its original online training runs. Per-run campaign-evidence artifacts retain logs, raw traces, rank diagnostics, configs, input hashes, and immutable source snapshots. Full private provenance, complete fetched bundles, parent phase logs, analysis scripts, final figures, and this report are retained by the [dedicated W&B analysis run](https://wandb.ai/aurora_gpt/torchtitan.ezpz.train/runs/agpt-postrecovery-report-20261102). That archival run executes no training. Public JSON contains sanitized numerical evidence; full source manifests and provenance remain in W&B.
+
+All fetched files are size/SHA-verified: `528` in `12482063`, `494` in `12482081`, and `624` in `12482090`. W&B artifacts are checked for committed state, with downloaded diagnostics/audits/traces checked against their manifests. Failed eager evidence is retained alongside completed arms.
+
+- [Pre-recovery audit and numerical limits](2026-11-01-handoff-audit.md)
+- [Same-allocation protocol](2026-11-01-paired-performance.md)
+- [Original startup incident](2026-11-01-startup-incident.md)

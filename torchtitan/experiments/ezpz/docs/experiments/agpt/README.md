@@ -29,7 +29,7 @@ Dense transformer training benchmarks across ALCF machines.
 
 ### Sunspot
 
-- [Recovered Sunspot MDS/TT comparison (2026-11-02)](sunspot/2026-11-02-recovery-comparison.md): fresh same-allocation controls, complete loaded-parameter audits, 2.444 s native DDP versus 2.363-2.365 s MDS, eager memory failure and successful six-shard follow-up.
+- [Recovered Sunspot MDS/TT comparison (2026-11-02)](sunspot/2026-11-02-recovery-comparison.md): fresh same-allocation controls; TT native DDP at 2.418 s versus 2.344 s MDS; eager/compiled comparison; all-rank audits; bucket-size trial; TFLOPs, MFU, memory, traces, and explicit numerical limits.
 
 - [Sunspot startup isolation and Aurora fallback (2026-11-01)](sunspot/2026-11-01-startup-incident.md): shell-only pre-run failure; Aurora 24-rank probe completed.
 - [Same-allocation MDS/TT comparison and live-load gates (2026-11-01)](sunspot/2026-11-01-paired-performance.md): first attempt `12481907` cancelled after PALS startup failure; replacement awaits a working application-start gate.

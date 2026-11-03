@@ -2,23 +2,27 @@
 
 Running log of what's happening, session by session. Most recent first.
 
-## 2026-11-02: Sunspot execution recovered; restart live-parameter gate
+## 2026-11-02: recovered Sunspot comparison and bucket experiment
 
-- Verified `12481979`: one start, exit `0`, both 10-step debug arms returned
-  `0`, `VERDICT mixed_demo rc=0`.
-- Resumed from clean pinned `a4057f84e` in a new project-filesystem checkout.
-  Config parsing and submission preflight passed. Online W&B remains enabled.
-- Initial duplicate submissions `12482057` / `12482058` hit exit processing
-  and retried. Their shared PBS stdout parent was missing; corrected that
-  verified submission defect before the next canary. Cause of scheduler
-  `-3` remains unverified. No jobs cancelled.
-- Jobs `12482057` / `12482058` / `12482059` reached application execution.
-  All three passed live loaded-parameter hashes on `24/24` ranks before training.
-- Native canaries `12482057` / `12482058` / `12482059` and HSDP `12482062`
-  completed 32 updates with exit `0` and `24/24` finite optimizer witnesses.
-  Formal same-allocation job `12482063` brackets three TT paths with fresh
-  MDS controls, using the pinned CLI payload fix.
-- [Continuation evidence and acceptance gates](experiments/agpt/sunspot/2026-11-02-recovery-comparison.md).
+- Recovery proof `12481979` and four 32-update canaries pass. Each canary
+  has exact loaded-parameter audits and finite optimizer witnesses on `24/24`
+  ranks. The earlier site startup failure's root cause remains unverified.
+- Repair the experimental MDS launcher in `4831cd2d9`: preserve its Python
+  payload across the legacy Click CLI and use an isolated same-version
+  Click overlay. Both borrowed training environments remain unchanged.
+- `12482063` records fresh MDS controls, HSDP loss compilation, and native
+  DDP/ZeRO-1. Eager HSDP R12/S2 fails with OOM after one update; the other
+  four arms complete all `32` updates. The failed evidence is retained.
+- `12482081` completes matched HSDP R4/S6 eager and loss compilation:
+  `2.908` versus `2.730 s/update`, a `6.10%` time reduction.
+- `12482090` completes MDS controls and native DDP buckets `100`, `2048`,
+  and `8192 MiB`. Actual bucket counts are `25`, `3`, and `1`; all TT
+  settings remain near `2.418 s/update` versus `2.344 s` MDS. Larger buckets
+  reduce recognized collective exposure without a useful throughput gain.
+- Complete input hashes match. Loss trajectories do not establish numerical
+  equivalence. TFLOPs/MFU are normalized useful work per FLAT tile.
+- Publish the [measured report, figure, and numerical evidence](experiments/agpt/sunspot/2026-11-02-recovery-comparison.md).
+  Complete raw campaign evidence is archived in online W&B.
 
 ## 2026-11-01: direct executable startup failure reproduced across queues
 
