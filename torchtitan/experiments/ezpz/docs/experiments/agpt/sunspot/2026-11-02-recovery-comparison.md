@@ -42,6 +42,29 @@ The captured rank-0 non-collective device-activity union is similar for MDS and 
 
 [Numerical series, all-rank summaries, and methods](2026-11-02-pair-12482063-evidence.json).
 
+## Matched eager/compiled results: job `12482081`
+
+Both HSDP paths use `dp_replicate=4`, `dp_shard=6`, identical workload, and per-arm `24/24` exact loaded-parameter audits. All four arms completed 32 updates with scheduler exit `0`.
+
+| Path | Mean s/update | tok/s/tile | Model TFLOP/s/tile | MFU % | Peak allocated / reserved GiB | Outer compile timer max s |
+|---|---:|---:|---:|---:|---:|---:|
+| MDS before, BF16_Optimizer compatibility | 2.363642 | 6931.7 | 77.54 | 26.00 | 46.396 / 50.613 | none |
+| TT HSDP R4/S6 eager | 2.907580 | 5634.9 | 63.04 | 21.14 | 52.896 / 58.064* | none |
+| TT HSDP R4/S6 loss compile | 2.730256 | 6000.9 | 67.13 | 22.51 | 37.271 / 42.439* | 15.450 |
+| MDS after, same control | 2.364875 | 6928.1 | 77.50 | 25.99 | 46.396 / 50.613 | none |
+
+Loss compilation reduces mean step time by `6.10%` at this common layout. Both TT rows include the opt-in parameter-materialization audit; their lifetime memory peaks are marked `*` and are not clean measurements of memory change due only to compilation. The audit's current allocated memory returned to its pre-audit value, but allocator-cache effects remain possible.
+
+The observed allocated-memory difference is `15.62494 GiB`, close to two full FP32 vocabulary tensors of shape `[8192, 256000]` (`15.625 GiB`). Eager cross-entropy upcasts predictions to FP32; compiling the loss fuses those casts into the loss kernels. This is consistent with the measured memory difference and the failed `7.81 GiB` allocation in R12/S2 eager. It does not prove that every allocation in the measured peak belongs to those two intermediates. See the pinned [`cross_entropy_loss` implementation](https://github.com/saforem2/torchtitan/blob/4831cd2d94ad1dca29f1956d5b40e2fee45bdc12/torchtitan/components/loss.py).
+
+All `1,536` consumed input hash records match. Eager loss versus MDS-before has max absolute difference `0.685070` and RMS `0.160800`; loss compilation has max absolute difference `1.803082` and RMS `0.332989`. MDS before/after has max absolute difference `0.646588` and RMS `0.128427`. Numerical equivalence remains unproven.
+
+R12/S2 and R4/S6 were measured in separate allocations with bracketing MDS controls. The eager/compiled toggle within R4/S6 is a same-allocation comparison; the cross-layout timing difference is not a same-node A/B.
+
+[Complete sanitized numerical series and all-rank summaries](2026-11-02-pair-12482081-evidence.json).
+
+![Fresh paired MDS and TorchTitan performance](2026-11-02-recovery-comparison.svg)
+
 <!-- measured-results:end -->
 
 ## Recovery evidence
@@ -237,3 +260,10 @@ The next isolated test keeps the native DDP/ZeRO-1 recipe fixed and varies
 `native_ddp_bucket_cap_mb` through `100`, `2048`, and `8192`, with the same
 before/after MDS controls. It tests whether reduction granularity accounts
 for the remaining measured gap; no result is assumed.
+
+## Bucket-granularity follow-up `12482090`
+
+This same-allocation job runs MDS controls before/after native DDP/ZeRO-1
+with `100`, `2048`, and `8192 MiB` bucket caps. Other workload, precision,
+optimizer, and loss-compilation settings are fixed. Each TT arm runs the
+native loaded-parameter audit before training. The test is in progress.
