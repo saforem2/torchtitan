@@ -58,8 +58,10 @@ first attempt. All three produced `24/24` live-parameter audit JSONs with
 `status=passed` and `all_ranks_passed=true`. Every rank matched all `111`
 expected parameter hashes before training. These files establish live
 loaded-parameter identity for this native DDP path, not full-model numerical
-equivalence across frameworks. Training completion and optimizer witnesses
-remain pending. No jobs were cancelled.
+equivalence across frameworks. All three then completed `32` updates with scheduler exit `0` and complete
+`24/24` rank diagnostics. Every rank recorded `32` successful optimizer calls,
+`32` ZeRO-1 all-gathers, and finite parameter, momentum, and Hessian state.
+No jobs were cancelled.
 
 | Job | Audit rank coverage | Initial live parameters | W&B |
 |---|---:|---|---|
@@ -83,3 +85,56 @@ reporting a comparative result.
 - [Recovered comparison and numerical limits](2026-11-01-handoff-audit.md)
 - [Same-allocation comparison protocol](2026-11-01-paired-performance.md)
 - [Original startup incident](2026-11-01-startup-incident.md)
+
+## Native DDP canary results
+
+These are loading/runtime canaries, not a new MDS/TT performance comparison.
+Every rank has `32` successful synchronized step records. The timing window
+is updates `21-32`, using the synchronized training-step timer rather than
+cumulative throughput printed during warmup.
+
+| Job | Rank-0 mean s/update | Largest per-rank mean s/update | Peak allocated GiB | Peak reserved GiB |
+|---|---:|---:|---:|---:|
+| `12482057` | `2.541401` | `2.542011` | `49.0643` | `56.8203` |
+| `12482058` | `2.540682` | `2.540782` | `49.0643` | `56.8203` |
+| `12482059` | `2.541382` | `2.541563` | `49.0643` | `56.8203` |
+
+All `1,536` input/label/raw-token hash records match across all three runs.
+The initial logged loss rounds to `17.75424` in each run, but update-32
+losses are `11.82221`, `11.37010`, and `11.40153`. Identical live parameters
+and complete input hashes therefore do not establish repeatable loss
+trajectories with this configuration (`debug.deterministic=false`). The
+cause of the later differences remains unresolved.
+
+Raw terminal canary evidence was fetched with SHA256
+`34cab1b4494df4e5a5e7aeff95b8ec5de6a47b34b464ce139722d04b231f11dd`.
+The online W&B runs retain the linked campaign-evidence artifacts.
+
+## HSDP audit and MDS launcher gate
+
+`12482062` runs the separate HSDP audit with `dp_replicate=12`,
+`dp_shard=2`, no reshard after forward, FP32 reduction, and deferred gradient
+reduction. Its materialization audit can affect lifetime memory peaks;
+those peaks will not be used as clean performance measurements. The job
+finished with exit `0`, `24/24` exact live-parameter audits, `24/24` completed
+rank diagnostics, `32` successful SophiaG calls on every rank, and finite
+parameters, momentum, and Hessian state.
+
+MDS login preflight found that its borrowed helper environment's Click
+`8.3.1` installation is missing `click/core.py`. The same Click version was
+installed with no dependencies into the isolated campaign overlay
+`.cache/mds-cli-overlay`. Neither borrowed runtime was modified. The
+replacement `click/core.py` SHA256 is
+`53a05fc6df06923343ab22741ea5ef96e247b72678b18e54480bccd4276aee64`.
+The old nested-separator command failed the exact installed Click CLI dry-run:
+its forwarded payload began at `--finetune`, dropping Python and the benchmark
+entrypoint. Removing the inner separator passed the same dry-run with MPI
+execution mocked. The benchmark entrypoint forwards training flags through
+`parse_known_args`, so the inner separator is unnecessary.
+
+The narrow fix and explicit overlay support are pinned in
+`4831cd2d94ad1dca29f1956d5b40e2fee45bdc12`. TT code remains at the audited
+base. Borrowed MDS source remains `9f407ed9e8e30920e28272daf8cb7db36c211e21`.
+The formal run will bracket TT eager, TT loss compilation, and native DDP
+ZeRO-1 with MDS controls on the same two allocated nodes. Raw traces are
+rank-local; they do not establish all-rank causal communication stalls.
