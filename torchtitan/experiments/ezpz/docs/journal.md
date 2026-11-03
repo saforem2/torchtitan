@@ -2,6 +2,21 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-11-03 (Sunspot) -- Cold first launch and MDS shape
+
+The `6.1%` "machine gap" is not the machine. On a node that has not run this
+workload in the last ~10 minutes, the first TT launch runs at `87`-`92` model
+TFLOP/s/tile for its whole lifetime; every later launch in the same job gives
+`92.6`-`95.1`, at or above July's `93.75`. Ruled out: `CCL_OP_SYNC`,
+`OMP_NUM_THREADS`, node image, hardware, page cache, CPU contention, XeLink
+prewarm and expandable segments. MDS does not show it. Separately, MDS at the
+2025 `z2rrt02w` shape (hidden `4096`, sequence `4096`, Llama2 vocab) gives
+`109.18` on today's Sunspot stack against `102.9` in July 2025; the current
+AGPT-2B shape has never exceeded `93.0`. Jobs `12482147`-`12482248`.
+[Report](experiments/agpt/sunspot/2026-11-02-throughput-recovery.md#anchor-launch-environment).
+
+---
+
 ## 2026-11-02 (Sunspot) -- XPU throughput recovery
 
 Took over Codex thread `01a168eb` after its historical-throughput goal stalled.

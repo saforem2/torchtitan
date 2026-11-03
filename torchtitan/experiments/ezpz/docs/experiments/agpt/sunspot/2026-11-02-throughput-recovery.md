@@ -17,8 +17,10 @@ The lower November 2 MDS rate came from accumulation `2` and the
 `BF16_Optimizer` compatibility path, not from a regression.
 
 The historical TT anchor is `6.1%` below its July result on identical code and
-runtime: `88.00` vs `93.75`. That gap belongs to the machine (node image,
-driver, or node placement), not to either framework.
+runtime: `88.00` vs `93.75`. That rerun was the first launch on a cold node;
+later launches on the same node give `92.6`-`95.1`. The slow first launch
+costs TT `2`-`7%` and its cause is still open
+([Anchor launch environment](#anchor-launch-environment)).
 
 | Arm | Accumulation x microbatch | s/update | tok/s/tile | Model TFLOP/s/tile |
 |---|---|---:|---:|---:|
@@ -33,7 +35,8 @@ driver, or node placement), not to either framework.
 | TT HSDP R2/S12, per-block compile | `2 x 1` | `2.6234` | `6245` | `69.86` |
 | TT HSDP R2/S12, per-block compile | `1 x 2` | `2.4914` | `6576` | `73.56` |
 | TT HSDP R2/S12, per-block compile, AdamW | `1 x 2` | `2.3572` | `6951` | `77.75` |
-| TT anchor `4a72fa1bf`, 1 node, global FSDP | `1 x 2` | `2.083` | `7866` | `88.00` |
+| TT anchor `4a72fa1bf`, 1 node, global FSDP, first launch | `1 x 2` | `2.083` | `7866` | `88.00` |
+| TT anchor `4a72fa1bf`, 1 node, global FSDP, later launch (`x10`) | `1 x 2` | `1.927`-`1.979` | `8278`-`8501` | `92.63`-`95.10` |
 | TT anchor `4a72fa1bf`, 1 node, global FSDP | `1 x 1` | `1.092` | `7505` | `83.95` |
 
 All rows are `24` FLAT tiles on `2` nodes, sequence `8192`, `32` updates,
@@ -58,6 +61,70 @@ native `elapsed_time_per_iteration_ms`. The anchor uses per-update
 `time_metrics/end_to_end(s)` from W&B; the same calculation reproduces
 `93.75` for `6tc71of4`. Log-line timestamps have `1 s` resolution (about `4%`
 at these step times) and are not used.
+
+## Anchor launch environment
+
+The July anchor ran from an interactive session; the November rerun ran under
+PBS batch with `CCL_OP_SYNC=1`, `CCL_PROCESS_LAUNCHER=pmix` and
+`OMP_NUM_THREADS=208`, none of which July set. None of these explains the gap.
+What does is launch order: the first TT launch on a node that has not run this
+workload in the last ~10 minutes is slow for its whole lifetime, and every
+later launch in the same job matches July.
+
+| Job | Node | First launch | Later launches |
+|---|---|---:|---:|
+| `12482147` | `x1921c2s6b0n0` (July's node) | `88.00` (batch env) | `93.49`, `93.36`, `93.24` (July env, no `CCL_OP_SYNC`, no `OMP_NUM_THREADS`) |
+| `12482150` | `x1922c6s6b0n0` | `88.42` (July env) | `93.14` (batch env), `93.70` |
+| `12482152` | `x1922c6s5b0n0` | `86.96`-`89.07` over 80 updates | -- |
+| `12482153` | `x1922c6s4b0n0`, 3 min after `12482151` | `94.38` | `94.63` |
+| `12482155` | `x1922c6s6b0n0`, 12 min after `12482150` | `89.80` | `93.53` |
+| `12482158` | `x1921c0s3b0n0` | `90.57` | `95.10` |
+| `12482243`-`12482246` | four fresh nodes | `90.27`-`92.18` | `93.62`-`94.28` |
+
+Model TFLOP/s/tile, updates `9`-`20`, local batch `2`. A slow launch also
+jitters: the per-update standard deviation is `20`-`170 ms` against `2`-`6 ms`
+for a later launch, and its first update takes `40`-`47 s` against `17`-`19 s`.
+
+Ruled out, each against a same-job control:
+
+- Environment: each of the three variables removed on its own gives the same
+  later-launch rate; the first launch is slow in the July environment too.
+- Node, image and driver: July's own node shows it, and later launches on
+  every node reach `92.6`-`95.1`. Kernel `53.66` (July) vs `53.78` (now).
+- Hardware: bf16 GEMM runs at `139`-`170` TFLOP/s on every tile of a cold node.
+- Page cache: reading the conda env and venv shared libraries first
+  (`12482155`) leaves the first launch slow.
+- CPU contention: a 15 s process sampler (`12482158`) shows no other busy
+  process during the slow launch.
+- XeLink: 90 s of 12-rank XCCL all-gather/reduce-scatter first (`12482238`)
+  leaves the first launch slow (`87.01`).
+- Expandable segments: one launch without `PYTORCH_XPU_ALLOC_CONF` reached
+  `93.40` (`12482239`), but two replicates gave `91.19` and `90.27`.
+- A 90 s GEMM prewarm (`12482151`) and a 55 GiB device allocation
+  (`12482157`) leave the first launch at `90.8` and `90.6`.
+
+MDS does not show it: its first matrix phase runs at the same rate as its last
+(`2346.6` vs `2343.9 ms`, `12482111`). Production TT jobs are one launch on
+nodes that are usually cold, so they likely pay this `2`-`7%`. The matrix TT
+arms above never ran first in their job.
+
+## MDS at the 2025 high-throughput shape
+
+The AuroraGPT W&B project has many Aurora MDS runs above `100` TFLOP/s/tile,
+none at the current AGPT-2B shape. The current shape (hidden `2048`, `12`
+layers, vocab `256000`, sequence `8192`) peaks at `93.0` (`1j4xxxky`, Aurora,
+October 2026). The runs above `100` are a wider, shallower model at sequence
+`4096` with the Llama2 vocab, for example
+[`z2rrt02w`](https://wandb.ai/aurora_gpt/AuroraGPT/runs/z2rrt02w) (July 2025,
+1 Aurora node): hidden `4096`, `10` layers, `32` heads, `8` KV heads, FFN
+`11008`, GBS `192`, ZeRO-1, AdamW, `102.9` TFLOP/s/tile at `7659` tok/s/tile.
+
+`benchmark_mds_historical_shape.sh` reruns `z2rrt02w`'s argv on today's
+Sunspot MDS stack (`9f407ed9e`, torch `2.10.0a0+git449b176`, DeepSpeed
+`0.18.5`) from scratch on the Llama2-tokenized books data. Job `12482248`
+gives `109.18` TFLOP/s/tile at `8128` tok/s/tile over iterations `21`-`32`,
+`6.1%` above July 2025. MDS has not lost throughput; the `~90` on AGPT-2B is
+the model shape.
 
 ## What changed in TT
 
@@ -110,8 +177,11 @@ logits memory.
 
 ## Open
 
-- Recover the `6.1%` machine gap. The anchor ran on one node; repeat it on
-  other nodes, and compare against the July node image and driver.
+- Find the cause of the slow first TT launch on a cold node (`2`-`7%`). Its
+  first update is `25 s` slower, so the next test is a profile of a cold first
+  launch against a later launch on the same node.
+- Run TT at the `z2rrt02w` shape to compare the frameworks where MDS reaches
+  `109`.
 - Fit native DDP at `1 x 2`, for example with chunked loss so FP32 logits are
   not materialized for both sequences at once.
 - `mode="max-autotune"` (`EZPZ_AGPT_COMPILE_BLOCKS=max-autotune`) is wired but
@@ -128,6 +198,8 @@ logits memory.
 | `12482114` | TT anchor `4a72fa1bf`, local batch `2` and `1` | `0` |
 | `12482126` | MDS control and AdamW/ZeRO-1; TT DDP per-block compile, `1 x 2`, AdamW | `1` (both DDP `1 x 2` arms: OOM) |
 | `12482127` | MDS control and AdamW/ZeRO-1; TT HSDP per-block compile `2 x 1`, `1 x 2`, AdamW | `0` |
+| `12482147`, `12482150`-`12482158`, `12482238`-`12482246` | TT anchor launch-order and cold-node tests ([Anchor launch environment](#anchor-launch-environment)) | `0` |
+| `12482248` | MDS at the `z2rrt02w` shape | `0` |
 
 Jobs `12482111`/`12482112` ran at `83fb8ad7b`; `12482126`/`12482127` ran at
 `586f1a542`, which adds the positions, compiled-block WGRAD and AdamW changes.
