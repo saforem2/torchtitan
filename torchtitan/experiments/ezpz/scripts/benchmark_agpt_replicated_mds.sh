@@ -47,6 +47,11 @@ export VIRTUAL_ENV="${MDS_VENV}"
 # Use the installed ezpz CLI and the exact MDS interpreter as its payload.
 export PATH="${MDS_VENV}/bin:${EZPZ_HELPER_ENV}/bin:/opt/pbs/bin:${PATH}"
 export PYTHONPATH="${MDS_ROOT}:${PYTHON_OVERLAY}:${DISTUTILS_OVERLAY}${PYTHONPATH:+:${PYTHONPATH}}"
+MDS_CLI_OVERLAY="${BENCH_MDS_CLI_OVERLAY:-}"
+if [[ -n "${MDS_CLI_OVERLAY}" ]]; then
+    [[ -s "${MDS_CLI_OVERLAY}/click/core.py" ]] || exit 95
+    export PYTHONPATH="${MDS_CLI_OVERLAY}:${PYTHONPATH}"
+fi
 hash -r
 [[ "$(command -v python)" == "${MDS_VENV}/bin/python" ]] || exit 93
 EZPZ_LAUNCHER="${EZPZ_HELPER_ENV}/bin/ezpz"
@@ -153,6 +158,10 @@ export AGPT_BENCH_BATCH_HASH_DIR="${OUTPUT_DIR}/input-hashes"
 export AGPT_BENCH_BATCH_MICROBATCHES="$((STEPS * 2))"
 export AGPT_BENCH_BATCH_HELPER="${TT_ROOT}/torchtitan/experiments/ezpz/scripts/agpt_batch_witness.py"
 mkdir -p "${PROVENANCE_DIR}"
+if [[ -n "${MDS_CLI_OVERLAY}" ]]; then
+    tar -czf "${PROVENANCE_DIR}/mds-cli-overlay.tar.gz" -C "${MDS_CLI_OVERLAY}" . || exit 99
+    sha256sum "${PROVENANCE_DIR}/mds-cli-overlay.tar.gz" > "${PROVENANCE_DIR}/mds-cli-overlay.sha256"
+fi
 cp -- "${BASH_SOURCE[0]}" "${PROVENANCE_DIR}/submitted-launcher.sh"
 sha256sum "${PROVENANCE_DIR}/submitted-launcher.sh" > "${PROVENANCE_DIR}/submitted-launcher.sha256"
 cp -- "${PBS_O_WORKDIR}/torchtitan/experiments/ezpz/scripts/benchmark_agpt_entrypoint.py" "${PROVENANCE_DIR}/benchmark_agpt_entrypoint.py"
@@ -274,12 +283,15 @@ fi
 exec 3>>"${LOG_FILE}"
 BASH_XTRACEFD=3
 set -x
+# The helper Click CLI consumes the outer separator. A second separator
+# makes its legacy parser discard Python and execute --finetune instead.
+# The benchmark entrypoint forwards unknown training flags without it.
 ezpz launch \
     --nproc "${NPROC}" --nproc_per_node "${NPROC_PER_NODE}" -- \
     "${MDS_VENV}/bin/python" "${PROVENANCE_DIR}/benchmark_agpt_entrypoint.py" \
     --benchmark-output="${OUTPUT_DIR}/rank-diagnostics" \
     "${WITNESS_ARGS[@]}" \
-    --benchmark-script="${MDS_ROOT}/pretrain_gpt_alcf.py" -- \
+    --benchmark-script="${MDS_ROOT}/pretrain_gpt_alcf.py" \
     --finetune \
     --override-opt_param-scheduler \
     --load "${LOAD_ROOT}" \
