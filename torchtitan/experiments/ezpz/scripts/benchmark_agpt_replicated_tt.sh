@@ -151,6 +151,7 @@ module -t list 2> "${OUT}/provenance/modules.txt"
 echo "BEGIN $(date -Is) host=$(hostname -s) job=${PBS_JOBID} sha=${EXPECTED}"
 echo "BENCH_TAG=${BENCH_TAG:-} CCL_OP_SYNC=${CCL_OP_SYNC} fsdp_reshard=${BENCH_FSDP_RESHARD:-default} fsdp_reduce=${BENCH_FSDP_REDUCE_DTYPE:-float32} fsdp_defer=${BENCH_FSDP_DEFER:-0} deterministic=${BENCH_DETERMINISTIC:-0} reduce_probe=${BENCH_REDUCE_PROBE:-0}"
 echo "ddp_zero1=${BENCH_DDP_ZERO1:-0} ddp_bucket_mb=${DDP_BUCKET_MB:-25} ddp_bucket_first=${BENCH_DDP_BUCKET_FIRST:-0}"
+echo "seed=${BENCH_SEED:-42} causal_blocks=${EZPZ_XPU_ATTN_CAUSAL_BLOCKS:-0}"
 echo "ARM=${ARM} nodes=${NODES} world=${NPROC} ppn=${PPN} optimizer=${OPTIMIZER} config=${TT_CONFIG} gbs=${GBS} microbatch=${MICROBATCH} gas=${GAS} seq=${SEQ} steps=${STEPS}"
 case "${COMPILE_MODE}" in
     none) echo "compile_mode=none components=none" ;;
@@ -217,6 +218,9 @@ else
             ;;
         *) echo "Unknown ARM=${ARM}" >&2; exit 2;;
     esac
+    # BENCH_SEED (default 42) is --debug.seed: the model init. The blendcorpus
+    # sample order has its own fixed seed.
+    [[ "${BENCH_SEED:-42}" =~ ^[0-9]+$ ]] || { echo "BENCH_SEED must be a non-negative integer" >&2; exit 2; }
     # BENCH_DETERMINISTIC=1: strict deterministic algorithms (no warn-only).
     DETERMINISTIC=(--debug.no-deterministic)
     case "${BENCH_DETERMINISTIC:-0}" in
@@ -319,7 +323,7 @@ else
         --dataloader.dataset-path="${ROOT}/torchtitan/experiments/ezpz/data-lists/sunspot/books.txt"
         --dataloader.train-iters="${STEPS}" --dataloader.split=95,5,0
         --dataloader.data-cache-path="${ROOT}/.cache/books-gbs${GBS}${BENCH_SEQ:+-seq${SEQ}}/index-cache"
-        --debug.seed=42 "${DETERMINISTIC[@]}" --metrics.log-freq=1
+        --debug.seed="${BENCH_SEED:-42}" "${DETERMINISTIC[@]}" --metrics.log-freq=1
         --metrics.enable-tensorboard --metrics.enable-wandb
         --dump-folder="${OUT}" --checkpointer.folder=checkpoints
         --checkpointer.interval=10000 --checkpointer.keep-latest-k=0

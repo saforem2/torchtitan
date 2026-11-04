@@ -646,6 +646,23 @@ def agpt_mds_shape_benchmark_adamw() -> FaultTolerantTrainer.Config:
     return cfg
 
 
+def agpt_2b_loss_ab() -> FaultTolerantTrainer.Config:
+    """AGPT-2B (``2b-mds``) from random init for short loss-curve A/Bs of
+    numerics changes: AdamW lr 3e-4 (betas 0.9/0.95, wd 0.1), 40 warmup
+    updates then constant, sequence 8192, no AC, no validator. ``--debug.seed``
+    sets the init; the blendcorpus sample order is fixed, so arms sharing a
+    seed see the same init and data."""
+    cfg = agpt("2b-mds", activation_checkpoint_mode="none", seq_len=8192)
+    cfg.optim.optimizer = default_adamw(lr=3e-4, betas=(0.9, 0.95), weight_decay=0.1)
+    cfg.optim.lr_scheduler.warmup_steps = 40
+    cfg.optim.lr_scheduler.decay_ratio = 0.0
+    cfg.optim.lr_scheduler.min_lr_factor = 1.0
+    cfg.validator.enable = False
+    cfg.checkpointer.folder = "checkpoints/agpt-2b-loss-ab"
+    cfg.metrics.enable_wandb = True
+    return cfg
+
+
 def agpt_2b_mds_anneal_wsd() -> FaultTolerantTrainer.Config:
     """ARM B (treatment): fork MDS gs138650, WSD decay-to-0 anneal.
 
