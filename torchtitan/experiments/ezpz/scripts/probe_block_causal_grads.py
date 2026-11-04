@@ -12,6 +12,7 @@ Variants set ``causal_blocks`` on every ``XPUScaledDotProductAttention``:
 
 - ``default``: torch-xpu flash attention with ``is_causal``.
 - ``default_repeat``: same again; the run-to-run floor of the default path.
+- ``blk1``: one causal flash call through the block-causal autograd.Function.
 - ``blk4`` / ``blk8``: ``block_causal_flash_attention`` with 4 / 8 chunks.
 - ``noise1e-3`` / ``noise4e-3``: default attention, with each element of the
   q/k/v gradients multiplied by ``1 + sigma * N(0, 1)``. A benign perturbation
@@ -47,13 +48,22 @@ DUMP = os.environ.get("AGPT_BLOCK_PROBE_DUMP", "0") == "1"
 VARIANTS = {
     "default": (0, 0.0),
     "default_repeat": (0, 0.0),
+    # One causal flash call through the block-causal autograd.Function: the
+    # same math as default, so it separates the wrapper from the chunking.
+    "blk1": (1, 0.0),
     "blk4": (4, 0.0),
     "blk8": (8, 0.0),
     "noise1e-3": (0, 1e-3),
     "noise4e-3": (0, 4e-3),
 }
+# AGPT_BLOCK_PROBE_VARIANTS (comma-separated) keeps a subset, in this order.
+_KEEP = os.environ.get("AGPT_BLOCK_PROBE_VARIANTS")
+if _KEEP:
+    VARIANTS = {k: v for k, v in VARIANTS.items() if k in _KEEP.split(",")}
 PAIRS = (
     ("default_repeat", "default"),
+    ("blk1", "default"),
+    ("blk4", "blk1"),
     ("blk4", "default"),
     ("blk8", "default"),
     ("blk8", "blk4"),
@@ -86,7 +96,16 @@ def patch_attention_noise() -> None:
         sigma = getattr(self, "probe_grad_noise", 0.0)
         if sigma:
             q, k, v = (_GradNoise.apply(t, sigma) for t in (q, k, v))
-        out = original(self, q, k, v, **kwargs)
+        if self.causal_blocks == 1 and kwargs.get("is_causal"):
+            from torchtitan.experiments.ezpz.agpt.xpu_block_causal_attention import (
+                block_causal_flash_attention,
+            )
+
+            out = block_causal_flash_attention(
+                q, k, v, n_chunks=1, scale=kwargs.get("scale")
+            )
+        else:
+            out = original(self, q, k, v, **kwargs)
         path = getattr(self, "probe_dump_path", None)
         if path is not None:
             self.probe_dump_path = None
@@ -282,6 +301,8 @@ class Probe:
             if self.rank == 0:
                 device = next(model.parameters()).device
                 for variant, reference in PAIRS:
+                    if variant not in grads or reference not in grads:
+                        continue
                     report = compare(grads[variant], grads[reference], device)
                     entry["pairs"][f"{variant}__vs__{reference}"] = report
                     t = report["total"]
