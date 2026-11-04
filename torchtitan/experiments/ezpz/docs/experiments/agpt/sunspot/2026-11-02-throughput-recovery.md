@@ -13,8 +13,9 @@ production-shaped batch (two sequences per rank per update) TT now runs
 
 Opt-in block-causal attention (`EZPZ_XPU_ATTN_CAUSAL_BLOCKS=4`) brings the
 same TT arm to `2.0788 s/update`, `88.17` model TFLOP/s/tile, `10.5%` faster
-than its later same-job control (`12482301`). Its gradients are wrong under
-per-block compile, so that speed is not usable yet
+than its later same-job control (`12482301`). Its training gradients differ
+from the default path's far more than the default differs from itself, so it
+stays off until that is explained
 ([Block-causal attention at AGPT-2B](#block-causal-attention-at-agpt-2b)).
 
 MDS reproduces its historical number. Its `8dscnx65` configuration (GBS `384`,
@@ -268,9 +269,15 @@ DDP/ZeRO-1 with per-block compile, `torch._dynamo.reset()` between variants:
 | `24` | `8` chunks vs default | `0.199` | `0.98040` | `1.22` |
 
 The losses of the replayed updates agree (`1.47185` vs `1.47190` at update
-`1`), so the forward is right and the backward is not. At update `1` the
-block-causal gradient is `50`-`100x` further from the default than the
-default is from itself.
+`1`). At update `1` the block-causal gradient is `50`-`100x` further from the
+default than the default is from itself.
+
+The difference grows with backward depth. The LM-head gradient agrees
+(relative L2 `6.9e-3`); the worst parameters are in layers `0` and `1` and the
+embedding. At update `1` the gradients are also badly conditioned: the
+embedding gradient norm is `1987` against `9.9` for the LM head. A small
+attention-backward difference amplified through the early layers would look
+like this.
 
 The attention op alone is fine in eager mode. Job `12482321` measures it
 against an FP32 math reference at the AGPT-2B shape (max abs error, torch
@@ -282,9 +289,15 @@ against an FP32 math reference at the AGPT-2B shape (max abs error, torch
 | Block-causal, `4` chunks | `0.0077` | `0.0103` | `0.0262` | `0.0443` |
 | Block-causal, `8` chunks | `0.0077` | `0.0103` | `0.0227` | `0.0332` |
 
-The difference between the two is the compiled training path. The eager
-probe arm ran out of device resources at its first backward, so it says
-nothing either way. Block-causal stays off by default.
+Compile is not the cause. Job `12482325` runs the same op on one tile under
+`torch.compile(fullgraph=True)`; relative L2 error against FP32 is the same
+eager and compiled (`dK` `3.37e-3` block-causal, `2.93e-3` default). The eager
+probe arm ran out of device resources at its first backward.
+
+Jobs `12482327` and `12482328` test amplification: the probe adds known
+relative noise (`1e-3`, `4e-3`) to the default path's q/k/v gradients, and the
+one-tile check measures the block-causal vs default difference at the op.
+Block-causal stays off by default.
 
 ## What changed in TT
 
@@ -343,10 +356,9 @@ logits memory.
 - Close the remaining `14%` TT gap at the `z2rrt02w` shape
   ([TT at the 2025 high-throughput shape](#tt-at-the-2025-high-throughput-shape)):
   profile MDS at that shape and compare the `2.2 s` of other TT kernels.
-- Fix block-causal backward under per-block compile, then rerun the gradient
-  probe. It is worth `9.5%` at AGPT-2B and `7`-`10%` at the `z2rrt02w` shape,
-  but its compiled gradients are wrong
-  ([Same-batch gradients](#same-batch-gradients)).
+- Explain the block-causal training-gradient difference before using it
+  ([Same-batch gradients](#same-batch-gradients)). It is worth `9.5%` at
+  AGPT-2B and `7`-`10%` at the `z2rrt02w` shape.
 - Rerun TT FSDP at the `z2rrt02w` shape with deferred gradient reduction.
 - Fit native DDP at `1 x 2`, for example with chunked loss so FP32 logits are
   not materialized for both sequences at once.
