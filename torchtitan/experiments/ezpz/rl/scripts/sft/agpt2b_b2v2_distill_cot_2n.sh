@@ -44,7 +44,7 @@ export https_proxy=http://proxy.alcf.anl.gov:3128
 SUBMIT_DIR="${PBS_O_WORKDIR:-$(pwd)}"
 cd "${SUBMIT_DIR}"
 
-VENV="${VENV:-/lus/tegu/projects/datascience/foremans/venvs/xpu-torch214-fixedlr-v2-20260927}"
+VENV="${VENV:-/lus/tegu/projects/datascience/foremans/venvs/rl-monarch-torch214-locality-20261001}"
 UTILS="${HOME}/stage/utils.sh"
 if [[ -f "${UTILS}" ]]; then
     source "${UTILS}" && ezpz_get_job_env
