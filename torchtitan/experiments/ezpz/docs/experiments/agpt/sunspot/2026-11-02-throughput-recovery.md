@@ -312,8 +312,38 @@ Noise at least as large as the op-level block-causal difference barely moves
 the training gradients. Random noise is not a systematic difference, but a
 `45x` gap points at something the random-input check does not exercise:
 the training call's dtypes, strides (q/k/v are views of one fused projection)
-or attention patterns. Job `12482329` saves real training attention calls and
-`12482330` replays them through both paths. Block-causal stays off by default.
+or attention patterns.
+
+Those are cleared too. Job `12482329` saved the first and last attention calls
+of training (bf16 under autocast, q/k/v strided views of the fused
+projection) at updates `1` and `24`; job `12482330` replays them. On every
+call block-causal's error against FP32 matches the default kernel's, and a
+dense bf16 copy of the inputs gives identical numbers:
+
+| Call | Default `dQ` / `dK` vs FP32 | `4` chunks `dQ` / `dK` vs FP32 | `4` chunks vs default `dQ` / `dK` |
+|---|---:|---:|---:|
+| Update `1`, layer `0` | `8.62e-3` / `3.52e-2` | `8.78e-3` / `3.56e-2` | `2.82e-3` / `4.97e-3` |
+| Update `1`, layer `11` | `7.41e-3` / `2.57e-3` | `8.75e-3` / `2.76e-3` | `8.65e-3` / `3.28e-3` |
+| Update `24`, layer `0` | `2.89e-2` / `0.248` | `2.89e-2` / `0.248` | `2.41e-3` / `3.93e-3` |
+| Update `24`, layer `11` | `1.37e-2` / `2.25e-3` | `1.67e-2` / `2.86e-3` | `1.81e-2` / `3.45e-3` |
+
+Relative L2. The default kernel itself is `25%` off FP32 in `dK` at layer `0`,
+update `24`.
+
+The same job ran the probe with blocks not compiled (loss compile only):
+
+| Arm | Update | `4` chunks vs default | Default repeat |
+|---|---:|---:|---:|
+| Blocks not compiled (`12482329`) | `24` | `1.18e-2` | `4.32e-2` |
+| Per-block compile (`12482327`) | `24` | `5.36e-2` | `6.75e-3` |
+| Blocks not compiled | `1` | `2.53` | `1.86e-2` |
+| Per-block compile | `1` | `0.928` | `1.58e-2` |
+
+Without per-block compile, block-causal is inside the default path's own
+run-to-run spread at update `24`. Update `1` diverges in both arms and is
+unexplained. Job `12482333` adds `blk1`, one causal flash call through the
+block-causal autograd function (same math as default), to separate that
+wrapper from the chunking. Block-causal stays off by default.
 
 ## What changed in TT
 
@@ -401,6 +431,7 @@ logits memory.
 | `12482321` | Attention microbenchmark against FP32: default, block-causal `4` and `8` chunks, `f214641b2` | `0` |
 | `12482325`, `12482328` | One-tile block-causal check, eager vs compiled, against FP32 and default, `b60c37a2c`/`ad261add3` | `0` |
 | `12482327` | Gradient probe with q/k/v gradient-noise calibration, per-block compile, `ad261add3` | `0` |
+| `12482329`, `12482330` | Gradient probe, blocks not compiled, saving training attention calls; replay of those calls, `32a3595f3` | `0` |
 
 Jobs `12482111`/`12482112` ran at `83fb8ad7b`; `12482126`/`12482127` ran at
 `586f1a542`, which adds the positions, compiled-block WGRAD and AdamW changes.
