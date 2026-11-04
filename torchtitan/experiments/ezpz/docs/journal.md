@@ -10,9 +10,12 @@ against a default repeat of `0.02`. Ruled out in turn: `torch.compile` (same
 error eager and compiled on one tile), amplified backward rounding (q/k/v
 gradient noise at `4e-3` gives `0.02`), training-call dtype/strides (saved
 calls replay correctly), and the autograd wrapper (`blk1` at the noise
-level). Forward-output noise at `1e-3` reproduces it (`2.42`), so these
-gradients are chaotic under any rounding-level forward change and the op is
-correct. Next is a multi-seed loss-curve A/B. Jobs `12482320`-`12482340`.
+level). Forward-output noise at `1e-3` moves the gradients `7`-`100x` more
+than backward noise at `4e-3`, so these gradients are chaotic under any
+rounding-level forward change; the op matches the default kernel on four
+saved training calls. Single-update magnitudes are unstable across jobs
+(`12482343` samples five updates). Next is a multi-seed loss-curve A/B. Jobs
+`12482320`-`12482343`.
 [Report](experiments/agpt/sunspot/2026-11-02-throughput-recovery.md#same-batch-gradients).
 
 ---
