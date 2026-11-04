@@ -13,6 +13,9 @@ Variants set ``causal_blocks`` on every ``XPUScaledDotProductAttention``:
 - ``default``: torch-xpu flash attention with ``is_causal``.
 - ``default_repeat``: same again; the run-to-run floor of the default path.
 - ``blk4`` / ``blk8``: ``block_causal_flash_attention`` with 4 / 8 chunks.
+- ``noise1e-3`` / ``noise4e-3``: default attention, with each element of the
+  q/k/v gradients multiplied by ``1 + sigma * N(0, 1)``. A benign perturbation
+  of known size, to show how much the backward amplifies one.
 
 ``torch._dynamo.reset()`` runs before every variant, so a compiled block
 cannot reuse a graph traced under another ``causal_blocks`` value.
@@ -35,13 +38,52 @@ import torch
 import torch.distributed as dist
 
 CATEGORIES = ("embed", "attention", "mlp", "norm", "lm_head", "other")
-VARIANTS = {"default": 0, "default_repeat": 0, "blk4": 4, "blk8": 8}
+# name: (causal_blocks, relative q/k/v gradient noise)
+VARIANTS = {
+    "default": (0, 0.0),
+    "default_repeat": (0, 0.0),
+    "blk4": (4, 0.0),
+    "blk8": (8, 0.0),
+    "noise1e-3": (0, 1e-3),
+    "noise4e-3": (0, 4e-3),
+}
 PAIRS = (
     ("default_repeat", "default"),
     ("blk4", "default"),
     ("blk8", "default"),
     ("blk8", "blk4"),
+    ("noise1e-3", "default"),
+    ("noise4e-3", "default"),
 )
+
+
+class _GradNoise(torch.autograd.Function):
+    """Identity forward; backward multiplies the gradient by 1 + sigma * N(0, 1)."""
+
+    @staticmethod
+    def forward(ctx, x, sigma: float):
+        ctx.sigma = sigma
+        return x.view_as(x)
+
+    @staticmethod
+    def backward(ctx, grad):
+        noise = torch.randn(grad.shape, dtype=torch.float32, device=grad.device)
+        return (grad.float() * (1 + ctx.sigma * noise)).to(grad.dtype), None
+
+
+def patch_attention_noise() -> None:
+    from torchtitan.experiments.ezpz.agpt import XPUScaledDotProductAttention
+
+    original = XPUScaledDotProductAttention._sdpa
+
+    @functools.wraps(original)
+    def _sdpa(self, q, k, v, **kwargs):
+        sigma = getattr(self, "probe_grad_noise", 0.0)
+        if sigma:
+            q, k, v = (_GradNoise.apply(t, sigma) for t in (q, k, v))
+        return original(self, q, k, v, **kwargs)
+
+    XPUScaledDotProductAttention._sdpa = _sdpa
 
 
 def category(name: str) -> str:
@@ -165,9 +207,10 @@ class Probe:
             {"variants": {}, "pairs": {}, "attention_modules": len(modules)},
         )
         try:
-            for name, n in VARIANTS.items():
+            for name, (n, sigma) in VARIANTS.items():
                 for m in modules:
                     m.causal_blocks = n
+                    m.probe_grad_noise = sigma
                 torch._dynamo.reset()
                 torch.xpu.synchronize()
                 started = time.perf_counter()
@@ -181,6 +224,7 @@ class Probe:
                     grads[name] = snapshot(model)
                     entry["variants"][name] = {
                         "causal_blocks": n,
+                        "grad_noise": sigma,
                         "seconds_rank0": elapsed,
                         "loss_rank0": float(loss),
                         "loss_mean": float(torch.stack(losses).mean()),
@@ -211,6 +255,7 @@ class Probe:
         finally:
             for m, n in zip(modules, original):
                 m.causal_blocks = n
+                m.probe_grad_noise = 0.0
             torch._dynamo.reset()
             engine.ntokens_seen = ntokens_seen
             grads.clear()
@@ -239,6 +284,7 @@ def main() -> None:
     updates = {
         int(x) for x in os.environ.get("AGPT_BLOCK_PROBE_UPDATES", "1,24").split(",")
     }
+    patch_attention_noise()
     install(output, updates)
     sys.argv = ["torchtitan.experiments.ezpz.train", *sys.argv[1:]]
     runpy.run_module(

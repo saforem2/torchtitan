@@ -7,8 +7,9 @@ Inputs are built in [B, S, H, D] and transposed to [B, H, S, D], as
 ``RESULT {json}`` line with out/dq/dk/dv relative L2 error against an FP32
 math reference computed in query chunks (no [S, S] matrix for all heads).
 
-Cases: default SDPA eager and compiled, block-causal (4, 8 chunks) eager and
-compiled with ``fullgraph=True``.
+Cases: default SDPA eager (twice) and compiled, block-causal (4, 8 chunks)
+eager and compiled with ``fullgraph=True``. Each case after the first also
+reports its relative L2 difference from the first default eager run.
 """
 
 from __future__ import annotations
@@ -53,21 +54,31 @@ def default_attention(q, k, v):
         )
 
 
-def run(name, fn, base, ref):
+def rel(got, ref):
+    return {
+        n: float((a - b).norm() / b.norm())
+        for n, a, b in zip(("out", "dq", "dk", "dv"), got, ref)
+    }
+
+
+def run(name, fn, base, ref, default=None):
     q, k, v = (t.detach().clone().requires_grad_(True) for t in base[:3])
     try:
         out = fn(q, k, v)
         out.backward(base[3])
         torch.xpu.synchronize()
         got = [out.detach().float(), q.grad.float(), k.grad.float(), v.grad.float()]
-        rec = {
-            n: float((a - b).norm() / b.norm())
-            for n, a, b in zip(("out", "dq", "dk", "dv"), got, ref)
-        }
+        rec = {"vs_fp32": rel(got, ref)}
+        if default is not None:
+            rec["vs_default_eager"] = rel(got, default)
     except Exception as e:  # noqa: BLE001
-        rec = {"error": f"{type(e).__name__}: {str(e).splitlines()[0][:300]}"}
+        got, rec = (
+            None,
+            {"error": f"{type(e).__name__}: {str(e).splitlines()[0][:300]}"},
+        )
     print("RESULT " + json.dumps({"case": name, **rec}), flush=True)
     torch.xpu.empty_cache()
+    return got
 
 
 def main():
@@ -80,7 +91,8 @@ def main():
     base = [bshd(HQ), bshd(HKV), bshd(HKV), bshd(HQ)]
     ref = reference(*base[:3], base[3])
     print(f"torch={torch.__version__} dev={torch.xpu.get_device_name()}", flush=True)
-    cases = {"default_eager": default_attention}
+    default = run("default_eager", default_attention, base, ref)
+    cases = {"default_eager_repeat": default_attention}
     cases["default_compiled"] = torch.compile(default_attention, fullgraph=True)
     for n in (4, 8):
 
@@ -90,7 +102,7 @@ def main():
         cases[f"blk{n}_eager"] = blk
         cases[f"blk{n}_compiled"] = torch.compile(blk, fullgraph=True)
     for name, fn in cases.items():
-        run(name, fn, base, ref)
+        run(name, fn, base, ref, default)
 
 
 if __name__ == "__main__":
