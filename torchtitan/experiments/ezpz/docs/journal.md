@@ -2,6 +2,19 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-11-04 (Sunspot) -- Block-causal attention at AGPT-2B
+
+`EZPZ_XPU_ATTN_CAUSAL_BLOCKS=4` on the best TT AGPT-2B arm (DDP/ZeRO-1,
+per-block compile, `24` tiles, `2 x 1`): `2.0788 s/update`, `88.17` model
+TFLOP/s/tile, against `2.2976 s` for the later same-job control. Flash backward
+drops from `0.613` to `0.384 s` per update. Update-1 losses agree to `0.001`;
+late losses sit `0.03`-`0.14` above both controls, so it stays opt-in until a
+gradient comparison. The MDS phase did not run (`BENCH_EXPECTED_MDS_HEAD`
+unset). Job `12482301`.
+[Report](experiments/agpt/sunspot/2026-11-02-throughput-recovery.md#block-causal-attention-at-agpt-2b).
+
+---
+
 ## 2026-11-03 (Sunspot) -- TT at the z2rrt02w shape
 
 New flavor `mds-4096x10` (`agpt_mds_shape_benchmark_adamw`) runs the 2025 MDS

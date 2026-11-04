@@ -11,6 +11,11 @@ production-shaped batch (two sequences per rank per update) TT now runs
 (`2.2852` vs `2.344`-`2.347 s/update` in `12482111`; `2.3079` vs `2.363 s` in
 `12482126`).
 
+Opt-in block-causal attention (`EZPZ_XPU_ATTN_CAUSAL_BLOCKS=4`) brings the
+same TT arm to `2.0788 s/update`, `88.17` model TFLOP/s/tile, `10.5%` faster
+than its later same-job control (`12482301`). Loss equivalence is not
+established ([Block-causal attention at AGPT-2B](#block-causal-attention-at-agpt-2b)).
+
 MDS reproduces its historical number. Its `8dscnx65` configuration (GBS `384`,
 accumulation `16`, AdamW, ZeRO-1) gives `89.76` today against `89.99` in March.
 The lower November 2 MDS rate came from accumulation `2` and the
@@ -205,6 +210,48 @@ re-gathers on all `16` microbatches. Earlier work ran accumulation `2`, where
 that costs little. `58.22` is not TT FSDP's rate at this shape;
 `BENCH_FSDP_DEFER=1` is untested here.
 
+## Block-causal attention at AGPT-2B
+
+Job `12482301` (`x1922c1s2b0n0`, `x1922c1s3b0n0`) ran the best TT AGPT-2B arm
+(DDP/ZeRO-1, per-block compile, SophiaG, `2 x 1`, `24` tiles) with and
+without block-causal attention, after a discarded 8-update warm-up launch.
+
+| Arm (phase order) | s/update | tok/s/tile | Model TFLOP/s/tile |
+|---|---:|---:|---:|
+| Control (2) | `2.4511` | `6684` | `74.78` |
+| Block-causal, `4` chunks (3) | `2.0788` | `7882` | `88.17` |
+| Block-causal, `8` chunks (4) | `2.0872` | `7850` | `87.81` |
+| Control (6) | `2.2976` | `7131` | `79.77` |
+
+Updates `21`-`32`, slowest rank per update. The second control matches
+`12482126` (`2.3079 s`). The first control has `0.56 s` of idle GPU time in
+its update-`7` trace and a `35 ms` step standard deviation, the pattern of the
+slow launches in [Anchor launch environment](#anchor-launch-environment),
+although it was not the job's first launch. Against the second control, four
+chunks is `9.5%` less time per update.
+
+| Arm | Flash backward | Flash forward | GEMM | Other | Collectives |
+|---|---:|---:|---:|---:|---:|
+| Control (6) | `0.613 s` | `0.148 s` | `0.904 s` | `0.451 s` | `0.123 s` |
+| `4` chunks | `0.384 s` | `0.120 s` | `0.910 s` | `0.481 s` | `0.116 s` |
+| `8` chunks | `0.355 s` | `0.120 s` | `0.911 s` | `0.511 s` | `0.125 s` |
+
+Rank-0 kernel time in the profiled update. Eight chunks skips more masked
+work but adds merge work; four chunks is as fast.
+
+The MDS control phase did not run: the matrix needs `BENCH_EXPECTED_MDS_HEAD`
+and the submission omitted it (exit `99` before launch). Against the earlier
+MDS SophiaG controls (`2.344`-`2.376 s`, other allocations), four chunks is
+`11`-`13%` faster.
+
+Losses at update `1` agree: `17.741` (both controls), `17.742` (`4` chunks),
+`17.733` (`8` chunks). Later updates are not deterministic: the two controls
+differ by up to `0.62` (update `16`). Over updates `24`-`31` the 4-chunk arm is
+above both controls on every update, by `0.03`-`0.14` against the closer one.
+That is inside the control spread seen earlier in the run but one-sided, so
+block-causal stays off by default until a same-batch gradient comparison
+settles it.
+
 ## What changed in TT
 
 Upstream replaced `apply_compile`, which compiled each `TransformerBlock` with
@@ -262,9 +309,10 @@ logits memory.
 - Close the remaining `14%` TT gap at the `z2rrt02w` shape
   ([TT at the 2025 high-throughput shape](#tt-at-the-2025-high-throughput-shape)):
   profile MDS at that shape and compare the `2.2 s` of other TT kernels.
-- Block-causal attention (`4` chunks) is worth `7`-`10%` at that shape. Measure
-  it at AGPT-2B (sequence `8192`, the production shape) and check
-  loss/gradient equivalence before turning it on.
+- Block-causal attention (`4` chunks) is worth `9.5%` at AGPT-2B and `7`-`10%`
+  at the `z2rrt02w` shape. Compare its gradients with the default path on the
+  same batch before turning it on; its late losses sit `0.03`-`0.14` above both
+  controls.
 - Rerun TT FSDP at the `z2rrt02w` shape with deferred gradient reduction.
 - Fit native DDP at `1 x 2`, for example with chunked loss so FP32 logits are
   not materialized for both sequences at once.
@@ -286,6 +334,7 @@ logits memory.
 | `12482248` | MDS at the `z2rrt02w` shape | `0` |
 | `12482280` | TT DDP/ZeRO-1 (`x2`), TT FSDP and MDS at the `z2rrt02w` shape, `ee9c5fd4a` | `0` |
 | `12482281` | TT DDP/ZeRO-1 at the `z2rrt02w` shape: control (`x2`), block-causal `4` and `8` chunks, `ee9c5fd4a` | `0` |
+| `12482301` | TT DDP/ZeRO-1 at AGPT-2B: control (`x2`), block-causal `4` and `8` chunks, `ee9c5fd4a` | `1` (MDS phase: `BENCH_EXPECTED_MDS_HEAD` unset) |
 
 Jobs `12482111`/`12482112` ran at `83fb8ad7b`; `12482126`/`12482127` ran at
 `586f1a542`, which adds the positions, compiled-block WGRAD and AdamW changes.
