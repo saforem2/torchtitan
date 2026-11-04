@@ -2240,27 +2240,23 @@ def ezpz_agpt_80b_deep_from_json() -> FaultTolerantTrainer.Config:
 
 
 def _polaris_dolma_grain(cfg: FaultTolerantTrainer.Config) -> FaultTolerantTrainer.Config:
-    """Wire Dolma raw JSON via Grain + OLMo-3 inline tokenization.
+    """Wire olmo-mix-1124 via Grain + HF streaming (precached local parquet).
 
-    Reads /eagle/datasets/dolma/data_v1.7/*.json.gz (2419 files, 4.1T).
-    TextProcessor tokenizes each sample with the model's own hf_assets_path
-    tokenizer at runtime — no pre-tokenized corpus required.
-
-    Uses IndexedJsonlSource (raw jsonl over byte offsets) rather than
-    HuggingFaceStreamingSource(json): the HF json loader infers a schema
-    from the file and chokes on Dolma's paloma_* null columns.
+    Uses the Polaris HF cache (/home/foremans/.cache/huggingface/hub) where
+    olmo-mix-1124 was precached via precache_hf_dataset.py. TextProcessor
+    tokenizes each sample with the model's own hf_assets_path tokenizer at
+    runtime — no pre-tokenized corpus required. Same intent as the Aurora
+    olmo-mix_smoke configs, but wired for Polaris where only the wiki subset
+    is currently cached (expand via additional precache for production).
     """
-    from torchtitan.components.data.sources import IndexedJsonlSource
-
-    # Single dolma shard for fast startup: 1.2G vs 4.1T scan (2419 files)
-    # IndexedJsonlSource rescans every pattern match at init (no index cache)
+    wiki_dir = _olmo_mix_subset_dir("wiki")
     cfg.dataloader = GrainDataLoader.Config(
         dataset=ConcatThenSplitPackingConfig(
             dataset=SingleDatasetConfig(
-                source=IndexedJsonlSource.Config(
-                    patterns=(
-                        "/eagle/datasets/dolma/data_v1.7/algebraic-stack-train-0000.json.gz",
-                    ),
+                source=HuggingFaceStreamingSource.Config(
+                    path="json",
+                    split="train",
+                    load_dataset_kwargs={"data_dir": wiki_dir},
                 ),
                 processor=TextProcessor.Config(),
                 post_filters=(lambda sample: sample is not None,),
