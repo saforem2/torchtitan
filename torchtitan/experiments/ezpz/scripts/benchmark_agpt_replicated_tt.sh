@@ -233,6 +233,17 @@ else
            [[ "${ARM}" == fsdp-* ]] || { echo "BENCH_REDUCE_PROBE needs an fsdp ARM" >&2; exit 2; } ;;
         *) echo "BENCH_REDUCE_PROBE must be 0 or 1" >&2; exit 2;;
     esac
+    # BENCH_BLOCK_PROBE=1 replays updates AGPT_BLOCK_PROBE_UPDATES (default 1,24)
+    # with default and block-causal attention (probe_block_causal_grads.py).
+    case "${BENCH_BLOCK_PROBE:-0}" in
+        0) ;;
+        1) [[ "${TRAIN_MODULE}" == torchtitan.experiments.ezpz.train ]] || {
+               echo "BENCH_BLOCK_PROBE and BENCH_REDUCE_PROBE are exclusive" >&2; exit 2; }
+           [[ "${ARM}" == ddp-* ]] || { echo "BENCH_BLOCK_PROBE needs a ddp ARM" >&2; exit 2; }
+           TRAIN_MODULE=torchtitan.experiments.ezpz.scripts.probe_block_causal_grads
+           export AGPT_BLOCK_PROBE_OUTPUT="${OUT}/block-causal-grads" ;;
+        *) echo "BENCH_BLOCK_PROBE must be 0 or 1" >&2; exit 2;;
+    esac
     # CompileConfig selects named @local_compile regions. For this AGPT-2B
     # recipe, fused_binary_activation is the only active model region: it uses
     # ComplexRoPE, plain RMSNorm and dense SwiGLU (not cos_sin_rope,
