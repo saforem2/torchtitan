@@ -339,11 +339,25 @@ The same job ran the probe with blocks not compiled (loss compile only):
 | Blocks not compiled | `1` | `2.53` | `1.86e-2` |
 | Per-block compile | `1` | `0.928` | `1.58e-2` |
 
-Without per-block compile, block-causal is inside the default path's own
-run-to-run spread at update `24`. Update `1` diverges in both arms and is
-unexplained. Job `12482333` adds `blk1`, one causal flash call through the
-block-causal autograd function (same math as default), to separate that
-wrapper from the chunking. Block-causal stays off by default.
+Job `12482333` reran both arms with `blk1`, one causal flash call through the
+block-causal autograd function (same math as default):
+
+| Arm | Update | Default repeat | `blk1` vs default | `4` chunks vs default |
+|---|---:|---:|---:|---:|
+| Per-block compile | `1` | `1.81e-2` | `1.25e-2` | `0.928` |
+| Per-block compile | `24` | `3.17e-2` | `2.41e-2` | `0.411` |
+| Blocks not compiled | `1` | `2.87e-2` | `2.44e-2` | `2.60` |
+| Blocks not compiled | `24` | `1.40e-2` | `8.52e-3` | `7.78e-2` |
+
+`blk1` is at the default path's own spread everywhere, so the autograd
+wrapper and compile are cleared; the difference comes with chunking. The
+uncompiled update-`24` result (`7.78e-2`) disagrees with `12482329`
+(`1.18e-2`), so a single replay at update `24` is not stable evidence either
+way. The chunked op is correct on the saved training calls, so the open
+question is whether the training state is this sensitive to the chunked
+forward output, which differs from default by `0.7`-`2e-3` relative. Job
+`12482340` perturbs the default forward output by that much. Block-causal
+stays off by default.
 
 ## What changed in TT
 
@@ -432,6 +446,7 @@ logits memory.
 | `12482325`, `12482328` | One-tile block-causal check, eager vs compiled, against FP32 and default, `b60c37a2c`/`ad261add3` | `0` |
 | `12482327` | Gradient probe with q/k/v gradient-noise calibration, per-block compile, `ad261add3` | `0` |
 | `12482329`, `12482330` | Gradient probe, blocks not compiled, saving training attention calls; replay of those calls, `32a3595f3` | `0` |
+| `12482333` | Gradient probe with `blk1`, per-block compile and blocks not compiled, `5e73faa7f` | `0` |
 
 Jobs `12482111`/`12482112` ran at `83fb8ad7b`; `12482126`/`12482127` ran at
 `586f1a542`, which adds the positions, compiled-block WGRAD and AdamW changes.
