@@ -380,13 +380,27 @@ training gradients `7`-`100x` more than q/k/v gradient noise at `4e-3`. The
 default path's repeat looks tight only because its forward is deterministic.
 The block-causal vs default number at update `24` (blocks not compiled) is
 not stable across jobs: `1.18e-2` (`12482329`), `7.78e-2` (`12482333`),
-`0.130` (`12482340`). Job `12482343` samples updates `6`, `11`, `16`, `21`
-and `26` in one run to compare distributions instead of single draws.
+`0.130` (`12482340`). Job `12482343` (blocks not compiled) samples five
+updates in one run:
+
+| Update | Default repeat | `blk1` | q/k/v grad noise `4e-3` | Fwd noise `1e-3` | Fwd noise `4e-3` | `4` chunks | `8` chunks |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| `6` | `3.46e-2` | `3.79e-2` | `2.60e-2` | `5.26` | `3.45` | `3.13` | `2.73` |
+| `11` | `1.57e-2` | `1.20e-2` | `1.52e-2` | `1.02` | `0.826` | `1.91` | `1.33` |
+| `16` | `6.62e-3` | `4.67e-3` | `9.60e-3` | `9.39e-2` | `0.368` | `0.169` | `0.227` |
+| `21` | `1.32e-2` | `1.10e-2` | `1.58e-2` | `0.249` | `0.653` | `0.116` | `0.539` |
+| `26` | `7.72e-3` | `1.21e-2` | `1.72e-2` | `0.399` | `0.695` | `0.114` | `0.447` |
+
+Two groups, cleanly separated at every update: default repeat, `blk1` and
+backward noise at `5e-3`-`4e-2`; forward noise and both block-causal variants
+at `9e-2`-`5.3`. Block-causal sits inside the forward-noise range at every
+sampled update.
 
 What is established: block-causal's op-level accuracy matches the default
 kernel's on four saved training calls (rank `0`, layers `0` and `11`, updates
-`1` and `24`); the autograd wrapper and compile are cleared (`blk1`); and a
-rounding-level forward change produces divergence of the same order. A
+`1` and `24`); the autograd wrapper and compile are cleared (`blk1`); and
+across five sampled updates its gradient divergence falls in the same range
+as random forward-output noise of `1e-3`-`4e-3`. A
 same-batch gradient comparison therefore cannot separate block-causal from
 the default path. A loss-curve A/B over a few hundred updates, several seeds
 per arm, can, and should come before it is turned on by default.
@@ -481,6 +495,7 @@ logits memory.
 | `12482329`, `12482330` | Gradient probe, blocks not compiled, saving training attention calls; replay of those calls, `32a3595f3` | `0` |
 | `12482333` | Gradient probe with `blk1`, per-block compile and blocks not compiled, `5e73faa7f` | `0` |
 | `12482340` | Gradient probe with forward-output noise, blocks not compiled, `b5a221174` | `0` |
+| `12482343` | Gradient probe at updates `6`-`26`, blocks not compiled, `5c4002ea1` | `0` |
 
 Jobs `12482111`/`12482112` ran at `83fb8ad7b`; `12482126`/`12482127` ran at
 `586f1a542`, which adds the positions, compiled-block WGRAD and AdamW changes.

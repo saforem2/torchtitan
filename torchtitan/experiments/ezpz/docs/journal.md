@@ -13,9 +13,10 @@ calls replay correctly), and the autograd wrapper (`blk1` at the noise
 level). Forward-output noise at `1e-3` moves the gradients `7`-`100x` more
 than backward noise at `4e-3`, so these gradients are chaotic under any
 rounding-level forward change; the op matches the default kernel on four
-saved training calls. Single-update magnitudes are unstable across jobs
-(`12482343` samples five updates). Next is a multi-seed loss-curve A/B. Jobs
-`12482320`-`12482343`.
+saved training calls. Over five sampled updates (`12482343`) block-causal
+sits inside the forward-noise range (`0.11`-`3.1` vs `0.09`-`5.3`); default
+repeat, `blk1` and backward noise stay at `5e-3`-`4e-2`. Next is a multi-seed
+loss-curve A/B. Jobs `12482320`-`12482343`.
 [Report](experiments/agpt/sunspot/2026-11-02-throughput-recovery.md#same-batch-gradients).
 
 ---
