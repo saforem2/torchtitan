@@ -13,11 +13,10 @@ production-shaped batch (two sequences per rank per update) TT now runs
 
 Opt-in block-causal attention (`EZPZ_XPU_ATTN_CAUSAL_BLOCKS=4`) brings the
 same TT arm to `2.0788 s/update`, `88.17` model TFLOP/s/tile, `10.5%` faster
-than its later same-job control (`12482301`). Its op-level accuracy matches
-the default kernel's on saved training calls. A same-batch gradient
-comparison cannot settle equivalence, because these gradients move as much
-under any rounding-level forward change; a loss-curve comparison should come
-before it is turned on ([Same-batch gradients](#same-batch-gradients)).
+than its later same-job control (`12482301`). In a 400-update loss A/B from
+random init (three seeds) its loss stays within `0.013` of the default path
+in every window, against a seed-to-seed spread of `0.018`-`0.034`
+([Loss-curve A/B](#loss-curve-ab)).
 
 MDS reproduces its historical number. Its `8dscnx65` configuration (GBS `384`,
 accumulation `16`, AdamW, ZeRO-1) gives `89.76` today against `89.99` in March.
@@ -405,6 +404,39 @@ same-batch gradient comparison therefore cannot separate block-causal from
 the default path. A loss-curve A/B over a few hundred updates, several seeds
 per arm, can, and should come before it is turned on by default.
 
+### Loss-curve A/B
+
+`agpt_2b_loss_ab` trains `2b-mds` from random init: AdamW `3e-4` (betas
+`0.9`/`0.95`, weight decay `0.1`), `40` warmup updates then constant,
+sequence `8192`, `12` tiles, DDP/ZeRO-1 with per-block compile, `400` updates
+(`79M` tokens). `--debug.seed` sets the init and the blendcorpus order is
+fixed, so the two arms of a seed share init and data. Jobs `12482374`-`12482376`
+ran one seed each on its own node; seed `2` ran block-causal first.
+
+Loss is the mean over all `12` ranks per update, then over the window.
+Difference is block-causal (`4` chunks) minus default, per seed:
+
+| Updates | Seed `1` | Seed `2` | Seed `3` | Mean | Default, SD across seeds |
+|---|---:|---:|---:|---:|---:|
+| `2`-`10` | `+0.0000` | `+0.0000` | `-0.0000` | `+0.0000` | `0.032` |
+| `11`-`50` | `+0.0010` | `+0.0083` | `+0.0003` | `+0.0032` | `0.034` |
+| `51`-`100` | `-0.0050` | `+0.0011` | `+0.0127` | `+0.0029` | `0.028` |
+| `101`-`200` | `-0.0010` | `+0.0062` | `+0.0070` | `+0.0041` | `0.022` |
+| `201`-`300` | `-0.0047` | `+0.0040` | `+0.0051` | `+0.0015` | `0.021` |
+| `301`-`400` | `-0.0046` | `-0.0009` | `+0.0035` | `-0.0007` | `0.018` |
+
+Final-window losses: `4.127`/`4.094`/`4.087` default, `4.122`/`4.093`/`4.090`
+block-causal. The paired difference changes sign across seeds and is at most
+`0.013` in any window, `5`-`10x` smaller than the spread from the init seed
+alone. Over updates `301`-`400` the per-update difference has a standard
+deviation of `0.010` in every seed. At `400` updates and three seeds the
+two paths are indistinguishable; this does not test long-horizon or
+production-scale training.
+
+Updates `101`-`400`, slowest rank: block-causal `2.062`/`2.173`/`2.073 s`,
+default `2.278`/`2.357`/`2.279 s`, `7.8`-`9.5%` less time per update in
+every pair.
+
 ## What changed in TT
 
 Upstream replaced `apply_compile`, which compiled each `TransformerBlock` with
@@ -462,10 +494,11 @@ logits memory.
 - Close the remaining `14%` TT gap at the `z2rrt02w` shape
   ([TT at the 2025 high-throughput shape](#tt-at-the-2025-high-throughput-shape)):
   profile MDS at that shape and compare the `2.2 s` of other TT kernels.
-- Run a loss-curve A/B of block-causal attention (`4` chunks) against the
-  default path over a few hundred updates, several seeds per arm, before
-  turning it on ([Same-batch gradients](#same-batch-gradients)). It is worth
-  `9.5%` at AGPT-2B and `7`-`10%` at the `z2rrt02w` shape.
+- Decide whether to turn block-causal attention (`4` chunks) on for
+  production. It is `7.8`-`9.5%` faster at AGPT-2B and matches the default
+  path's loss over `400` updates and three seeds
+  ([Loss-curve A/B](#loss-curve-ab)); it has not run at multi-node scale or
+  past `400` updates.
 - Rerun TT FSDP at the `z2rrt02w` shape with deferred gradient reduction.
 - Fit native DDP at `1 x 2`, for example with chunked loss so FP32 logits are
   not materialized for both sequences at once.
@@ -496,6 +529,7 @@ logits memory.
 | `12482333` | Gradient probe with `blk1`, per-block compile and blocks not compiled, `5e73faa7f` | `0` |
 | `12482340` | Gradient probe with forward-output noise, blocks not compiled, `b5a221174` | `0` |
 | `12482343` | Gradient probe at updates `6`-`26`, blocks not compiled, `5c4002ea1` | `0` |
+| `12482374`-`12482376` | Loss-curve A/B, one seed each, default and block-causal `4` chunks, `400` updates, `b63a88d5a` | `0` |
 
 Jobs `12482111`/`12482112` ran at `83fb8ad7b`; `12482126`/`12482127` ran at
 `586f1a542`, which adds the positions, compiled-block WGRAD and AdamW changes.

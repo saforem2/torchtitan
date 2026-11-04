@@ -2,6 +2,19 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-11-04 (Sunspot) -- Block-causal loss A/B
+
+`agpt_2b_loss_ab` (AGPT-2B from random init, AdamW `3e-4`, `12` tiles,
+per-block compile), three seeds, `400` updates per arm. Block-causal
+attention (`4` chunks) minus default, mean over seeds: `+0.003`-`+0.004` in
+updates `11`-`200`, `-0.0007` in `301`-`400`; at most `0.013` in any
+seed/window, against `0.018`-`0.034` seed-to-seed spread. Final losses
+`4.122`/`4.093`/`4.090` vs `4.127`/`4.094`/`4.087`. `7.8`-`9.5%` less time per
+update in every pair. Jobs `12482374`-`12482376`.
+[Report](experiments/agpt/sunspot/2026-11-02-throughput-recovery.md#loss-curve-ab).
+
+---
+
 ## 2026-11-04 (Sunspot) -- Block-causal gradients
 
 Same-batch gradient probe (`probe_block_causal_grads.py`): block-causal
