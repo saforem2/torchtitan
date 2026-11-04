@@ -22,6 +22,11 @@ later launches on the same node give `92.6`-`95.1`. The slow first launch
 costs TT `2`-`7%` and its cause is still open
 ([Anchor launch environment](#anchor-launch-environment)).
 
+At the wider 2025 MDS shape (`z2rrt02w`: hidden `4096`, sequence `4096`,
+accumulation `16`) TT DDP/ZeRO-1 is `26%` slower than MDS, and `14%` slower
+with block-causal attention
+([TT at the 2025 high-throughput shape](#tt-at-the-2025-high-throughput-shape)).
+
 | Arm | Accumulation x microbatch | s/update | tok/s/tile | Model TFLOP/s/tile |
 |---|---|---:|---:|---:|
 | MDS control, SophiaG, `BF16_Optimizer` (`x4`) | `2 x 1` | `2.344`-`2.376` | `6895`-`6990` | `77.13`-`78.19` |
@@ -52,7 +57,7 @@ are repeats in separate allocations.
 | MDS runtime | Torch `2.10.0a0+git449b176`, DeepSpeed `0.18.5` |
 | Tokens per update per tile | `16384` (`2 x 8192`) except the GAS-16 MDS rows (`131072`) |
 | Timing window | Updates `21`-`32` (anchor: `9`-`20`) |
-| FLOPs/token | `11,186,515,968`, the recovery report's normalization |
+| FLOPs/token | `11,186,515,968`, the recovery report's normalization; `1.3433e10` at the `z2rrt02w` shape, whose TFLOP/s are not comparable with the AGPT-2B rows |
 
 TT time is the mean over updates of the slowest rank's synchronized step
 record (`rank-*.steps.jsonl`, `BENCH_STEP_TIMINGS=1`); the standard deviation
@@ -152,9 +157,14 @@ GPU is busy `9.72` of `9.92 s`, and gradient reduction takes `0.19 s`.
 | Kernel | Time per update | Rate |
 |---|---:|---:|
 | GEMM | `4.38 s` | `171` TFLOP/s (non-attention FLOPs) |
-| Flash-attention backward | `2.32 s` | `38` TFLOP/s |
-| Flash-attention forward | `0.55 s` | `81` TFLOP/s |
+| Flash-attention backward | `2.32 s` | `38` TFLOP/s (dense count) |
+| Flash-attention forward | `0.55 s` | `81` TFLOP/s (dense count) |
 | Elementwise binary | `0.48 s` | -- |
+
+Attention rates use MDS's dense (non-causal) attention FLOPs, `12 s h` per
+token per layer; a causal count halves them. The backward/forward ratio is
+the point: `4.3x` against about `2.5x` for a kernel that does the same work
+per FLOP.
 
 The attention backward is the outlier. The torch `2.14` XPU flash backward
 does not skip fully masked key tiles under `is_causal`; IPEX xetla, which MDS
@@ -177,15 +187,23 @@ Four chunks is `7`-`10%` faster than the controls, whose spread is `3%`.
 Update `12` traces: flash backward drops from `2.26` to `1.53 s` and the
 extra merge work adds `0.16 s`; GEMM is unchanged (`4.57` vs `4.58 s`). Final
 losses after `32` updates are `6.656`/`6.698` (controls) and `6.667`
-(4 chunks), a smoke check, not an equivalence test.
+(4 chunks), a smoke check, not an equivalence test. The two controls share a
+seed and node and still differ by `0.042`, so the runs are not deterministic;
+an equivalence test has to be stated against that spread.
 
 TT with block-causal attention is still `14%` slower than MDS (`9.111` vs
-`7.977 s`). Non-GEMM, non-attention kernels take `2.2 s` per update in TT;
+`7.977 s`). That compares two jobs on two nodes; the TT controls agree across
+jobs (`10.04`-`10.10` and `9.78`-`10.07 s`) and MDS agrees with `12482248`
+within `1%`. Non-GEMM, non-attention kernels take `2.2 s` per update in TT;
 that is the next place to look, with an MDS trace at this shape for
 comparison.
 
 FSDP spends `3.01 s` in all-gather and `2.43 s` in reduce-scatter per
-update: it gathers parameters again for each of the `16` microbatches.
+update. This arm ran with the launcher default
+`--parallelism.no-fsdp-defer-gradient-reduction`, so it reduce-scatters and
+re-gathers on all `16` microbatches. Earlier work ran accumulation `2`, where
+that costs little. `58.22` is not TT FSDP's rate at this shape;
+`BENCH_FSDP_DEFER=1` is untested here.
 
 ## What changed in TT
 
@@ -245,7 +263,9 @@ logits memory.
   ([TT at the 2025 high-throughput shape](#tt-at-the-2025-high-throughput-shape)):
   profile MDS at that shape and compare the `2.2 s` of other TT kernels.
 - Block-causal attention (`4` chunks) is worth `7`-`10%` at that shape. Measure
-  it at AGPT-2B and check loss/gradient equivalence before turning it on.
+  it at AGPT-2B (sequence `8192`, the production shape) and check
+  loss/gradient equivalence before turning it on.
+- Rerun TT FSDP at the `z2rrt02w` shape with deferred gradient reduction.
 - Fit native DDP at `1 x 2`, for example with chunked loss so FP32 logits are
   not materialized for both sequences at once.
 - `mode="max-autotune"` (`EZPZ_AGPT_COMPILE_BLOCKS=max-autotune`) is wired but
