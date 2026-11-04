@@ -45,16 +45,15 @@ SUBMIT_DIR="${PBS_O_WORKDIR:-$(pwd)}"
 cd "${SUBMIT_DIR}"
 
 VENV="${VENV:-/lus/tegu/projects/datascience/foremans/venvs/xpu-torch214-fixedlr-v2-20260927}"
-# Activate target venv BEFORE ezpz_setup_job so it doesn't wipe VIRTUAL_ENV
-source "${VENV}/bin/activate"
-# Use local utils.sh — compute nodes have no outbound net for curl
+# Use staged utils.sh — compute has no outbound net. Use ezpz_get_job_env (dist
+# info only, no venv) then activate target venv that has trl. ezpz_setup_job
+# would deactivate + pick stale xpu-torch214 (no trl), so we skip it.
 UTILS="${HOME}/stage/utils.sh"
 if [[ -f "${UTILS}" ]]; then
-    source "${UTILS}" && ezpz_setup_job
+    source "${UTILS}" && ezpz_get_job_env
 else
-    source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup_job
+    source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_get_job_env
 fi
-# Re-activate: ezpz_setup_job deactivates any existing venv then picks its default (xpu-torch214, no trl)
 source "${VENV}/bin/activate"
 
 python3 -c "import trl; print('trl', trl.__version__)" || { echo "FATAL: trl missing"; exit 1; }
