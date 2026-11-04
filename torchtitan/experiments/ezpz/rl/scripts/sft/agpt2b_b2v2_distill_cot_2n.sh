@@ -45,7 +45,9 @@ SUBMIT_DIR="${PBS_O_WORKDIR:-$(pwd)}"
 cd "${SUBMIT_DIR}"
 
 VENV="${VENV:-/lus/tegu/projects/datascience/foremans/venvs/xpu-torch214-fixedlr-v2-20260927}"
-source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup "${VENV}"
+source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup_job
+# Override venv: ezpz_setup_job auto-picks xpu-torch214 (no trl), we need fixedlr-v2
+source "${VENV}/bin/activate"
 
 python3 -c "import trl; print('trl', trl.__version__)" || { echo "FATAL: trl missing"; exit 1; }
 python3 -c "import torch; print('torch', torch.__version__, 'xpu', torch.xpu.is_available())" 2>&1 | head -2
