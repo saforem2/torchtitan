@@ -13,11 +13,11 @@ production-shaped batch (two sequences per rank per update) TT now runs
 
 Opt-in block-causal attention (`EZPZ_XPU_ATTN_CAUSAL_BLOCKS=4`) brings the
 same TT arm to `2.0788 s/update`, `88.17` model TFLOP/s/tile, `10.5%` faster
-than its later same-job control (`12482301`). The op matches the default
-kernel's accuracy on real training calls. Its training gradients differ from
-the default path's by as much as any rounding-level change to the forward
-output does; a longer loss comparison should come before it is turned on
-([Same-batch gradients](#same-batch-gradients)).
+than its later same-job control (`12482301`). Its op-level accuracy matches
+the default kernel's on saved training calls. A same-batch gradient
+comparison cannot settle equivalence, because these gradients move as much
+under any rounding-level forward change; a loss-curve comparison should come
+before it is turned on ([Same-batch gradients](#same-batch-gradients)).
 
 MDS reproduces its historical number. Its `8dscnx65` configuration (GBS `384`,
 accumulation `16`, AdamW, ZeRO-1) gives `89.76` today against `89.99` in March.
@@ -329,7 +329,8 @@ dense bf16 copy of the inputs gives identical numbers:
 | Update `24`, layer `11` | `1.37e-2` / `2.25e-3` | `1.67e-2` / `2.86e-3` | `1.81e-2` / `3.45e-3` |
 
 Relative L2. The default kernel itself is `25%` off FP32 in `dK` at layer `0`,
-update `24`.
+update `24`, so that call shows only that both paths share the error; the
+other three confirm block-causal against FP32.
 
 The same job ran the probe with blocks not compiled (loss compile only):
 
@@ -370,17 +371,25 @@ output by `1 + sigma * N(0, 1)` in the forward pass, gradient passing through:
 | Block-causal, `4` chunks | `2.56` | `0.130` |
 | Block-causal, `8` chunks | `0.917` | `0.174` |
 
-Relative L2. A forward perturbation at bf16 rounding size moves these
-gradients as far as block-causal does; a backward perturbation does not. The
-default path's repeat looks tight only because its forward is deterministic.
+Relative L2. The update-`1` column is saturated: `sigma = 1e-3` moves the
+gradient further than `4e-3`, and the cosine goes negative, so magnitudes
+there carry no information.
 
-Conclusion: block-causal attention is correct. Its op-level error matches the
-default kernel's on real training calls, the wrapper and compile are cleared,
-and its effect on training gradients is that of a rounding-level forward
-change, which these gradients are chaotic under. A same-batch gradient
-comparison cannot separate it from the default path. A loss-curve A/B over a
-few hundred updates (several seeds per arm) is the test that can, and should
-come before it is turned on by default.
+The robust result is the asymmetry. Forward-output noise at `1e-3` moves the
+training gradients `7`-`100x` more than q/k/v gradient noise at `4e-3`. The
+default path's repeat looks tight only because its forward is deterministic.
+The block-causal vs default number at update `24` (blocks not compiled) is
+not stable across jobs: `1.18e-2` (`12482329`), `7.78e-2` (`12482333`),
+`0.130` (`12482340`). Job `12482343` samples updates `6`, `11`, `16`, `21`
+and `26` in one run to compare distributions instead of single draws.
+
+What is established: block-causal's op-level accuracy matches the default
+kernel's on four saved training calls (rank `0`, layers `0` and `11`, updates
+`1` and `24`); the autograd wrapper and compile are cleared (`blk1`); and a
+rounding-level forward change produces divergence of the same order. A
+same-batch gradient comparison therefore cannot separate block-causal from
+the default path. A loss-curve A/B over a few hundred updates, several seeds
+per arm, can, and should come before it is turned on by default.
 
 ## What changed in TT
 
