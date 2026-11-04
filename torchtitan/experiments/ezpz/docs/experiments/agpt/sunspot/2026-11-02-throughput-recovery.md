@@ -126,6 +126,47 @@ gives `109.18` TFLOP/s/tile at `8128` tok/s/tile over iterations `21`-`32`,
 `6.1%` above July 2025. MDS has not lost throughput; the `~90` on AGPT-2B is
 the model shape.
 
+## TT at the 2025 high-throughput shape
+
+`mds-4096x10` (`agpt_mds_shape_benchmark_adamw`) is the `z2rrt02w` model in
+TT: `2,034,323,456` parameters, the count W&B records for that run. Job
+`12482280` ran TT and MDS on one node (`x1922c2s0b0n0`) with the same batch
+(microbatch `1`, accumulation `16`, GBS `192`, sequence `4096`), AdamW, from
+random init on the same books data. A discarded 8-update TT launch ran first,
+so no measured TT arm is a cold first launch.
+
+| Arm (phase order) | s/update | tok/s/tile | TFLOP/s/tile |
+|---|---:|---:|---:|
+| TT DDP/ZeRO-1, per-block compile (2) | `10.100` | `6489` | `87.17` |
+| TT FSDP, per-block compile (3) | `15.122` | `4334` | `58.22` |
+| MDS ZeRO-1 (4) | `7.977` | `8216` | `110.36` |
+| TT DDP/ZeRO-1, per-block compile (5) | `10.042` | `6526` | `87.66` |
+
+Updates `21`-`32`. TFLOP/s uses MDS's own count at this shape,
+`1.3433e10` FLOPs/token (`110.36e12 / 8216`). TT DDP takes `26%` longer per
+update than MDS. At AGPT-2B it was `2.3`-`2.6%` faster.
+
+The rank-0 trace of update `12` (phase 5) shows TT DDP is compute-bound: the
+GPU is busy `9.72` of `9.92 s`, and gradient reduction takes `0.19 s`.
+
+| Kernel | Time per update | Rate |
+|---|---:|---:|
+| GEMM | `4.38 s` | `171` TFLOP/s (non-attention FLOPs) |
+| Flash-attention backward | `2.32 s` | `38` TFLOP/s |
+| Flash-attention forward | `0.55 s` | `81` TFLOP/s |
+| Elementwise binary | `0.48 s` | -- |
+
+The attention backward is the outlier. The torch `2.14` XPU flash backward
+does not skip fully masked key tiles under `is_causal`; IPEX xetla, which MDS
+uses, does (`24.7` vs `10.2 ms` causal at the AGPT-2B shape,
+[handoff audit](2026-11-01-handoff-audit.md#attention-and-communication)).
+Job `12482281` tests the opt-in block-causal path
+(`EZPZ_XPU_ATTN_CAUSAL_BLOCKS`), which computes only the lower-triangle
+blocks, against same-job controls.
+
+FSDP spends `3.01 s` in all-gather and `2.43 s` in reduce-scatter per
+update: it gathers parameters again for each of the `16` microbatches.
+
 ## What changed in TT
 
 Upstream replaced `apply_compile`, which compiled each `TransformerBlock` with
@@ -180,8 +221,8 @@ logits memory.
 - Find the cause of the slow first TT launch on a cold node (`2`-`7%`). Its
   first update is `25 s` slower, so the next test is a profile of a cold first
   launch against a later launch on the same node.
-- Run TT at the `z2rrt02w` shape to compare the frameworks where MDS reaches
-  `109`.
+- Close the `26%` TT gap at the `z2rrt02w` shape; attention backward is the
+  first suspect ([TT at the 2025 high-throughput shape](#tt-at-the-2025-high-throughput-shape)).
 - Fit native DDP at `1 x 2`, for example with chunked loss so FP32 logits are
   not materialized for both sequences at once.
 - `mode="max-autotune"` (`EZPZ_AGPT_COMPILE_BLOCKS=max-autotune`) is wired but
@@ -200,6 +241,7 @@ logits memory.
 | `12482127` | MDS control and AdamW/ZeRO-1; TT HSDP per-block compile `2 x 1`, `1 x 2`, AdamW | `0` |
 | `12482147`, `12482150`-`12482158`, `12482238`-`12482246` | TT anchor launch-order and cold-node tests ([Anchor launch environment](#anchor-launch-environment)) | `0` |
 | `12482248` | MDS at the `z2rrt02w` shape | `0` |
+| `12482280` | TT DDP/ZeRO-1 (`x2`), TT FSDP and MDS at the `z2rrt02w` shape, `ee9c5fd4a` | `0` |
 
 Jobs `12482111`/`12482112` ran at `83fb8ad7b`; `12482126`/`12482127` ran at
 `586f1a542`, which adds the positions, compiled-block WGRAD and AdamW changes.
