@@ -45,7 +45,14 @@ SUBMIT_DIR="${PBS_O_WORKDIR:-$(pwd)}"
 cd "${SUBMIT_DIR}"
 
 VENV="${VENV:-/lus/tegu/projects/datascience/foremans/venvs/xpu-torch214-fixedlr-v2-20260927}"
-source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup_job
+# Use local utils.sh copy — compute nodes have no outbound net for curl
+# Preflight: ensure staged copy exists (login has proxy, compute does not)
+UTILS="${HOME}/stage/utils.sh"
+if [[ -f "${UTILS}" ]]; then
+    source "${UTILS}" && ezpz_setup_job
+else
+    source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup_job
+fi
 # Override venv: ezpz_setup_job auto-picks xpu-torch214 (no trl), we need fixedlr-v2
 source "${VENV}/bin/activate"
 
