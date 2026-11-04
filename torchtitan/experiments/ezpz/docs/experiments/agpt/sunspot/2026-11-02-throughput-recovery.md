@@ -160,9 +160,29 @@ The attention backward is the outlier. The torch `2.14` XPU flash backward
 does not skip fully masked key tiles under `is_causal`; IPEX xetla, which MDS
 uses, does (`24.7` vs `10.2 ms` causal at the AGPT-2B shape,
 [handoff audit](2026-11-01-handoff-audit.md#attention-and-communication)).
-Job `12482281` tests the opt-in block-causal path
-(`EZPZ_XPU_ATTN_CAUSAL_BLOCKS`), which computes only the lower-triangle
-blocks, against same-job controls.
+
+The opt-in block-causal path (`EZPZ_XPU_ATTN_CAUSAL_BLOCKS`) splits the
+sequence into `n` chunks and computes only the lower-triangle block pairs.
+Job `12482281` (`x1922c4s2b0n0`, a discarded warm-up launch first) ran it
+between two controls:
+
+| Arm (phase order) | s/update | tok/s/tile | TFLOP/s/tile |
+|---|---:|---:|---:|
+| Control (2) | `10.073` | `6506` | `87.39` |
+| Block-causal, `4` chunks (3) | `9.111` | `7193` | `96.62` |
+| Block-causal, `8` chunks (4) | `9.285` | `7058` | `94.81` |
+| Control (5) | `9.777` | `6703` | `90.04` |
+
+Four chunks is `7`-`10%` faster than the controls, whose spread is `3%`.
+Update `12` traces: flash backward drops from `2.26` to `1.53 s` and the
+extra merge work adds `0.16 s`; GEMM is unchanged (`4.57` vs `4.58 s`). Final
+losses after `32` updates are `6.656`/`6.698` (controls) and `6.667`
+(4 chunks), a smoke check, not an equivalence test.
+
+TT with block-causal attention is still `14%` slower than MDS (`9.111` vs
+`7.977 s`). Non-GEMM, non-attention kernels take `2.2 s` per update in TT;
+that is the next place to look, with an MDS trace at this shape for
+comparison.
 
 FSDP spends `3.01 s` in all-gather and `2.43 s` in reduce-scatter per
 update: it gathers parameters again for each of the `16` microbatches.
@@ -221,8 +241,11 @@ logits memory.
 - Find the cause of the slow first TT launch on a cold node (`2`-`7%`). Its
   first update is `25 s` slower, so the next test is a profile of a cold first
   launch against a later launch on the same node.
-- Close the `26%` TT gap at the `z2rrt02w` shape; attention backward is the
-  first suspect ([TT at the 2025 high-throughput shape](#tt-at-the-2025-high-throughput-shape)).
+- Close the remaining `14%` TT gap at the `z2rrt02w` shape
+  ([TT at the 2025 high-throughput shape](#tt-at-the-2025-high-throughput-shape)):
+  profile MDS at that shape and compare the `2.2 s` of other TT kernels.
+- Block-causal attention (`4` chunks) is worth `7`-`10%` at that shape. Measure
+  it at AGPT-2B and check loss/gradient equivalence before turning it on.
 - Fit native DDP at `1 x 2`, for example with chunked loss so FP32 logits are
   not materialized for both sequences at once.
 - `mode="max-autotune"` (`EZPZ_AGPT_COMPILE_BLOCKS=max-autotune`) is wired but
@@ -242,6 +265,7 @@ logits memory.
 | `12482147`, `12482150`-`12482158`, `12482238`-`12482246` | TT anchor launch-order and cold-node tests ([Anchor launch environment](#anchor-launch-environment)) | `0` |
 | `12482248` | MDS at the `z2rrt02w` shape | `0` |
 | `12482280` | TT DDP/ZeRO-1 (`x2`), TT FSDP and MDS at the `z2rrt02w` shape, `ee9c5fd4a` | `0` |
+| `12482281` | TT DDP/ZeRO-1 at the `z2rrt02w` shape: control (`x2`), block-causal `4` and `8` chunks, `ee9c5fd4a` | `0` |
 
 Jobs `12482111`/`12482112` ran at `83fb8ad7b`; `12482126`/`12482127` ran at
 `586f1a542`, which adds the positions, compiled-block WGRAD and AdamW changes.

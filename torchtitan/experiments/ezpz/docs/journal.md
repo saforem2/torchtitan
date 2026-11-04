@@ -2,6 +2,19 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-11-03 (Sunspot) -- TT at the z2rrt02w shape
+
+New flavor `mds-4096x10` (`agpt_mds_shape_benchmark_adamw`) runs the 2025 MDS
+shape in TT. Same node, same batch (GAS `16`, sequence `4096`): MDS `110.36`
+model TFLOP/s/tile, TT DDP/ZeRO-1 `87.17`-`87.66`, TT FSDP `58.22`. The trace
+is compute-bound and the torch `2.14` flash backward runs at `38` TFLOP/s
+because it does not skip causally masked tiles. Block-causal attention
+(`EZPZ_XPU_ATTN_CAUSAL_BLOCKS=4`) gives `96.62`, `7`-`10%` over same-job
+controls; TT is still `14%` behind MDS. Jobs `12482280`, `12482281`.
+[Report](experiments/agpt/sunspot/2026-11-02-throughput-recovery.md#tt-at-the-2025-high-throughput-shape).
+
+---
+
 ## 2026-11-03 (Sunspot) -- Cold first launch and MDS shape
 
 The `6.1%` "machine gap" is not the machine. On a node that has not run this
