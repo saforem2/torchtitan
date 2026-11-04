@@ -14,6 +14,8 @@ Variants set ``causal_blocks`` on every ``XPUScaledDotProductAttention``:
 - ``default_repeat``: same again; the run-to-run floor of the default path.
 - ``blk1``: one causal flash call through the block-causal autograd.Function.
 - ``blk4`` / ``blk8``: ``block_causal_flash_attention`` with 4 / 8 chunks.
+- ``fwdnoise1e-3`` / ``fwdnoise4e-3``: default attention with its forward
+  output multiplied by ``1 + sigma * N(0, 1)`` (gradient passes through).
 - ``noise1e-3`` / ``noise4e-3``: default attention, with each element of the
   q/k/v gradients multiplied by ``1 + sigma * N(0, 1)``. A benign perturbation
   of known size, to show how much the backward amplifies one.
@@ -55,6 +57,10 @@ VARIANTS = {
     "blk8": (8, 0.0),
     "noise1e-3": (0, 1e-3),
     "noise4e-3": (0, 4e-3),
+    # Negative sigma: perturb the forward attention output instead,
+    # out + sigma * N(0, 1) * out with the gradient passing straight through.
+    "fwdnoise1e-3": (0, -1e-3),
+    "fwdnoise4e-3": (0, -4e-3),
 }
 # AGPT_BLOCK_PROBE_VARIANTS (comma-separated) keeps a subset, in this order.
 _KEEP = os.environ.get("AGPT_BLOCK_PROBE_VARIANTS")
@@ -69,6 +75,8 @@ PAIRS = (
     ("blk8", "blk4"),
     ("noise1e-3", "default"),
     ("noise4e-3", "default"),
+    ("fwdnoise1e-3", "default"),
+    ("fwdnoise4e-3", "default"),
 )
 
 
@@ -94,7 +102,7 @@ def patch_attention_noise() -> None:
     @functools.wraps(original)
     def _sdpa(self, q, k, v, **kwargs):
         sigma = getattr(self, "probe_grad_noise", 0.0)
-        if sigma:
+        if sigma > 0:
             q, k, v = (_GradNoise.apply(t, sigma) for t in (q, k, v))
         if self.causal_blocks == 1 and kwargs.get("is_causal"):
             from torchtitan.experiments.ezpz.agpt.xpu_block_causal_attention import (
@@ -106,6 +114,9 @@ def patch_attention_noise() -> None:
             )
         else:
             out = original(self, q, k, v, **kwargs)
+        if sigma < 0:
+            noise = torch.randn(out.shape, dtype=torch.float32, device=out.device)
+            out = out + (out.float() * (-sigma) * noise).to(out.dtype).detach()
         path = getattr(self, "probe_dump_path", None)
         if path is not None:
             self.probe_dump_path = None
