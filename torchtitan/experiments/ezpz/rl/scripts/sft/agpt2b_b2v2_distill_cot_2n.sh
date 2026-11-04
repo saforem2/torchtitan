@@ -42,24 +42,17 @@ export http_proxy=http://proxy.alcf.anl.gov:3128
 export https_proxy=http://proxy.alcf.anl.gov:3128
 
 SUBMIT_DIR="${PBS_O_WORKDIR:-$(pwd)}"
-source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup_job
-
 cd "${SUBMIT_DIR}"
 
-# Activate the venv that has TRL + torch 2.13 XPU
-# Prefer the fw213-sync84 venv (updated), fall back to .venv
-if [[ -f "/lus/tegu/projects/datascience/foremans/venvs/fw213-sync84/bin/activate" ]]; then
-    source /lus/tegu/projects/datascience/foremans/venvs/fw213-sync84/bin/activate
-elif [[ -f ".venv/bin/activate" ]]; then
-    source .venv/bin/activate
-fi
+VENV="${VENV:-/lus/tegu/projects/datascience/foremans/venvs/rl-monarch-torch214}"
+source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup "${VENV}"
 
 python3 -c "import trl; print('trl', trl.__version__)" || { echo "FATAL: trl missing"; exit 1; }
 python3 -c "import torch; print('torch', torch.__version__, 'xpu', torch.xpu.is_available())" 2>&1 | head -2
 
 # Base = ckpt-900 sharded output (re-consolidate if -hf missing, else use sharded directly)
 # train_sft.py accepts either HF dir or sharded DCP via --model_name_or_path
-BASE_MODEL="${BASE_MODEL:-$SUBMIT_DIR/outputs/sft/agpt-2b-gs138650-tulu-math-uc-mix-8n-gbs6144/checkpoint-900}"
+BASE_MODEL="${BASE_MODEL:-$SUBMIT_DIR/outputs/sft/agpt-2b-gs138650-tulu-math-uc-mix-8n-gbs6144/checkpoint-900-hf}"
 # Fallback: if checkpoint-900 doesn't exist, try the alternate path
 if [[ ! -d "${BASE_MODEL}" ]]; then
     BASE_MODEL="$SUBMIT_DIR/outputs/sft/agpt2b-gsm8k-r1cot-2n"
