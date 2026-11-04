@@ -32,7 +32,8 @@ CKPT="${CKPT:-$HOME/rl-repro/run/agpt2b-ckpt900}"   # staged ckpt-900 w/ gemma t
 LIMIT="${LIMIT:-200}"
 DTYPE="${DTYPE:-float32}"
 OUT="${OUT:-$REPO/outputs/evals/cot/gsm8k-cot-baseline.jsonl}"
-PY=$REPO/venvs/rl-vllm/bin/python
+PY="${PY:-$REPO/venvs/rl-vllm/bin/python}"
+[[ -f "$PY" ]] || PY="/lus/tegu/projects/datascience/foremans/venvs/rl-vllm/bin/python"
 mkdir -p "$(dirname "$OUT")"
 
 echo "COT-EVAL START $(date +%T) host=$(hostname) ckpt=$CKPT limit=$LIMIT dtype=$DTYPE"
