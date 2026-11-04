@@ -17,9 +17,9 @@ REPO=/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan
 cd "${PBS_O_WORKDIR:-$REPO}" || exit 9
 
 source /usr/share/lmod/lmod/init/bash 2>/dev/null
-module load oneapi/release/2025.3.1 hdf5 pti-gpu >/dev/null 2>&1
-export CCL_ROOT=/opt/aurora/26.26.0/oneapi/ccl/latest
-export LD_LIBRARY_PATH=/opt/cray/libfabric/2.3.1/lib64:/opt/aurora/26.26.0/oneapi/2025.3/opt/mpi/libfabric/lib:$CCL_ROOT/lib:/opt/aurora/26.26.0/oneapi/2025.3/lib:$LD_LIBRARY_PATH
+module load frameworks/2026.1.0 pti-gpu >/dev/null 2>&1
+export CCL_ROOT=/opt/aurora/26.181.0/oneapi/ccl/latest
+export LD_LIBRARY_PATH=/opt/cray/libfabric/2.3.1/lib64:/opt/aurora/26.181.0/oneapi/2026.1/lib:$CCL_ROOT/lib:$LD_LIBRARY_PATH
 export ZE_FLAT_DEVICE_HIERARCHY=COMPOSITE
 export ONEAPI_DEVICE_SELECTOR="opencl:gpu;level_zero:gpu"
 export ZE_AFFINITY_MASK=0            # single tile is plenty for the eval
@@ -32,9 +32,7 @@ CKPT="${CKPT:-$HOME/rl-repro/run/agpt2b-ckpt900}"   # staged ckpt-900 w/ gemma t
 LIMIT="${LIMIT:-200}"
 DTYPE="${DTYPE:-float32}"
 OUT="${OUT:-$REPO/outputs/evals/cot/gsm8k-cot-baseline.jsonl}"
-VENV_RL_VLLM="/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan/venvs/rl-vllm"
-PY="${PY:-$VENV_RL_VLLM/bin/python}"
-[[ -f "$PY" ]] || PY="/lus/tegu/projects/datascience/foremans/venvs/rl-vllm/bin/python"
+PY="${PY:-/opt/aurora/26.181.0/frameworks/aurora_frameworks-2026.1.0/bin/python}"
 # Workaround: Sunspot compute has no $HOME/torchtitan (checkout at $REPO), but script uses relative path
 # Ensure eval script is found from REPO
 EVAL_SCRIPT="$REPO/torchtitan/experiments/ezpz/scripts/eval/eval_cot_gsm8k.py"
