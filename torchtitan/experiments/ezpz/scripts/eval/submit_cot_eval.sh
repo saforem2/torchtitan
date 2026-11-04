@@ -17,7 +17,7 @@ REPO=/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan
 cd "${PBS_O_WORKDIR:-$REPO}" || exit 9
 
 source /usr/share/lmod/lmod/init/bash 2>/dev/null
-module load frameworks/2026.1.0 pti-gpu >/dev/null 2>&1
+module load frameworks/2026.1.0 oneapi/release/2025.3.1 pti-gpu >/dev/null 2>&1
 export CCL_ROOT=/opt/aurora/26.181.0/oneapi/ccl/latest
 export LD_LIBRARY_PATH=/opt/aurora/26.181.0/spack/unified/1.1.1/install/linux-x86_64/pti-gpu-0.17.0-62kxpbr/lib64:$LD_LIBRARY_PATH
 export ZE_FLAT_DEVICE_HIERARCHY=COMPOSITE
