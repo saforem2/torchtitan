@@ -2252,11 +2252,15 @@ def _polaris_dolma_grain(cfg: FaultTolerantTrainer.Config) -> FaultTolerantTrain
     """
     from torchtitan.components.data.sources import IndexedJsonlSource
 
+    # Single dolma shard for fast startup: 1.2G vs 4.1T scan (2419 files)
+    # IndexedJsonlSource rescans every pattern match at init (no index cache)
     cfg.dataloader = GrainDataLoader.Config(
         dataset=ConcatThenSplitPackingConfig(
             dataset=SingleDatasetConfig(
                 source=IndexedJsonlSource.Config(
-                    patterns=("/eagle/datasets/dolma/data_v1.7/*.json.gz",),
+                    patterns=(
+                        "/eagle/datasets/dolma/data_v1.7/algebraic-stack-train-0000.json.gz",
+                    ),
                 ),
                 processor=TextProcessor.Config(),
                 post_filters=(lambda sample: sample is not None,),
