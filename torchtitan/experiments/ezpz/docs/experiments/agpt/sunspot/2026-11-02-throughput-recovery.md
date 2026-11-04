@@ -13,8 +13,9 @@ production-shaped batch (two sequences per rank per update) TT now runs
 
 Opt-in block-causal attention (`EZPZ_XPU_ATTN_CAUSAL_BLOCKS=4`) brings the
 same TT arm to `2.0788 s/update`, `88.17` model TFLOP/s/tile, `10.5%` faster
-than its later same-job control (`12482301`). Loss equivalence is not
-established ([Block-causal attention at AGPT-2B](#block-causal-attention-at-agpt-2b)).
+than its later same-job control (`12482301`). Its gradients are wrong under
+per-block compile, so that speed is not usable yet
+([Block-causal attention at AGPT-2B](#block-causal-attention-at-agpt-2b)).
 
 MDS reproduces its historical number. Its `8dscnx65` configuration (GBS `384`,
 accumulation `16`, AdamW, ZeRO-1) gives `89.76` today against `89.99` in March.
@@ -248,9 +249,42 @@ Losses at update `1` agree: `17.741` (both controls), `17.742` (`4` chunks),
 `17.733` (`8` chunks). Later updates are not deterministic: the two controls
 differ by up to `0.62` (update `16`). Over updates `24`-`31` the 4-chunk arm is
 above both controls on every update, by `0.03`-`0.14` against the closer one.
-That is inside the control spread seen earlier in the run but one-sided, so
-block-causal stays off by default until a same-batch gradient comparison
-settles it.
+That is inside the control spread seen earlier in the run but one-sided.
+
+### Same-batch gradients
+
+`probe_block_causal_grads.py` (`BENCH_BLOCK_PROBE=1`) replays one update with
+the same weights and microbatches under default and block-causal attention and
+compares the all-reduced gradients on rank `0`. Job `12482320`, `12` tiles,
+DDP/ZeRO-1 with per-block compile, `torch._dynamo.reset()` between variants:
+
+| Update | Pair | Relative L2 | Cosine | Max abs diff |
+|---:|---|---:|---:|---:|
+| `1` | default repeat vs default | `1.80e-2` | `0.99986` | `3.0` |
+| `1` | `4` chunks vs default | `0.938` | `0.458` | `164.5` |
+| `1` | `8` chunks vs default | `1.80` | `0.655` | `391` |
+| `24` | default repeat vs default | `8.36e-3` | `0.99998` | `0.0625` |
+| `24` | `4` chunks vs default | `9.93e-2` | `0.99506` | `0.570` |
+| `24` | `8` chunks vs default | `0.199` | `0.98040` | `1.22` |
+
+The losses of the replayed updates agree (`1.47185` vs `1.47190` at update
+`1`), so the forward is right and the backward is not. At update `1` the
+block-causal gradient is `50`-`100x` further from the default than the
+default is from itself.
+
+The attention op alone is fine in eager mode. Job `12482321` measures it
+against an FP32 math reference at the AGPT-2B shape (max abs error, torch
+`2.14`):
+
+| Case | out | dQ | dK | dV |
+|---|---:|---:|---:|---:|
+| Default flash | `0.0077` | `0.0103` | `0.0219` | `0.0303` |
+| Block-causal, `4` chunks | `0.0077` | `0.0103` | `0.0262` | `0.0443` |
+| Block-causal, `8` chunks | `0.0077` | `0.0103` | `0.0227` | `0.0332` |
+
+The difference between the two is the compiled training path. The eager
+probe arm ran out of device resources at its first backward, so it says
+nothing either way. Block-causal stays off by default.
 
 ## What changed in TT
 
@@ -309,10 +343,10 @@ logits memory.
 - Close the remaining `14%` TT gap at the `z2rrt02w` shape
   ([TT at the 2025 high-throughput shape](#tt-at-the-2025-high-throughput-shape)):
   profile MDS at that shape and compare the `2.2 s` of other TT kernels.
-- Block-causal attention (`4` chunks) is worth `9.5%` at AGPT-2B and `7`-`10%`
-  at the `z2rrt02w` shape. Compare its gradients with the default path on the
-  same batch before turning it on; its late losses sit `0.03`-`0.14` above both
-  controls.
+- Fix block-causal backward under per-block compile, then rerun the gradient
+  probe. It is worth `9.5%` at AGPT-2B and `7`-`10%` at the `z2rrt02w` shape,
+  but its compiled gradients are wrong
+  ([Same-batch gradients](#same-batch-gradients)).
 - Rerun TT FSDP at the `z2rrt02w` shape with deferred gradient reduction.
 - Fit native DDP at `1 x 2`, for example with chunked loss so FP32 logits are
   not materialized for both sequences at once.
@@ -335,6 +369,8 @@ logits memory.
 | `12482280` | TT DDP/ZeRO-1 (`x2`), TT FSDP and MDS at the `z2rrt02w` shape, `ee9c5fd4a` | `0` |
 | `12482281` | TT DDP/ZeRO-1 at the `z2rrt02w` shape: control (`x2`), block-causal `4` and `8` chunks, `ee9c5fd4a` | `0` |
 | `12482301` | TT DDP/ZeRO-1 at AGPT-2B: control (`x2`), block-causal `4` and `8` chunks, `ee9c5fd4a` | `1` (MDS phase: `BENCH_EXPECTED_MDS_HEAD` unset) |
+| `12482320` | Block-causal gradient probe, eager and per-block compile, `f214641b2` | `1` (eager arm: `UR_RESULT_ERROR_OUT_OF_RESOURCES`) |
+| `12482321` | Attention microbenchmark against FP32: default, block-causal `4` and `8` chunks, `f214641b2` | `0` |
 
 Jobs `12482111`/`12482112` ran at `83fb8ad7b`; `12482126`/`12482127` ran at
 `586f1a542`, which adds the positions, compiled-block WGRAD and AdamW changes.
