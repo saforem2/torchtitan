@@ -2245,16 +2245,18 @@ def _polaris_dolma_grain(cfg: FaultTolerantTrainer.Config) -> FaultTolerantTrain
     Reads /eagle/datasets/dolma/data_v1.7/*.json.gz (2419 files, 4.1T).
     TextProcessor tokenizes each sample with the model's own hf_assets_path
     tokenizer at runtime — no pre-tokenized corpus required.
+
+    Uses IndexedJsonlSource (raw jsonl over byte offsets) rather than
+    HuggingFaceStreamingSource(json): the HF json loader infers a schema
+    from the file and chokes on Dolma's paloma_* null columns.
     """
+    from torchtitan.components.data.sources import IndexedJsonlSource
+
     cfg.dataloader = GrainDataLoader.Config(
         dataset=ConcatThenSplitPackingConfig(
             dataset=SingleDatasetConfig(
-                source=HuggingFaceStreamingSource.Config(
-                    path="json",
-                    split="train",
-                    load_dataset_kwargs={
-                        "data_files": "/eagle/datasets/dolma/data_v1.7/*.json.gz",
-                    },
+                source=IndexedJsonlSource.Config(
+                    patterns=("/eagle/datasets/dolma/data_v1.7/*.json.gz",),
                 ),
                 processor=TextProcessor.Config(),
                 post_filters=(lambda sample: sample is not None,),
