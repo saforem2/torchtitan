@@ -56,6 +56,8 @@ fi
 export VIRTUAL_ENV="${VENV}"
 export PATH="${VENV}/bin:${PATH}"
 export PYTHONPATH="${VENV}/lib/python3.12/site-packages${PYTHONPATH:+:${PYTHONPATH}}"
+# Prepend venv's bundled UR/SYCL so it wins over stale system 2026.0 on x1921 nodes
+export LD_LIBRARY_PATH="${VENV}/lib:${LD_LIBRARY_PATH:-}"
 
 python3 -c "import trl; print('trl', trl.__version__)" || { echo "FATAL: trl missing"; exit 1; }
 python3 -c "import torch; print('torch', torch.__version__, 'xpu', torch.xpu.is_available())" 2>&1 | head -2
