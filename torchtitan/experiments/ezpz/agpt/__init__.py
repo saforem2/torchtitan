@@ -746,6 +746,18 @@ agpt_configs = {
         vocab_size=256000,
         hidden_dim=11008,
     ),
+    # [ezpz] Throughput-only shape of the 2025 MDS Aurora run z2rrt02w (102.9
+    # TFLOP/s/tile): Llama2 vocab, hidden 4096, 10 layers, GQA 32/8, FFN 11008.
+    # Used to compare TT and MDS at a shape where MDS exceeds 100 TFLOP/s/tile.
+    "mds-4096x10": _build_agpt_config(
+        dim=4096,
+        n_layers=10,
+        n_heads=32,
+        n_kv_heads=8,
+        rope_theta=10000,
+        vocab_size=32000,
+        hidden_dim=11008,
+    ),
     "2B_qknorm": _build_agpt_config(
         dim=2048,
         n_layers=12,

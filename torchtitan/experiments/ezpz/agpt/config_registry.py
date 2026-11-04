@@ -634,6 +634,18 @@ def agpt_2b_replicated_benchmark_adamw() -> FaultTolerantTrainer.Config:
     return cfg
 
 
+def agpt_mds_shape_benchmark_adamw() -> FaultTolerantTrainer.Config:
+    """The z2rrt02w MDS shape (``mds-4096x10``) from random init with that
+    run's AdamW (lr 2e-4, betas 0.9/0.95, wd 0.1), sequence 4096, no AC.
+    Throughput benchmark only; the CLI supplies data and parallelism."""
+    cfg = agpt("mds-4096x10", activation_checkpoint_mode="none", seq_len=4096)
+    cfg.optim.optimizer = default_adamw(lr=2e-4, betas=(0.9, 0.95), weight_decay=0.1)
+    cfg.optim.lr_scheduler.warmup_steps = 0
+    cfg.checkpointer.folder = "checkpoints/agpt-mds-shape-benchmark"
+    cfg.metrics.enable_wandb = True
+    return cfg
+
+
 def agpt_2b_mds_anneal_wsd() -> FaultTolerantTrainer.Config:
     """ARM B (treatment): fork MDS gs138650, WSD decay-to-0 anneal.
 

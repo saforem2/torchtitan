@@ -9,11 +9,12 @@
 
 # Run MDS and TT arms serially on the same allocated nodes.
 # BENCH_PHASES is a space-separated list of KIND:TAG[:KEY=VAL+KEY=VAL...],
-# KIND being mds or tt. Overrides apply to that phase only, e.g.
+# KIND being mds, mdsshape or tt. Overrides apply to that phase only, e.g.
 #   "mds:ctl tt:blk:ARM=ddp-bf16-losscompile+BENCH_COMPILE_MODE=blocks-loss
 #    mds:gas16:MDS_GAS=16+MDS_OPTIMIZER=adamw+MDS_ZERO_STAGE=1+MDS_ZERO0_PATH=runtime"
 # MDS phases default to the historical BF16_Optimizer control used by
 # benchmark_agpt_replicated_pair.sh; TT phases call the TT launcher directly.
+# mdsshape runs benchmark_mds_historical_shape.sh (the z2rrt02w shape).
 set -o pipefail
 export ZE_FLAT_DEVICE_HIERARCHY=FLAT
 ROOT="${PBS_O_WORKDIR:?submit from the isolated checkout}"
@@ -56,6 +57,11 @@ for phase in ${PHASES}; do
                 RUN_KIND="matrix-${tag}" \
                 timeout --kill-after=60 "${BENCH_MDS_TIMEOUT:-1500}" \
                 bash --login "${SCRIPTS}/benchmark_agpt_replicated_mds.sh"
+            ;;
+        mdsshape)
+            env "${overrides[@]}" \
+                timeout --kill-after=60 "${BENCH_MDS_TIMEOUT:-1500}" \
+                bash --login "${SCRIPTS}/benchmark_mds_historical_shape.sh"
             ;;
         tt)
             env ARM=ddp-bf16-losscompile "${overrides[@]}" BENCH_TAG="${tag}" \

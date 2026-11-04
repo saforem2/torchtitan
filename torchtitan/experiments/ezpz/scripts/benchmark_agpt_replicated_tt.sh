@@ -60,17 +60,23 @@ NPROC=$((NODES * PPN))
 export BENCH_EXPECTED_WORLD_SIZE="${NPROC}"
 # Two sequences per rank per update, as microbatch 1 x accumulation 2 or
 # microbatch 2 x accumulation 1. Tokens per update are the same either way.
+# BENCH_SEQS_PER_RANK and BENCH_SEQ change that budget and the sequence length;
+# BENCH_TT_CONFIG replaces the optimizer-derived config (another model shape).
+SEQ="${BENCH_SEQ:-8192}"
+SEQS_PER_RANK="${BENCH_SEQS_PER_RANK:-2}"
 OPTIMIZER="${BENCH_OPTIMIZER:-sophiag}"
 case "${OPTIMIZER}" in
     sophiag) TT_CONFIG=agpt_2b_replicated_benchmark; WITNESS=(--benchmark-sophia-witness) ;;
     adamw) TT_CONFIG=agpt_2b_replicated_benchmark_adamw; WITNESS=() ;;
     *) echo "BENCH_OPTIMIZER must be sophiag or adamw" >&2; exit 2;;
 esac
+TT_CONFIG="${BENCH_TT_CONFIG:-${TT_CONFIG}}"
 MICROBATCH="${BENCH_MICROBATCH:-1}"
 case "${MICROBATCH}" in 1|2) ;; *) echo "BENCH_MICROBATCH must be 1 or 2" >&2; exit 2;; esac
-GAS=$((2 / MICROBATCH))
-GBS=$((NPROC * 2))
-TOKENS=$((GBS * 8192))
+(( SEQS_PER_RANK % MICROBATCH == 0 )) || { echo "BENCH_SEQS_PER_RANK must be a multiple of BENCH_MICROBATCH" >&2; exit 2; }
+GAS=$((SEQS_PER_RANK / MICROBATCH))
+GBS=$((NPROC * SEQS_PER_RANK))
+TOKENS=$((GBS * SEQ))
 JOB="${PBS_JOBID%%.*}"
 # BENCH_TAG separates ablation variants of one ARM in one PBS job. When the
 # compile mode overrides the ARM-derived default, include it in the run path.
@@ -145,7 +151,7 @@ module -t list 2> "${OUT}/provenance/modules.txt"
 echo "BEGIN $(date -Is) host=$(hostname -s) job=${PBS_JOBID} sha=${EXPECTED}"
 echo "BENCH_TAG=${BENCH_TAG:-} CCL_OP_SYNC=${CCL_OP_SYNC} fsdp_reshard=${BENCH_FSDP_RESHARD:-default} fsdp_reduce=${BENCH_FSDP_REDUCE_DTYPE:-float32} fsdp_defer=${BENCH_FSDP_DEFER:-0} deterministic=${BENCH_DETERMINISTIC:-0} reduce_probe=${BENCH_REDUCE_PROBE:-0}"
 echo "ddp_zero1=${BENCH_DDP_ZERO1:-0} ddp_bucket_mb=${DDP_BUCKET_MB:-25} ddp_bucket_first=${BENCH_DDP_BUCKET_FIRST:-0}"
-echo "ARM=${ARM} nodes=${NODES} world=${NPROC} ppn=${PPN} optimizer=${OPTIMIZER} gbs=${GBS} microbatch=${MICROBATCH} gas=${GAS} seq=8192 steps=${STEPS}"
+echo "ARM=${ARM} nodes=${NODES} world=${NPROC} ppn=${PPN} optimizer=${OPTIMIZER} config=${TT_CONFIG} gbs=${GBS} microbatch=${MICROBATCH} gas=${GAS} seq=${SEQ} steps=${STEPS}"
 case "${COMPILE_MODE}" in
     none) echo "compile_mode=none components=none" ;;
     loss) echo "compile_mode=loss components=loss" ;;
@@ -295,13 +301,13 @@ else
         "${WITNESS[@]}" "${TIMING[@]}" "${INITIAL_AUDIT[@]}"
         --benchmark-module="${TRAIN_MODULE}" --
         --module=ezpz.agpt --config="${TT_CONFIG}"
-        --training.steps="${STEPS}" --training.max-context-length=8192
-        --training.num-tokens-per-microbatch-per-dp-rank=$((MICROBATCH * 8192))
+        --training.steps="${STEPS}" --training.max-context-length="${SEQ}"
+        --training.num-tokens-per-microbatch-per-dp-rank=$((MICROBATCH * SEQ))
         --training.num-tokens-per-train-step="${TOKENS}"
         "${PARALLEL[@]}" --dataloader.dataset=blendcorpus
         --dataloader.dataset-path="${ROOT}/torchtitan/experiments/ezpz/data-lists/sunspot/books.txt"
         --dataloader.train-iters="${STEPS}" --dataloader.split=95,5,0
-        --dataloader.data-cache-path="${ROOT}/.cache/books-gbs${GBS}/index-cache"
+        --dataloader.data-cache-path="${ROOT}/.cache/books-gbs${GBS}${BENCH_SEQ:+-seq${SEQ}}/index-cache"
         --debug.seed=42 "${DETERMINISTIC[@]}" --metrics.log-freq=1
         --metrics.enable-tensorboard --metrics.enable-wandb
         --dump-folder="${OUT}" --checkpointer.folder=checkpoints
