@@ -44,7 +44,7 @@ export https_proxy=http://proxy.alcf.anl.gov:3128
 SUBMIT_DIR="${PBS_O_WORKDIR:-$(pwd)}"
 cd "${SUBMIT_DIR}"
 
-VENV="${VENV:-/lus/tegu/projects/datascience/foremans/venvs/rl-monarch-torch214}"
+VENV="${VENV:-/lus/tegu/projects/datascience/foremans/venvs/xpu-torch214-fixedlr-v2-20260927}"
 source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup "${VENV}"
 
 python3 -c "import trl; print('trl', trl.__version__)" || { echo "FATAL: trl missing"; exit 1; }
