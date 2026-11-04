@@ -84,9 +84,10 @@ if [[ ! -d "${BASE_MODEL}" ]]; then
     exit 1
 fi
 
-# Dataset: distill_cot_mix via mix-spec so we can tune weights without code changes
-# Default 50/50 OpenThoughts + gsm8k-r1cot. Override via SFT_DATASET env.
-SFT_DATASET="${SFT_DATASET:-OpenThoughts-114k-decontam:0.5,gsm8k-r1cot:0.5}"
+# Dataset: gsm8k-r1cot alone, more epochs — proven B2 path, just longer.
+# distill_cot_mix (OpenThoughts) hit HF cache race on multi-rank; shelve it
+# until we fix the streaming+cache coherency or pretokenize.
+SFT_DATASET="${SFT_DATASET:-gsm8k-r1cot}"
 
 echo "=== B2v2: distill CoT SFT on ckpt-900, ${NUM_EPOCHS}ep, dataset=${SFT_DATASET} ===" | tee "${LOG_DIR}/run.log"
 echo "BASE_MODEL=${BASE_MODEL}" | tee -a "${LOG_DIR}/run.log"
