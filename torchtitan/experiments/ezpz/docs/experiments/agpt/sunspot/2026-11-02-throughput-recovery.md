@@ -294,10 +294,26 @@ Compile is not the cause. Job `12482325` runs the same op on one tile under
 eager and compiled (`dK` `3.37e-3` block-causal, `2.93e-3` default). The eager
 probe arm ran out of device resources at its first backward.
 
-Jobs `12482327` and `12482328` test amplification: the probe adds known
-relative noise (`1e-3`, `4e-3`) to the default path's q/k/v gradients, and the
-one-tile check measures the block-causal vs default difference at the op.
-Block-causal stays off by default.
+Amplification of a rounding-sized difference is not the cause either. Job
+`12482328` puts the block-causal vs default difference at the op at `1.3e-3`
+(`out`, `dQ`) to `3.7e-3` (`dK`, `dV`) relative L2, with random inputs. Job
+`12482327` multiplies the default path's q/k/v gradients by
+`1 + sigma * N(0, 1)` in training and compares against the unperturbed
+default:
+
+| Update `1` | Relative L2 | Cosine |
+|---|---:|---:|
+| Default repeat | `1.58e-2` | `0.99989` |
+| `sigma = 1e-3` | `1.93e-2` | `0.99982` |
+| `sigma = 4e-3` | `2.13e-2` | `0.99978` |
+| Block-causal, `4` chunks | `0.928` | `0.468` |
+
+Noise at least as large as the op-level block-causal difference barely moves
+the training gradients. Random noise is not a systematic difference, but a
+`45x` gap points at something the random-input check does not exercise:
+the training call's dtypes, strides (q/k/v are views of one fused projection)
+or attention patterns. Job `12482329` saves real training attention calls and
+`12482330` replays them through both paths. Block-causal stays off by default.
 
 ## What changed in TT
 
@@ -383,6 +399,8 @@ logits memory.
 | `12482301` | TT DDP/ZeRO-1 at AGPT-2B: control (`x2`), block-causal `4` and `8` chunks, `ee9c5fd4a` | `1` (MDS phase: `BENCH_EXPECTED_MDS_HEAD` unset) |
 | `12482320` | Block-causal gradient probe, eager and per-block compile, `f214641b2` | `1` (eager arm: `UR_RESULT_ERROR_OUT_OF_RESOURCES`) |
 | `12482321` | Attention microbenchmark against FP32: default, block-causal `4` and `8` chunks, `f214641b2` | `0` |
+| `12482325`, `12482328` | One-tile block-causal check, eager vs compiled, against FP32 and default, `b60c37a2c`/`ad261add3` | `0` |
+| `12482327` | Gradient probe with q/k/v gradient-noise calibration, per-block compile, `ad261add3` | `0` |
 
 Jobs `12482111`/`12482112` ran at `83fb8ad7b`; `12482126`/`12482127` ran at
 `586f1a542`, which adds the positions, compiled-block WGRAD and AdamW changes.
