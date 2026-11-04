@@ -106,6 +106,7 @@ ezpz launch --np 24 -ppn 12 --timeout "${IDLE_TIMEOUT:-1800}" \
     --per_device_train_batch_size 2 \
     --gradient_accumulation_steps 8 \
     --max_length 2048 \
+    --dataset_num_proc 8 \
     --bf16 --fsdp full_shard \
     --logging_steps 5 \
     --save_strategy epoch \
