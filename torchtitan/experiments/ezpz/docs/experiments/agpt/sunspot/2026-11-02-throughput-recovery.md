@@ -494,11 +494,11 @@ logits memory.
 - Close the remaining `14%` TT gap at the `z2rrt02w` shape
   ([TT at the 2025 high-throughput shape](#tt-at-the-2025-high-throughput-shape)):
   profile MDS at that shape and compare the `2.2 s` of other TT kernels.
-- Decide whether to turn block-causal attention (`4` chunks) on for
-  production. It is `7.8`-`9.5%` faster at AGPT-2B and matches the default
-  path's loss over `400` updates and three seeds
-  ([Loss-curve A/B](#loss-curve-ab)); it has not run at multi-node scale or
-  past `400` updates.
+- Block-causal attention (`4` chunks) stays opt-in
+  (`EZPZ_XPU_ATTN_CAUSAL_BLOCKS=4`), decided 2026-11-04. It is `7.8`-`9.5%`
+  faster at AGPT-2B and matches the default path's loss over `400` updates
+  and three seeds ([Loss-curve A/B](#loss-curve-ab)). Revisit after a
+  multi-node run and a run past `400` updates.
 - Rerun TT FSDP at the `z2rrt02w` shape with deferred gradient reduction.
 - Fit native DDP at `1 x 2`, for example with chunked loss so FP32 logits are
   not materialized for both sequences at once.

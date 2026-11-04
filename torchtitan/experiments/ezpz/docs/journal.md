@@ -2,6 +2,13 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-11-04 (Sunspot) -- Block-causal stays opt-in
+
+Block-causal attention stays off by default; set
+`EZPZ_XPU_ATTN_CAUSAL_BLOCKS=4` to use it. Not yet run at multi-node scale or
+past `400` updates.
+[Report](experiments/agpt/sunspot/2026-11-02-throughput-recovery.md#loss-curve-ab).
+
 ## 2026-11-04 (Sunspot) -- Block-causal loss A/B
 
 `agpt_2b_loss_ab` (AGPT-2B from random init, AdamW `3e-4`, `12` tiles,
