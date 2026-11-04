@@ -45,16 +45,17 @@ SUBMIT_DIR="${PBS_O_WORKDIR:-$(pwd)}"
 cd "${SUBMIT_DIR}"
 
 VENV="${VENV:-/lus/tegu/projects/datascience/foremans/venvs/xpu-torch214-fixedlr-v2-20260927}"
-# Use staged utils.sh — compute has no outbound net. Use ezpz_get_job_env (dist
-# info only, no venv) then activate target venv that has trl. ezpz_setup_job
-# would deactivate + pick stale xpu-torch214 (no trl), so we skip it.
 UTILS="${HOME}/stage/utils.sh"
 if [[ -f "${UTILS}" ]]; then
     source "${UTILS}" && ezpz_get_job_env
 else
     source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_get_job_env
 fi
-source "${VENV}/bin/activate"
+# Force correct venv via PATH — ezpz_get_job_env clobbers VIRTUAL_ENV to
+# stale xpu-torch214 (no trl). VIRTUAL_ENV alone isn't enough; need PATH.
+export VIRTUAL_ENV="${VENV}"
+export PATH="${VENV}/bin:${PATH}"
+export PYTHONPATH="${VENV}/lib/python3.12/site-packages${PYTHONPATH:+:${PYTHONPATH}}"
 
 python3 -c "import trl; print('trl', trl.__version__)" || { echo "FATAL: trl missing"; exit 1; }
 python3 -c "import torch; print('torch', torch.__version__, 'xpu', torch.xpu.is_available())" 2>&1 | head -2
