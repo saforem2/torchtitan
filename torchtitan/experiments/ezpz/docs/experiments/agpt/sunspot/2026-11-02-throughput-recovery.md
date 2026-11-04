@@ -225,7 +225,7 @@ without block-causal attention, after a discarded 8-update warm-up launch.
 
 Updates `21`-`32`, slowest rank per update. The second control matches
 `12482126` (`2.3079 s`). The first control has `0.56 s` of idle GPU time in
-its update-`7` trace and a `35 ms` step standard deviation, the pattern of the
+its update-`12` trace and a `35 ms` step standard deviation, the pattern of the
 slow launches in [Anchor launch environment](#anchor-launch-environment),
 although it was not the job's first launch. Against the second control, four
 chunks is `9.5%` less time per update.
