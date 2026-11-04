@@ -13,10 +13,11 @@ production-shaped batch (two sequences per rank per update) TT now runs
 
 Opt-in block-causal attention (`EZPZ_XPU_ATTN_CAUSAL_BLOCKS=4`) brings the
 same TT arm to `2.0788 s/update`, `88.17` model TFLOP/s/tile, `10.5%` faster
-than its later same-job control (`12482301`). Its training gradients differ
-from the default path's far more than the default differs from itself, so it
-stays off until that is explained
-([Block-causal attention at AGPT-2B](#block-causal-attention-at-agpt-2b)).
+than its later same-job control (`12482301`). The op matches the default
+kernel's accuracy on real training calls. Its training gradients differ from
+the default path's by as much as any rounding-level change to the forward
+output does; a longer loss comparison should come before it is turned on
+([Same-batch gradients](#same-batch-gradients)).
 
 MDS reproduces its historical number. Its `8dscnx65` configuration (GBS `384`,
 accumulation `16`, AdamW, ZeRO-1) gives `89.76` today against `89.99` in March.
@@ -355,9 +356,31 @@ uncompiled update-`24` result (`7.78e-2`) disagrees with `12482329`
 (`1.18e-2`), so a single replay at update `24` is not stable evidence either
 way. The chunked op is correct on the saved training calls, so the open
 question is whether the training state is this sensitive to the chunked
-forward output, which differs from default by `0.7`-`2e-3` relative. Job
-`12482340` perturbs the default forward output by that much. Block-causal
-stays off by default.
+forward output, which differs from default by `0.7`-`2e-3` relative.
+
+It is. Job `12482340` (blocks not compiled) multiplies the default attention
+output by `1 + sigma * N(0, 1)` in the forward pass, gradient passing through:
+
+| Variant vs default | Update `1` | Update `24` |
+|---|---:|---:|
+| Default repeat | `1.50e-2` | `1.15e-2` |
+| q/k/v gradient noise, `sigma = 4e-3` | `2.23e-2` | `1.19e-2` |
+| Forward-output noise, `sigma = 1e-3` | `2.42` (cosine `-0.61`) | `8.04e-2` |
+| Forward-output noise, `sigma = 4e-3` | `0.805` | `0.336` |
+| Block-causal, `4` chunks | `2.56` | `0.130` |
+| Block-causal, `8` chunks | `0.917` | `0.174` |
+
+Relative L2. A forward perturbation at bf16 rounding size moves these
+gradients as far as block-causal does; a backward perturbation does not. The
+default path's repeat looks tight only because its forward is deterministic.
+
+Conclusion: block-causal attention is correct. Its op-level error matches the
+default kernel's on real training calls, the wrapper and compile are cleared,
+and its effect on training gradients is that of a rounding-level forward
+change, which these gradients are chaotic under. A same-batch gradient
+comparison cannot separate it from the default path. A loss-curve A/B over a
+few hundred updates (several seeds per arm) is the test that can, and should
+come before it is turned on by default.
 
 ## What changed in TT
 
@@ -416,9 +439,10 @@ logits memory.
 - Close the remaining `14%` TT gap at the `z2rrt02w` shape
   ([TT at the 2025 high-throughput shape](#tt-at-the-2025-high-throughput-shape)):
   profile MDS at that shape and compare the `2.2 s` of other TT kernels.
-- Explain the block-causal training-gradient difference before using it
-  ([Same-batch gradients](#same-batch-gradients)). It is worth `9.5%` at
-  AGPT-2B and `7`-`10%` at the `z2rrt02w` shape.
+- Run a loss-curve A/B of block-causal attention (`4` chunks) against the
+  default path over a few hundred updates, several seeds per arm, before
+  turning it on ([Same-batch gradients](#same-batch-gradients)). It is worth
+  `9.5%` at AGPT-2B and `7`-`10%` at the `z2rrt02w` shape.
 - Rerun TT FSDP at the `z2rrt02w` shape with deferred gradient reduction.
 - Fit native DDP at `1 x 2`, for example with chunked loss so FP32 logits are
   not materialized for both sequences at once.
@@ -447,6 +471,7 @@ logits memory.
 | `12482327` | Gradient probe with q/k/v gradient-noise calibration, per-block compile, `ad261add3` | `0` |
 | `12482329`, `12482330` | Gradient probe, blocks not compiled, saving training attention calls; replay of those calls, `32a3595f3` | `0` |
 | `12482333` | Gradient probe with `blk1`, per-block compile and blocks not compiled, `5e73faa7f` | `0` |
+| `12482340` | Gradient probe with forward-output noise, blocks not compiled, `b5a221174` | `0` |
 
 Jobs `12482111`/`12482112` ran at `83fb8ad7b`; `12482126`/`12482127` ran at
 `586f1a542`, which adds the positions, compiled-block WGRAD and AdamW changes.

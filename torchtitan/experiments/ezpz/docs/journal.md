@@ -2,6 +2,21 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-11-04 (Sunspot) -- Block-causal gradients
+
+Same-batch gradient probe (`probe_block_causal_grads.py`): block-causal
+gradients differ from default by relative L2 `0.93`-`2.6` at update `1`,
+against a default repeat of `0.02`. Ruled out in turn: `torch.compile` (same
+error eager and compiled on one tile), amplified backward rounding (q/k/v
+gradient noise at `4e-3` gives `0.02`), training-call dtype/strides (saved
+calls replay correctly), and the autograd wrapper (`blk1` at the noise
+level). Forward-output noise at `1e-3` reproduces it (`2.42`), so these
+gradients are chaotic under any rounding-level forward change and the op is
+correct. Next is a multi-seed loss-curve A/B. Jobs `12482320`-`12482340`.
+[Report](experiments/agpt/sunspot/2026-11-02-throughput-recovery.md#same-batch-gradients).
+
+---
+
 ## 2026-11-04 (Sunspot) -- Block-causal attention at AGPT-2B
 
 `EZPZ_XPU_ATTN_CAUSAL_BLOCKS=4` on the best TT AGPT-2B arm (DDP/ZeRO-1,
