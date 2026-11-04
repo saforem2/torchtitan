@@ -45,15 +45,16 @@ SUBMIT_DIR="${PBS_O_WORKDIR:-$(pwd)}"
 cd "${SUBMIT_DIR}"
 
 VENV="${VENV:-/lus/tegu/projects/datascience/foremans/venvs/xpu-torch214-fixedlr-v2-20260927}"
-# Use local utils.sh copy — compute nodes have no outbound net for curl
-# Preflight: ensure staged copy exists (login has proxy, compute does not)
+# Activate target venv BEFORE ezpz_setup_job so it doesn't wipe VIRTUAL_ENV
+source "${VENV}/bin/activate"
+# Use local utils.sh — compute nodes have no outbound net for curl
 UTILS="${HOME}/stage/utils.sh"
 if [[ -f "${UTILS}" ]]; then
     source "${UTILS}" && ezpz_setup_job
 else
     source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup_job
 fi
-# Override venv: ezpz_setup_job auto-picks xpu-torch214 (no trl), we need fixedlr-v2
+# Re-activate: ezpz_setup_job deactivates any existing venv then picks its default (xpu-torch214, no trl)
 source "${VENV}/bin/activate"
 
 python3 -c "import trl; print('trl', trl.__version__)" || { echo "FATAL: trl missing"; exit 1; }
