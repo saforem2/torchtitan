@@ -358,9 +358,10 @@ def install(output: Path, updates: set[int]) -> None:
 
 def main() -> None:
     output = Path(os.environ["AGPT_BLOCK_PROBE_OUTPUT"])
-    updates = {
-        int(x) for x in os.environ.get("AGPT_BLOCK_PROBE_UPDATES", "1,24").split(",")
-    }
+    # Comma- or dash-separated: the matrix launcher's phase overrides cannot
+    # carry commas.
+    raw = os.environ.get("AGPT_BLOCK_PROBE_UPDATES", "1,24")
+    updates = {int(x) for x in raw.replace("-", ",").split(",") if x}
     patch_attention_noise()
     install(output, updates)
     sys.argv = ["torchtitan.experiments.ezpz.train", *sys.argv[1:]]
