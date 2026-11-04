@@ -10,10 +10,16 @@ math reference computed in query chunks (no [S, S] matrix for all heads).
 Cases: default SDPA eager (twice) and compiled, block-causal (4, 8 chunks)
 eager and compiled with ``fullgraph=True``. Each case after the first also
 reports its relative L2 difference from the first default eager run.
+
+``--inputs FILE ...`` instead replays attention calls saved by
+``probe_block_causal_grads.py`` (``AGPT_BLOCK_PROBE_DUMP=1``): the recorded
+q/k/v values, strides and dtypes, output gradient, scale and autocast state.
 """
 
 from __future__ import annotations
 
+import argparse
+import contextlib
 import json
 
 import torch
@@ -25,14 +31,16 @@ from torchtitan.experiments.ezpz.agpt.xpu_block_causal_attention import (
 
 B, S, HQ, HKV, D = 1, 8192, 16, 4, 128
 SCALE = D**-0.5
+CTX = contextlib.nullcontext
 BACKENDS = [SDPBackend.OVERRIDEABLE, SDPBackend.FLASH_ATTENTION, SDPBackend.MATH]
 
 
 def reference(q, k, v, do):
     """FP32 causal attention and its gradients, 1024 query rows at a time."""
     q, k, v = (t.detach().float().requires_grad_(True) for t in (q, k, v))
-    kk = k.repeat_interleave(HQ // HKV, dim=1)
-    vv = v.repeat_interleave(HQ // HKV, dim=1)
+    S = q.shape[-2]
+    kk = k.repeat_interleave(q.shape[1] // k.shape[1], dim=1)
+    vv = v.repeat_interleave(q.shape[1] // v.shape[1], dim=1)
     outs = []
     for start in range(0, S, 1024):
         rows = slice(start, start + 1024)
@@ -61,10 +69,17 @@ def rel(got, ref):
     }
 
 
+def leaf(t):
+    """Copy keeping the strides, including a non-dense view of a fused projection."""
+    x = torch.empty_strided(t.shape, t.stride(), dtype=t.dtype, device=t.device)
+    return x.copy_(t.detach()).requires_grad_(True)
+
+
 def run(name, fn, base, ref, default=None):
-    q, k, v = (t.detach().clone().requires_grad_(True) for t in base[:3])
+    q, k, v = (leaf(t) for t in base[:3])
     try:
-        out = fn(q, k, v)
+        with CTX():
+            out = fn(q, k, v)
         out.backward(base[3])
         torch.xpu.synchronize()
         got = [out.detach().float(), q.grad.float(), k.grad.float(), v.grad.float()]
@@ -81,7 +96,60 @@ def run(name, fn, base, ref, default=None):
     return got
 
 
+def replay(paths):
+    """Default vs block-causal attention on recorded training calls."""
+    global SCALE, CTX
+    dev = torch.device("xpu")
+    for path in paths:
+        data = torch.load(path, map_location="cpu")
+        meta = data["meta"]
+        print(f"INPUTS {path} {json.dumps(meta)}", flush=True)
+        base = []
+        for name in ("q", "k", "v"):
+            m = meta[name]
+            t = torch.empty_strided(
+                m["shape"], m["stride"], dtype=data[name].dtype, device=dev
+            )
+            base.append(t.copy_(data[name]))
+        base.append(data["do"].to(dev))
+        scale = meta["kwargs"].get("scale")
+        SCALE = (
+            float(scale) if scale not in (None, "None") else base[0].shape[-1] ** -0.5
+        )
+        CTX = (
+            (lambda: torch.autocast("xpu", dtype=torch.bfloat16))
+            if meta["autocast_xpu"]
+            else contextlib.nullcontext
+        )
+        ref = reference(*base[:3], base[3])
+        tag = path.rsplit("/", 1)[-1]
+        default = run(f"{tag}:default", default_attention, base, ref)
+        run(f"{tag}:default_repeat", default_attention, base, ref, default)
+        for n in (4, 8):
+
+            def blk(q, k, v, n=n, scale=SCALE):
+                return block_causal_flash_attention(q, k, v, n_chunks=n, scale=scale)
+
+            run(f"{tag}:blk{n}", blk, base, ref, default)
+            # Same values, dense BSHD layout and bf16: isolates layout/dtype.
+            dense = [
+                t.detach()
+                .to(torch.bfloat16)
+                .transpose(1, 2)
+                .contiguous()
+                .transpose(1, 2)
+                for t in base[:3]
+            ] + [base[3]]
+            run(f"{tag}:blk{n}_dense_bf16", blk, dense, ref, default)
+
+
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--inputs", nargs="*")
+    args = parser.parse_args()
+    if args.inputs:
+        replay(args.inputs)
+        return
     torch.manual_seed(0)
     dev = torch.device("xpu")
 

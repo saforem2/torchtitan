@@ -20,6 +20,10 @@ Variants set ``causal_blocks`` on every ``XPUScaledDotProductAttention``:
 ``torch._dynamo.reset()`` runs before every variant, so a compiled block
 cannot reuse a graph traced under another ``causal_blocks`` value.
 
+``AGPT_BLOCK_PROBE_DUMP=1`` (eager blocks only) also saves the inputs, layout
+and output gradient of the first and last attention calls of the ``default``
+variant on rank 0, for ``check_block_causal_compile.py --inputs``.
+
 Environment: ``AGPT_BLOCK_PROBE_OUTPUT`` (required) is the output directory.
 """
 
@@ -38,6 +42,7 @@ import torch
 import torch.distributed as dist
 
 CATEGORIES = ("embed", "attention", "mlp", "norm", "lm_head", "other")
+DUMP = os.environ.get("AGPT_BLOCK_PROBE_DUMP", "0") == "1"
 # name: (causal_blocks, relative q/k/v gradient noise)
 VARIANTS = {
     "default": (0, 0.0),
@@ -81,9 +86,42 @@ def patch_attention_noise() -> None:
         sigma = getattr(self, "probe_grad_noise", 0.0)
         if sigma:
             q, k, v = (_GradNoise.apply(t, sigma) for t in (q, k, v))
-        return original(self, q, k, v, **kwargs)
+        out = original(self, q, k, v, **kwargs)
+        path = getattr(self, "probe_dump_path", None)
+        if path is not None:
+            self.probe_dump_path = None
+            dump_attention_call(path, q, k, v, out, kwargs)
+        return out
 
     XPUScaledDotProductAttention._sdpa = _sdpa
+
+
+def dump_attention_call(path: Path, q, k, v, out, kwargs) -> None:
+    """Save one eager attention call's inputs, layout and output gradient."""
+    meta = {
+        name: {
+            "dtype": str(t.dtype),
+            "shape": list(t.shape),
+            "stride": list(t.stride()),
+            "contiguous": t.is_contiguous(),
+            "requires_grad": t.requires_grad,
+        }
+        for name, t in (("q", q), ("k", k), ("v", v), ("out", out))
+    }
+    meta["autocast_xpu"] = torch.is_autocast_enabled("xpu")
+    meta["autocast_dtype"] = str(torch.get_autocast_dtype("xpu"))
+    meta["kwargs"] = {key: str(value) for key, value in kwargs.items()}
+    data = {name: t.detach().cpu() for name, t in (("q", q), ("k", k), ("v", v))}
+    data["meta"] = meta
+    print(f"BLOCK_PROBE_DUMP_META {path.name} {json.dumps(meta)}", flush=True)
+
+    def save(grad):
+        data["do"] = grad.detach().cpu()
+        meta["do"] = {"dtype": str(grad.dtype), "stride": list(grad.stride())}
+        torch.save(data, path)
+        print(f"BLOCK_PROBE_DUMP {path}", flush=True)
+
+    out.register_hook(save)
 
 
 def category(name: str) -> str:
@@ -211,6 +249,12 @@ class Probe:
                 for m in modules:
                     m.causal_blocks = n
                     m.probe_grad_noise = sigma
+                if name == "default" and self.rank == 0 and DUMP:
+                    # Eager blocks only: torch.save cannot run in a traced graph.
+                    for index in (0, len(modules) - 1):
+                        modules[index].probe_dump_path = (
+                            self.output / f"attention-u{update}-layer{index}.pt"
+                        )
                 torch._dynamo.reset()
                 torch.xpu.synchronize()
                 started = time.perf_counter()
@@ -256,6 +300,7 @@ class Probe:
             for m, n in zip(modules, original):
                 m.causal_blocks = n
                 m.probe_grad_noise = 0.0
+                m.probe_dump_path = None
             torch._dynamo.reset()
             engine.ntokens_seen = ntokens_seen
             grads.clear()

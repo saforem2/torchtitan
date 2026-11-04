@@ -10,6 +10,8 @@
 # One-tile check of block-causal attention gradients, eager vs torch.compile,
 # against an FP32 reference (check_block_causal_compile.py), in the TT
 # torch-2.14 venv. Submit via alcf-job-preflight/submit.sh from the checkout.
+# CHECK_INPUTS, if set, is a directory of attention calls saved by the
+# gradient probe (AGPT_BLOCK_PROBE_DUMP=1); they are replayed instead.
 set -o pipefail
 ulimit -c 0
 export ZE_FLAT_DEVICE_HIERARCHY=FLAT
@@ -34,9 +36,15 @@ export LD_LIBRARY_PATH="${SHIM}:${LD_LIBRARY_PATH:-}"
 export PYTHONPATH="${ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 export TORCHINDUCTOR_CACHE_DIR="/tmp/blk-compile-${JOB}/inductor"
 export TRITON_CACHE_DIR="/tmp/blk-compile-${JOB}/triton"
+INPUTS=()
+if [[ -n "${CHECK_INPUTS:-}" ]]; then
+    shopt -s nullglob
+    INPUTS=(--inputs "${CHECK_INPUTS}"/*.pt)
+    ((${#INPUTS[@]} > 1)) || { echo "no .pt files in ${CHECK_INPUTS}" | tee -a "${OUT}/run.log"; exit 3; }
+fi
 ZE_AFFINITY_MASK=0 "${TT_VENV}/bin/python" \
     "${ROOT}/torchtitan/experiments/ezpz/scripts/check_block_causal_compile.py" \
-    >> "${OUT}/run.log" 2>&1
+    "${INPUTS[@]}" >> "${OUT}/run.log" 2>&1
 rc=$?
 grep -h '^RESULT ' "${OUT}/run.log"
 echo "END $(date -Is) rc=${rc}" | tee -a "${OUT}/run.log"
