@@ -32,12 +32,17 @@ CKPT="${CKPT:-$HOME/rl-repro/run/agpt2b-ckpt900}"   # staged ckpt-900 w/ gemma t
 LIMIT="${LIMIT:-200}"
 DTYPE="${DTYPE:-float32}"
 OUT="${OUT:-$REPO/outputs/evals/cot/gsm8k-cot-baseline.jsonl}"
-PY="${PY:-$REPO/venvs/rl-vllm/bin/python}"
+VENV_RL_VLLM="/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan/venvs/rl-vllm"
+PY="${PY:-$VENV_RL_VLLM/bin/python}"
 [[ -f "$PY" ]] || PY="/lus/tegu/projects/datascience/foremans/venvs/rl-vllm/bin/python"
+# Workaround: Sunspot compute has no $HOME/torchtitan (checkout at $REPO), but script uses relative path
+# Ensure eval script is found from REPO
+EVAL_SCRIPT="$REPO/torchtitan/experiments/ezpz/scripts/eval/eval_cot_gsm8k.py"
+[[ -f "$EVAL_SCRIPT" ]] || EVAL_SCRIPT="$HOME/torchtitan/experiments/ezpz/scripts/eval/eval_cot_gsm8k.py"
 mkdir -p "$(dirname "$OUT")"
 
 echo "COT-EVAL START $(date +%T) host=$(hostname) ckpt=$CKPT limit=$LIMIT dtype=$DTYPE"
-"$PY" -u torchtitan/experiments/ezpz/scripts/eval/eval_cot_gsm8k.py \
+"$PY" -u "$EVAL_SCRIPT" \
     --model "$CKPT" \
     --limit "$LIMIT" \
     --dtype "$DTYPE" \
