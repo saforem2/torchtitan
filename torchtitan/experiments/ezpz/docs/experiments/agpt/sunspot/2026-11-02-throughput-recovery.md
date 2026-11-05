@@ -29,12 +29,17 @@ later launches on the same node give `92.6`-`95.1`. The slow first launch
 costs TT `2`-`7%` and its cause is still open
 ([Anchor launch environment](#anchor-launch-environment)).
 
+Against MDS's own fastest AGPT-2B configuration (AdamW, ZeRO-1,
+`2.203`-`2.214 s/update`, separate allocations) the same TT arm is `3`-`5%`
+slower; same-allocation job `12482619` compares them directly.
+
 At the wider 2025 MDS shape (`z2rrt02w`: hidden `4096`, sequence `4096`,
-accumulation `16`) TT DDP/ZeRO-1 is `26%` slower than MDS, and `14%` slower
-with block-causal attention
+accumulation `16`) TT DDP/ZeRO-1 is `26%` slower than MDS AdamW/ZeRO-1, and
+`14%` slower with block-causal attention
 ([TT at the 2025 high-throughput shape](#tt-at-the-2025-high-throughput-shape)).
 Storing the ZeRO-1 model in BF16 (opt-in `BENCH_DDP_ZERO1_PARAMS=bfloat16`)
-closes that to `0.9%`: `8.08 s/update`, `108.9` TFLOP/s/tile, half the peak
+with block-causal attention closes that to `0.9%`: `8.08 s/update`, `108.9`
+TFLOP/s/tile, half the peak
 memory ([BF16 model storage](#bf16-model-storage)). At AGPT-2B over `400`
 updates and three seeds its loss stays inside the seed spread; it is
 `2.5`-`6.2%` faster there. It stays opt-in.
@@ -271,9 +276,12 @@ both with block-causal attention (`4` chunks), after a discarded warm-up:
 
 BF16 storage is `9.7%` faster than the steadier FP32 run and `0.9%` slower
 than MDS (`8.008 s`, `12482583`, same node). The FP32 arms span `8.96`-`9.46
-s` in this job and `9.11 s` in `12482281`. In the update-`12` trace, casts
-drop from `1.00` to `0.48 s` and elementwise kernels from `0.80` to `0.51 s`;
-GEMM is `4.45 s`. Losses after `32` updates are `6.637`/`6.636` (BF16) and
+s` in this job and `9.11 s` in `12482281`. The update-`12` trace is busy
+`7.89 s` against `8.95 s` for FP32 storage (`12482281`); GEMM (`4.45` vs
+`4.58 s`) and attention (`2.12` vs `2.11 s`) barely move, so about `1.0 s`
+comes out of casts, elementwise work and norms. Per-category deltas within
+that group are not reliable: the fused RMSNorm-backward kernels gain a cast
+and change bucket. Losses after `32` updates are `6.637`/`6.636` (BF16) and
 `6.642`/`6.668` (FP32), a smoke check.
 
 The loss A/B repeats the [block-causal one](#loss-curve-ab) at AGPT-2B
@@ -607,6 +615,8 @@ logits memory.
   `0.9%` behind MDS at the `z2rrt02w` shape with block-causal attention; loss
   inside the seed spread at AGPT-2B over `400` updates, slightly higher in all
   three seeds over the last `10`. Needs a longer run and a multi-node run.
+  The `0.9%` configuration stacks it with block-causal attention; each was
+  loss-tested alone, the combination was not.
 - The remaining `z2rrt02w` gap is attention backward: TT's block-causal path
   takes `0.54 s` more per update than IPEX xetla
   ([TT and MDS kernels](#tt-and-mds-kernels-at-this-shape)).
