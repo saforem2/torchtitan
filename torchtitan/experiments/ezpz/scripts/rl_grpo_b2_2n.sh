@@ -116,6 +116,36 @@ else
   else CKPT="${DEFAULT_CKPT_HF}"
   fi
 fi
+# If only sharded DCP exists (checkpoint-93 is FSDP, not HF), consolidate to -hf.
+# This is a one-time merge via accelerate (needs the SFT base tokenizer at ckpt-900-hf or agpt model).
+# SFT ckpt-93's tokenizer is the same gemma tokenizer as the base; we derive SRC from the stage-1 base.
+if [[ ! -s "${CKPT}/config.json" ]] && [[ -d "${CKPT}/pytorch_model_fsdp_0" ]]; then
+  echo "CKPT ${CKPT} is sharded DCP (no config.json), consolidating to ${DEFAULT_CKPT_HF} ..." >&2
+  # Source HF config/tokenizer: prefer ckpt-900-hf (same model/tokenizer), fallback to any SFT final
+  SRC_HF="${WT}/outputs/sft/agpt-2b-gs138650-tulu-math-uc-mix-8n-gbs6144/checkpoint-900-hf"
+  if [[ ! -f "${SRC_HF}/config.json" ]]; then
+    SRC_HF="${WT}/outputs/sft/agpt-2b-gs138650-tulu-math-uc-mix-8n-gbs6144/checkpoint-900"
+    # If still sharded, try the B2v2 SFT final which has config (it's TRL, writes HF)
+    if [[ ! -f "${SRC_HF}/config.json" ]]; then
+      SRC_HF=$(find "${WT}/outputs/sft/agpt2b-b2v2-distill-cot-2n-ep3" -name "config.json" -printf "%h\n" 2>/dev/null | head -1)
+    fi
+  fi
+  if [[ -n "${SRC_HF}" && -f "${SRC_HF}/config.json" ]]; then
+    mkdir -p "${DEFAULT_CKPT_HF}"
+    "${V}/bin/python" -m accelerate.commands.merge_weights --help >/dev/null 2>&1 || echo "WARN: accelerate merge-weights not available, trying alt" >&2
+    "${V}/bin/accelerate" merge-weights "${CKPT}/pytorch_model_fsdp_0" "${DEFAULT_CKPT_HF}" 2>&1 | tail -5
+    cp "${SRC_HF}/config.json" "${DEFAULT_CKPT_HF}/" 2>/dev/null || true
+    cp "${SRC_HF}"/tokenizer* "${DEFAULT_CKPT_HF}/" 2>/dev/null || true
+    cp "${SRC_HF}/special_tokens_map.json" "${DEFAULT_CKPT_HF}/" 2>/dev/null || true
+    "${V}/bin/python" "${WT}/torchtitan/experiments/ezpz/rl/scripts/repair_agpt_hf_artifact.py" "${DEFAULT_CKPT_HF}" 2>&1 | tail -3
+    echo "Consolidated ${CKPT} -> ${DEFAULT_CKPT_HF}" >&2
+    ls -lh "${DEFAULT_CKPT_HF}/model.safetensors" 2>&1 | head -1
+    CKPT="${DEFAULT_CKPT_HF}"
+  else
+    echo "WARN: cannot consolidate ${CKPT}: no SRC_HF with config.json found (tried ${SRC_HF})" >&2
+  fi
+fi
+
 OUT="${OUT:-${WT}/outputs/rl/grpo-agpt2b-b2-gs${GROUP_SIZE:-8}-lr${LR:-5e-6}-${PBS_JOBID%%.*}}"
 
 if [[ ! -s "${CKPT}/config.json" ]] && [[ ! -s "${CKPT}/model.safetensors" ]] && [[ ! -s "${CKPT}/pytorch_model.bin" ]]; then

@@ -48,17 +48,24 @@ export https_proxy="${https_proxy:-http://proxy.alcf.anl.gov:3128}"
 export ftp_proxy="${ftp_proxy:-http://proxy.alcf.anl.gov:3128}"
 export no_proxy="${no_proxy:-localhost,127.0.0.1,*.alcf.anl.gov,*.aurora.alcf.anl.gov}"
 
-EZPZ_UTILS="${PBS_O_WORKDIR:-$PWD}/.ezpz-utils-cache/ezpz-utils.sh"
-if [[ -f "$EZPZ_UTILS" ]]; then source "$EZPZ_UTILS"
-else source <(curl -fsSL --max-time 30 https://bit.ly/ezpz-utils); fi
-cd "${PBS_O_WORKDIR:-$(pwd)}"
+SUBMIT_DIR="${PBS_O_WORKDIR:-$(pwd)}"
+cd "${SUBMIT_DIR}" || exit 1
 
+# Pinned ezpz-utils (like B2v2 + data_resume working jobs)
+source "${SUBMIT_DIR}/torchtitan/experiments/ezpz/scripts/load_pinned_ezpz_utils.sh"
+load_pinned_ezpz_utils || exit $?
 ezpz_load_modules
 ezpz_setup_job
-source .venv/bin/activate
-if [[ -f .venv.tar.gz ]]; then ezpz yeet --src .venv.tar.gz; else ezpz yeet; fi
-deactivate
-source /tmp/.venv/bin/activate
+
+# CPT VENV: fw-2026.1 with Grain (verified: has ezpz cli + torchtitan + grain 0.2.18)
+VENV="${VENV:-/lus/tegu/projects/datascience/foremans/venvs/fw-2026.1-rc2-grain-historical}"
+# Fallback for alternative names
+[[ -x "${VENV}/bin/python" ]] || VENV=/lus/tegu/projects/datascience/foremans/venvs/fw213-2026.1.0-spmd
+export VIRTUAL_ENV="${VENV}"
+export PATH="${VENV}/bin:/opt/pbs/bin:${PATH}"
+export LD_LIBRARY_PATH="${VENV}/lib:${LD_LIBRARY_PATH:-}"
+[[ "$(command -v python)" == "${VENV}/bin/python" ]] || { echo "FATAL: venv python mismatch: $(command -v python) != ${VENV}/bin/python" >&2; exit 93; }
+python3 -c "from ezpz.cli import main; print('ezpz+venv ok')" || { echo "FATAL: ezpz cli missing in ${VENV}" >&2; exit 1; }
 
 PPN="${NGPU_PER_HOST:-12}"
 NGPUS_ACTIVE=$(( NHOSTS_TRAIN * PPN ))
