@@ -2,6 +2,18 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-11-05 (Sunspot) -- Combination loss A/B at two nodes, 2000 updates
+
+`agpt_2b_loss_ab` at `24` tiles, three seeds, `2000` updates, default vs BF16
+ZeRO-1 storage with block-causal attention (`12482684`-`12482686`).
+Combination minus default, mean over seeds: `+0.058` in `2`-`10`, `-0.013`
+to `-0.017` through update `1200`, `-0.004` in `1601`-`2000`; every window
+inside the default seed spread (`0.025` at the end). Final `10`-update
+windows `2.803`/`2.812`/`2.830` vs `2.801`/`2.821`/`2.826`. `15.1`-`16.4%`
+faster (`1.99`-`2.05` vs `2.38`-`2.42 s/update`). Still opt-in; defaults are
+Sam's call.
+[Report](experiments/agpt/sunspot/2026-11-02-throughput-recovery.md#two-nodes-2000-updates).
+
 ## 2026-11-05 (Sunspot) -- Block-causal plus BF16 storage loss A/B
 
 `agpt_2b_loss_ab`, three seeds, `400` updates, default vs BF16 ZeRO-1
