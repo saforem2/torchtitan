@@ -7,6 +7,7 @@
 import os
 import tempfile
 from contextlib import contextmanager, nullcontext
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -171,9 +172,11 @@ def test_agpt_fsdp_shards_stacked_linear_on_matrix_rows(monkeypatch) -> None:
     )
     model = Model()
 
+    # A 1-D shard mesh of size 1: every row count divides it.
+    mesh = SimpleNamespace(ndim=1, size=lambda dim=None: 1)
     agpt_parallelize.apply_fsdp(
         model,
-        cast(Any, object()),
+        cast(Any, mesh),
         param_dtype=torch.bfloat16,
         reduce_dtype=torch.float32,
         pp_enabled=False,
@@ -250,3 +253,26 @@ def test_native_ddp_cpu_gloo_two_rank_step_matches_single_process() -> None:
             join=True,
         )
         assert os.path.exists(result_file)
+
+
+@pytest.mark.skipif(
+    not torch.distributed.is_gloo_available(), reason="Gloo backend is unavailable"
+)
+def test_native_ddp_disables_inplace_wgrad_accum_for_autocast(tmp_path) -> None:
+    torch.distributed.init_process_group(
+        "gloo", init_method=f"file://{tmp_path}/rendezvous", rank=0, world_size=1
+    )
+    try:
+        linear = Linear.Config(in_features=4, out_features=3).build()
+        assert linear.inplace_wgrad_accum
+        mesh = torch.distributed.device_mesh.init_device_mesh(
+            "cpu", (1,), mesh_dim_names=("dp_replicate",)
+        )
+        ddp = wrap_native_ddp(linear, mesh, bucket_cap_mb=1.0)
+
+        assert not linear.inplace_wgrad_accum
+        with native_ddp_autocast_context(nullcontext, "cpu")():
+            ddp(torch.ones(2, 4)).sum().backward()
+        assert linear.weight.grad is not None
+    finally:
+        torch.distributed.destroy_process_group()

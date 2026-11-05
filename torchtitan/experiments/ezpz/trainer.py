@@ -18,7 +18,12 @@ import spmd_types as spmd
 import torch
 from torch.distributed.elastic.multiprocessing.errors import record
 
-from torchtitan.components.checkpointer import CheckpointManager, DATALOADER
+from torchtitan.components.checkpointer import (
+    CheckpointManager,
+    DATALOADER,
+    MODEL,
+    ModelWrapper,
+)
 from torchtitan.components.data.loader import BaseDataLoader, DataloaderExhaustedError
 from torchtitan.components.data.types import TrainingMicrobatch
 from torchtitan.components.loss import IGNORE_INDEX
@@ -34,6 +39,7 @@ from torchtitan.experiments.ezpz.config import EzpzParallelismConfig
 from torchtitan.experiments.ezpz.logging import logger
 from torchtitan.experiments.ezpz.lr_finder import LRFinderConfig
 from torchtitan.experiments.ezpz.native_ddp import (
+    NativeDDP,
     install_agpt_dtype_probe,
     native_ddp_autocast_context,
     validate_native_ddp,
@@ -44,6 +50,7 @@ from torchtitan.experiments.ezpz.xpu_graph import (
     maybe_wrap_with_xpu_graph,
     xpu_graph_teardown,
 )
+from torchtitan.experiments.ezpz.zero1 import flatten_parameters_, install_zero1
 from torchtitan.experiments.torchft.config.job_config import FaultTolerance
 from torchtitan.experiments.torchft.manager import maybe_semi_sync_training
 from torchtitan.experiments.torchft.trainer import (
@@ -232,6 +239,21 @@ class EzpzTrainingEngine(TorchFTTrainingEngine):
             create_seed_checkpoint=create_seed_checkpoint,
         )
         config = self.config
+        if getattr(config.parallelism, "native_ddp_zero1", False) and not getattr(
+            config.parallelism, "enable_data_parallel_native_ddp", False
+        ):
+            raise ValueError("native_ddp_zero1 requires native DDP")
+        param_dtype = getattr(
+            config.parallelism, "native_ddp_zero1_param_dtype", "float32"
+        )
+        if param_dtype == "bfloat16" and not (
+            getattr(config.parallelism, "native_ddp_zero1", False)
+            and config.parallelism.native_ddp_zero1_allgather_dtype == "bfloat16"
+        ):
+            raise ValueError(
+                "native_ddp_zero1_param_dtype=bfloat16 requires native_ddp_zero1 "
+                "with native_ddp_zero1_allgather_dtype=bfloat16"
+            )
         if getattr(config.parallelism, "enable_data_parallel_native_ddp", False):
             validate_native_ddp(
                 model_name=self._model_name(),
@@ -256,18 +278,57 @@ class EzpzTrainingEngine(TorchFTTrainingEngine):
                 ),
             )
             assert len(self.model_parts) == 1
+            dp_mesh = self.parallelism_context.get_mesh("dp_replicate")
+            self._zero1_buffer = None
+            if getattr(config.parallelism, "native_ddp_zero1", False):
+                self._zero1_buffer = flatten_parameters_(
+                    self.model_parts[0],
+                    world_size=dp_mesh.size(),
+                    rank=dp_mesh.get_local_rank(),
+                    dtype=getattr(torch, param_dtype),
+                )
             self.model_parts[0] = wrap_native_ddp(
                 self.model_parts[0],
-                self.parallelism_context.get_mesh("dp_replicate"),
+                dp_mesh,
                 config.parallelism.native_ddp_bucket_cap_mb,
                 config.parallelism.native_ddp_compute_policy,
                 config.parallelism.native_ddp_bucketize_first_iteration,
+                communication_dtype=config.parallelism.native_ddp_communication_dtype,
             )
 
         if os.getenv("TORCHTITAN_AGPT_DTYPE_PROBE") == "1":
             if self.parallelism_context.pp_enabled or len(self.model_parts) != 1:
                 raise ValueError("AGPT dtype probe requires a non-pipeline model")
             install_agpt_dtype_probe(self.model_parts[0])
+
+    def _initialize_checkpointer(
+        self,
+        *,
+        extra_states: dict[str, torch.distributed.checkpoint.stateful.Stateful]
+        | None,
+        sd_adapter: Any | None,
+    ) -> None:
+        super()._initialize_checkpointer(
+            extra_states=extra_states,
+            sd_adapter=sd_adapter,
+        )
+        if not getattr(
+            self.config.parallelism, "enable_data_parallel_native_ddp", False
+        ):
+            return
+        checkpointer = getattr(self, "checkpointer", None)
+        if checkpointer is None:
+            return
+        states = getattr(checkpointer, "states", None)
+        if states is None or MODEL not in states:
+            raise RuntimeError(
+                "native DDP checkpointer must expose its model state entry"
+            )
+        unwrapped_parts = [
+            part.module if isinstance(part, NativeDDP) else part
+            for part in self.model_parts
+        ]
+        states[MODEL] = ModelWrapper(unwrapped_parts)
 
     def _initialize_forward_backward(self) -> None:
         super()._initialize_forward_backward()
@@ -284,6 +345,21 @@ class EzpzTrainingEngine(TorchFTTrainingEngine):
     def _initialize_optim(self) -> None:
         super()._initialize_optim()
         self.optim._run_update = self._optim_update
+        buffer = getattr(self, "_zero1_buffer", None)
+        if buffer is not None:
+            part = self.model_parts[0]
+            self._zero1_state = install_zero1(
+                self.optim.optimizers,
+                buffer,
+                process_group=self.parallelism_context.get_mesh(
+                    "dp_replicate"
+                ).get_group(),
+                allgather_dtype=self.config.parallelism.native_ddp_zero1_allgather_dtype,
+                module=part.module if isinstance(part, NativeDDP) else part,
+            )
+            logger.info(
+                "native DDP ZeRO-1: %s", self._zero1_state.diagnostics()
+            )
 
     def _native_ddp_train_context(self) -> AbstractContextManager[None]:
         """SPMD context composed with native-DDP bf16 autocast."""

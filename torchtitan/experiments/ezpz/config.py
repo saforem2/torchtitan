@@ -55,8 +55,8 @@ class EzpzParallelismConfig(ParallelismConfig):
     Use native ``DistributedDataParallel`` for pure replicated AGPT data
     parallelism. This experimental path keeps FP32 master parameters and
     gradients. Its forward compute policy is selected separately below. It is
-    disabled by default and supports no model parallelism. PP, TP, CP, EP, and
-    outer gradient accumulation remain unsupported.
+    disabled by default and supports no model parallelism. PP, TP, CP, and EP
+    remain unsupported; data-parallel gradient accumulation is supported.
     """
 
     native_ddp_compute_policy: Literal["autocast"] = "autocast"
@@ -65,8 +65,43 @@ class EzpzParallelismConfig(ParallelismConfig):
     parameter storage is supported.
     """
 
+    native_ddp_communication_dtype: Literal["float32", "bfloat16"] = "float32"
+    """
+    Native DDP collective payload precision. The BF16 compression hook
+    quantizes gradient buckets for communication and copies the result back
+    into FP32 gradients; parameter storage and local gradient accumulation
+    remain FP32. BF16 communication can change numerical results.
+    """
+
     native_ddp_bucket_cap_mb: float = 25.0
     """Gradient bucket capacity for the native DDP backend, in MiB."""
+
+    native_ddp_zero1: bool = False
+    """
+    Shard the optimizer across the native-DDP replicas, ZeRO-1 style. Model
+    parameters are flattened into one FP32 buffer before DDP wraps them; each
+    rank steps a contiguous ``1/world`` slice and one all-gather per update
+    redistributes the result. Elementwise optimizers only.
+    """
+
+    native_ddp_zero1_allgather_dtype: Literal["float32", "bfloat16"] = "float32"
+    """
+    ZeRO-1 parameter all-gather payload. ``bfloat16`` keeps a separate FP32
+    master shard and leaves BF16-rounded values in the replicated model
+    parameters, as Megatron-DeepSpeed's BF16 optimizer does. ``float32``
+    keeps the model parameters themselves as the FP32 masters.
+    """
+
+    native_ddp_zero1_param_dtype: Literal["float32", "bfloat16"] = "float32"
+    """
+    Storage dtype of the replicated ZeRO-1 model parameters. ``bfloat16``
+    (requires ``native_ddp_zero1_allgather_dtype=bfloat16``) stores the
+    model in BF16, as Megatron-DeepSpeed does: autocast no longer casts the
+    weights on every microbatch, gradients accumulate in BF16 across
+    microbatches, and the FP32 master exists only in each rank's optimizer
+    shard. Changes numerics; ``float32`` keeps FP32 storage and FP32
+    gradient accumulation.
+    """
 
     native_ddp_bucketize_first_iteration: bool = False
     """

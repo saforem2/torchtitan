@@ -21,6 +21,7 @@ Differences vs upstream `parallelize_llama`:
   `reshard_after_forward=reshard_after_forward_policy == "always"`).
 """
 
+import math
 import os
 
 import ezpz
@@ -34,6 +35,7 @@ from torch.distributed.fsdp import (
     fully_shard,
     MixedPrecisionPolicy,
 )
+from torch.distributed.tensor import DTensor, Shard
 
 from torchtitan.config import TORCH_DTYPE_MAP, TrainingConfig
 from torchtitan.config.parallelism import ParallelismConfig
@@ -50,6 +52,33 @@ from torchtitan.experiments.ezpz.fsdp_compat import resolve_fsdp_mesh
 from torchtitan.experiments.ezpz.logging import logger
 
 from torchtitan.models.llama3.model import Llama3Model
+
+
+# [ezpz] Per-block torch.compile, opt-in via EZPZ_AGPT_COMPILE_BLOCKS.
+# Upstream replaced apply_compile (one fullgraph torch.compile per
+# TransformerBlock, the historical components=[model, loss] path) with named
+# @local_compile regions, which leave most of the block eager. This restores
+# the old per-block compile, after AC and before FSDP/native DDP, without
+# touching core. "default"/"1" -> mode=None; any other value is passed as the
+# torch.compile mode (e.g. "max-autotune").
+def _maybe_compile_transformer_blocks(model: nn.Module) -> None:
+    mode = os.environ.get("EZPZ_AGPT_COMPILE_BLOCKS", "").strip()
+    if mode in ("", "0", "false", "none"):
+        return
+    compile_mode = None if mode in ("1", "true", "default") else mode
+    for _, transformer_block in model.layers.named_children():
+        # A traced backward cannot add into weight.grad in place; the
+        # regular AccumulateGrad path gives the same sum.
+        for module in transformer_block.modules():
+            if getattr(module, "inplace_wgrad_accum", False):
+                module.inplace_wgrad_accum = False
+        transformer_block.compile(
+            backend="inductor", fullgraph=True, mode=compile_mode
+        )
+    logger.info(
+        "Compiled each TransformerBlock with torch.compile (fullgraph, mode=%s)",
+        compile_mode,
+    )
 
 
 def parallelize_llama(
@@ -114,6 +143,8 @@ def parallelize_llama(
     # ``apply`` checkpoints every transformer block in ``model.layers``.
     if activation_remat is not None:
         activation_remat.apply(model)
+
+    _maybe_compile_transformer_blocks(model)
 
     # Native DDP is installed by the ezpz trainer after parameters leave the
     # meta device. Apply TP/AC/compile here, but do not also install FSDP.
@@ -212,6 +243,55 @@ def disable_fsdp_gradient_division(model: nn.Module) -> None:
     )
 
 
+def fsdp_shard_degree(
+    dp_mesh: DeviceMesh, dp_mesh_dims: DataParallelMeshDims | None
+) -> int:
+    """Number of ranks FSDP splits each parameter across.
+
+    With ``DataParallelMeshDims`` this is the (flattened) product of the
+    ``shard`` axes; replicate axes (HSDP) do not shard. Without it the mesh
+    is FSDP's own: 1-D means FSDP and 2-D means ``(replicate, shard)`` HSDP,
+    so the shard degree is the size of the last dimension.
+    """
+    if dp_mesh_dims is not None:
+        names = dp_mesh_dims.shard_names
+        return math.prod(dp_mesh[name].size() for name in names) if names else 1
+    return dp_mesh.size(dp_mesh.ndim - 1)
+
+
+def divisible_linear_param_shard_placements(
+    module: nn.Module,
+    shard_degree: int,
+    fallbacks: list[tuple[tuple[int, ...], int]] | None = None,
+) -> dict[nn.Parameter, Shard]:
+    """Core's stacked-linear ``Shard(ndim-2)`` map, minus uneven entries.
+
+    ``linear_param_shard_placements`` (cde3c93227, mirroring upstream #4808)
+    shards stacked ``[N, F, D]`` weights on the matrix-row dim ``F`` so the
+    two-element projection axis of ``w13`` is not padded to the shard degree.
+    FSDP2 only supports uneven sharding on dim 0, so a row count that the
+    shard degree does not divide (AGPT-2B ``F=11008`` over 12 or 24 ranks)
+    raises ``NotImplementedError`` at ``fully_shard``. Drop those entries so
+    FSDP's default padded ``Shard(0)`` applies to them; each rank then
+    stores a padded ``[ceil(N/shard_degree), F, D]`` slice. Each dropped
+    ``(local shape, dim)`` is appended to ``fallbacks`` so the caller can
+    warn once.
+
+    The placement only changes the local storage layout. DCP save/load works
+    on global DTensor metadata, so checkpoints stay interchangeable.
+    """
+    placements = linear_param_shard_placements(module)
+    kept: dict[nn.Parameter, Shard] = {}
+    for param, placement in placements.items():
+        # FSDP checks the local tensor: a TP-sharded DTensor is already split.
+        local = param.to_local() if isinstance(param, DTensor) else param
+        if local.shape[placement.dim] % shard_degree == 0:
+            kept[param] = placement
+        elif fallbacks is not None:
+            fallbacks.append((tuple(local.shape), placement.dim))
+    return kept
+
+
 def apply_fsdp(
     model: nn.Module,
     dp_mesh: DeviceMesh,
@@ -303,13 +383,27 @@ def apply_fsdp(
             reshard_after_forward=reshard_after_forward,
         )
 
+    shard_degree = fsdp_shard_degree(dp_mesh, dp_mesh_dims)
+    fallbacks: list[tuple[tuple[int, ...], int]] = []
     for transformer_block in model.layers.values():
-        stacked_param_placements = linear_param_shard_placements(transformer_block)
+        stacked_param_placements = divisible_linear_param_shard_placements(
+            transformer_block, shard_degree, fallbacks
+        )
         fully_shard(
             transformer_block,
             **fsdp_config,
             reshard_after_forward=reshard_after_forward,
             shard_placement_fn=stacked_param_placements.get,
+        )
+    if fallbacks:
+        logger.warning(
+            "FSDP: %d stacked linear params (shapes/dims %s) do not divide "
+            "the shard degree %d on their matrix-row dim; using padded "
+            "Shard(0) for them. Each rank stores and all-gathers a padded "
+            "slice; pick a shard degree that divides the rows to avoid it.",
+            len(fallbacks),
+            sorted(set(fallbacks)),
+            shard_degree,
         )
 
     if not tied and model.norm is not None and model.lm_head is not None:
