@@ -128,6 +128,6 @@ ezpz launch --nproc "${NGPUS_ACTIVE}" --nproc_per_node "${PPN}" --auto-retry --s
   --training.seq-len="${SEQ_LEN}" --training.steps="${TRAINING_STEPS}" \
   --checkpoint.initial-load-path="${BASE_CKPT}" \
   --checkpoint.initial-load-model-only \
-  --lr-scheduler.warmup-steps=20 --lr-scheduler.decay-ratio=0.0 --lr-scheduler.min-lr-factor=1.0 \
+  --optim.lr-scheduler.warmup-steps=20 --optim.lr-scheduler.decay-ratio=0.0 --optim.lr-scheduler.min-lr-factor=1.0 \
   "${extra_args[@]}" \
   "$@"
