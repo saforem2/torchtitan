@@ -47,7 +47,8 @@ is not a distinct artifact -- the MDS 2B is one continuous 140k-step run whose
 | [B3](sft/agpt/2b-mds/b3-instruct-cot-mix/design.md) | one combined SFT, +OpenR1 0.25, seq 8192 | 0.05 -- long-CoT dilution |
 | [B4a](sft/agpt/2b-mds/b4-finish-and-reweight/README.md) | bolt B2's finishing stage onto the B3 base | **0.02**, format collapsed to 0.26, 133/200 unclosed |
 | [B4b](sft/agpt/2b-mds/b4-finish-and-reweight/README.md) | reweight gsm8k-r1cot to 0.40 + length-filter, seq 4096 | 0.065 -- fixed the symptom, not the accuracy |
-| **B2v2** (this doc, 2026-11-04) | ckpt-900-hf -> gsm8k-r1cot, 3 ep, 2N Sunspot job 12482423 (`rl/scripts/sft/agpt2b_b2v2_distill_cot_2n.sh`) | **TRAINING COMPLETE, eval pending.** loss 0.8069, mean_token_accuracy 0.8198, W&B `xakno7kg`, ckpts 2/4/6+final. Extends B2's proven two-stage lineage (narrow GSM8K only); distill_cot_mix (OpenThoughts) shelved due to HF cache race at 2N |
+| **B2v2 ep3** (this doc, 2026-11-04) | ckpt-900-hf -> gsm8k-r1cot, 3 ep, 2N Sunspot 12482423 | **0.09** CoT (format 0.86, gen 416, 22 unclosed) -- **worse than B2**. Eval jobs 12482572/73 on frameworks 2026.1.0 vLLM 0.26 XPU (Sunspot PVC). W&B `xakno7kg`. |
+| **B2v2 ep6** (this doc, 2026-11-04) | same, 6 ep (12 steps), job 12482485 | **0.105** CoT (format 0.91, gen 378, 15 unclosed) -- still half of B2, 6ep did not recover. W&B `ur6pqqhp`. |
 
 ### B2v2 -- stronger stage-2 SFT on ckpt-900 (2026-11-04)
 
@@ -56,8 +57,7 @@ is not a distinct artifact -- the MDS 2B is one continuous 140k-step run whose
 **Original intent:** `distill_cot_mix` = 50% OpenThoughts-114k-decontam + 50% gsm8k-r1cot (broad frontier CoT, GSM8K-test-decontaminated, same `<think>/<answer>\boxed{}` envelope, mix-spec tunable). **Shelved 2026-11-04** -- OpenThoughts streaming + multi-rank HF arrow-cache coherency fails at 2N (rank 0 writes new cache, others look for old shards). Falls back to **gsm8k-r1cot alone**, more epochs -- proven B2 path, just longer. Pre-tokenize or fix cache coherency to re-enable the distill mix.
 
 **Run:** 2N Sunspot (`select=2`), PBS job **12482423**, script `torchtitan/experiments/ezpz/rl/scripts/sft/agpt2b_b2v2_distill_cot_2n.sh`, base `outputs/sft/agpt-2b-gs138650-tulu-math-uc-mix-8n-gbs6144/checkpoint-900-hf`, TRL `SFTTrainer`, FSDP `full_shard`, LR 2e-5 cosine, batch 2 / GAS 8 / seq 2048 (GBS 384), 3 epochs (6 steps), `dataset_num_proc=8`, bf16, `save_strategy=epoch`.
-
-**Training outcome (from TRL logs):** loss **0.8069**, **mean_token_accuracy 0.8198**, W&B run **`xakno7kg`**, checkpoints at steps **2/4/6 + final**. Loss descends cleanly; no OOM or cache crash after fixes below.
+**Training outcome (from TRL logs):** loss **0.8069**, **mean_token_accuracy 0.8198**, W&B run **`xakno7kg`** (ep3) / **`ur6pqqhp`** (ep6), checkpoints at steps **2/4/6 + final** (ep3) and **2/4/6/8/10/12 + final** (ep6). Loss descends cleanly; no OOM or cache crash after fixes below.
 
 **Env fixes (5 commits 2026-11-04, see `git log --oneline -- rl/scripts/sft/agpt2b_b2v2*`):**
 - **venv:** `ezpz_get_job_env` clobbers `VIRTUAL_ENV` to stale `xpu-torch214` (no `trl`). Fix: export `VIRTUAL_ENV` + prepend `PATH`/`PYTHONPATH` to `rl-monarch-torch214-locality-20261001` (torch 2.14+xpu + trl + Monarch on compute). Verified with `python3 -c "import trl"`.
@@ -65,7 +65,14 @@ is not a distinct artifact -- the MDS 2B is one continuous 140k-step run whose
 - **`dataset_num_proc`:** 32 -> 8 (16 OOMs in `map` subprocesses; 8 is stable).
 - **HF cache race:** see shelved distill mix above. Also: staged `~/stage/utils.sh` (compute nodes have no outbound net; `curl https://bit.ly/ezpz-utils` fails).
 
-**Pending (next task):** eval GSM8K-CoT vs B2's **0.205** (same 200-problem harness), then extend to 6 epochs or fix the distill mix (pre-tokenize OpenThoughts).
+**Eval (2026-11-04, Sunspot, frameworks 2026.1.0 + vLLM 0.26 XPU, jobs 12482572/73, `eval_cot_gsm8k.py` fp32):**
+
+| checkpoint | CoT acc | format | gen_len | unclosed | vs B2 0.205 |
+|---|---:|---:|---:|---:|---|
+| ep3 final (6 steps) | **0.09** | 0.86 | 416 | 22 | **-0.115** |
+| ep6 final (12 steps) | **0.105** | 0.91 | 378 | 15 | **-0.10** |
+
+**More stage-2 epochs on the same narrow gsm8k-r1cot made it worse**, not better -- same failure mode as B3/B4. Training loss/accuracy looked healthy while eval halved. Do not extend this recipe further; next lever is distill-mix pre-tokenized (OpenThoughts-114k) or a different cold-start.
 
 ### Two findings worth carrying
 
@@ -150,7 +157,7 @@ No LoRA adapter has been promoted to a production checkpoint.
 Also open: re-run the ckpt-900 GRPO with more walltime (it hit 6h at ~step 20,
 never converged); the 32N oneCCL scale fault that blocks the v2-256n base.
 
-**In flight 2026-11-04:** B2v2 stage-2 SFT training complete (job 12482423, loss 0.8069, acc 0.8198, W&B `xakno7kg`). **Pending:** GSM8K-CoT eval vs B2's 0.205, then 6-epoch extension or distill-mix fix.
+**2026-11-04 B2v2 verdict:** ep3 0.09 / ep6 0.105 CoT (jobs 12482572/73; 0.115 below B2 0.205). Extending the narrow stage-2 is refuted same as B3/B4. Next is distill-mix pre-tokenized or a different cold-start -- not more epochs.
 
 ## Known doc inconsistencies
 
