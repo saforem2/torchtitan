@@ -2,6 +2,16 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-11-05 (Sunspot) -- BF16 ZeRO-1 storage loss A/B
+
+`agpt_2b_loss_ab`, three seeds, `400` updates, FP32 vs BF16 ZeRO-1 model
+storage (`12482597`-`12482599`). BF16 minus FP32, mean over seeds: `+0.051`
+in updates `2`-`10`, `-0.041` in `11`-`50`, `-0.002` in `301`-`400`; at most
+`0.072` in any seed/window against `0.053`-`0.104` seed spread. Over the last
+`10` updates BF16 is higher in all three seeds (`+0.004`-`+0.008`). `2.5`-`6.2%`
+faster at accumulation `2`. Stays opt-in; next is a longer and a multi-node
+run. [Report](experiments/agpt/sunspot/2026-11-02-throughput-recovery.md#bf16-model-storage).
+
 ## 2026-11-04 (Sunspot) -- MDS trace at z2rrt02w; BF16 ZeRO-1 storage
 
 MDS rank-0 trace at the `z2rrt02w` shape (`12482583`, `MDS_PROFILE=1`):
@@ -11,8 +21,7 @@ its cast kernels run once per layer per microbatch because the ZeRO-1 model
 holds BF16 values in FP32 storage. New opt-in
 `BENCH_DDP_ZERO1_PARAMS=bfloat16` stores the model in BF16: `8.082`/`8.087
 s/update` against `8.956`-`9.463 s` (`12482585`), `0.9%` behind MDS, peak
-memory `20.3` vs `41.8 GiB`. Gradients accumulate in BF16; loss A/B
-`12482597`-`12482599` running.
+memory `20.3` vs `41.8 GiB`. Gradients accumulate in BF16.
 [Report](experiments/agpt/sunspot/2026-11-02-throughput-recovery.md#bf16-model-storage).
 
 ## 2026-11-04 (Sunspot) -- Block-causal stays opt-in

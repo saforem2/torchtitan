@@ -35,7 +35,9 @@ with block-causal attention
 ([TT at the 2025 high-throughput shape](#tt-at-the-2025-high-throughput-shape)).
 Storing the ZeRO-1 model in BF16 (opt-in `BENCH_DDP_ZERO1_PARAMS=bfloat16`)
 closes that to `0.9%`: `8.08 s/update`, `108.9` TFLOP/s/tile, half the peak
-memory ([BF16 model storage](#bf16-model-storage)). Its loss A/B is running.
+memory ([BF16 model storage](#bf16-model-storage)). At AGPT-2B over `400`
+updates and three seeds its loss stays inside the seed spread; it is
+`2.5`-`6.2%` faster there. It stays opt-in.
 
 | Arm | Accumulation x microbatch | s/update | tok/s/tile | Model TFLOP/s/tile |
 |---|---|---:|---:|---:|
@@ -272,8 +274,40 @@ than MDS (`8.008 s`, `12482583`, same node). The FP32 arms span `8.96`-`9.46
 s` in this job and `9.11 s` in `12482281`. In the update-`12` trace, casts
 drop from `1.00` to `0.48 s` and elementwise kernels from `0.80` to `0.51 s`;
 GEMM is `4.45 s`. Losses after `32` updates are `6.637`/`6.636` (BF16) and
-`6.642`/`6.668` (FP32), a smoke check. A three-seed loss A/B at AGPT-2B
-(`12482597`-`12482599`) is running.
+`6.642`/`6.668` (FP32), a smoke check.
+
+The loss A/B repeats the [block-causal one](#loss-curve-ab) at AGPT-2B
+(`agpt_2b_loss_ab`, `12` tiles, `400` updates, no block-causal attention),
+FP32 vs BF16 storage, one job per seed (`12482597`-`12482599`); seed `2` runs
+BF16 first. BF16 minus FP32 loss, mean over `12` ranks and the window:
+
+| Updates | Seed 1 | Seed 2 | Seed 3 | Mean | FP32 seed spread |
+|---|---:|---:|---:|---:|---:|
+| 2-10 | `+0.034` | `+0.079` | `+0.041` | `+0.051` | `0.077` |
+| 11-50 | `-0.053` | `-0.014` | `-0.056` | `-0.041` | `0.074` |
+| 51-100 | `-0.017` | `+0.037` | `-0.072` | `-0.017` | `0.104` |
+| 101-200 | `-0.004` | `-0.002` | `-0.029` | `-0.012` | `0.068` |
+| 201-300 | `-0.012` | `-0.005` | `-0.007` | `-0.008` | `0.055` |
+| 301-400 | `-0.014` | `+0.001` | `+0.006` | `-0.002` | `0.053` |
+
+Update `1` losses agree to `1e-4`. The paired differences are larger than
+block-causal's (at most `0.072` per window against `0.013`; up to `0.14` in a
+`10`-update window) but stay inside the seed spread and shrink toward the end.
+Over updates `391`-`400` BF16 is higher in all three seeds, by `+0.004`,
+`+0.005` and `+0.008`, against a final seed spread of `0.044`. Three seeds
+cannot tell that from noise. The FP32 arms reproduce the controls of
+`12482374`-`12482376` (final windows `4.057`/`4.013`/`4.021` vs
+`4.049`/`4.023`/`4.023`).
+
+At accumulation `2` the speedup is smaller: `2.146`/`2.235`/`2.166` against
+`2.289`/`2.294`/`2.284 s/update`, `2.5`-`6.2%`. The smallest gain is seed
+`2`, where BF16 ran first in the job, and step time drifts by up to `5%`
+within one arm, so this range is not a precise estimate.
+
+BF16 storage stays opt-in. It is the larger change: gradients accumulate in
+BF16 across microbatches and the residual stream is BF16. Before it is a
+default it needs a run past `400` updates and a multi-node run, as
+block-causal does.
 
 FSDP spends `3.01 s` in all-gather and `2.43 s` in reduce-scatter per
 update. This arm ran with the launcher default
@@ -569,6 +603,13 @@ logits memory.
   faster at AGPT-2B and matches the default path's loss over `400` updates
   and three seeds ([Loss-curve A/B](#loss-curve-ab)). Revisit after a
   multi-node run and a run past `400` updates.
+- BF16 ZeRO-1 model storage (`BENCH_DDP_ZERO1_PARAMS=bfloat16`) stays opt-in:
+  `0.9%` behind MDS at the `z2rrt02w` shape with block-causal attention; loss
+  inside the seed spread at AGPT-2B over `400` updates, slightly higher in all
+  three seeds over the last `10`. Needs a longer run and a multi-node run.
+- The remaining `z2rrt02w` gap is attention backward: TT's block-causal path
+  takes `0.54 s` more per update than IPEX xetla
+  ([TT and MDS kernels](#tt-and-mds-kernels-at-this-shape)).
 - Rerun TT FSDP at the `z2rrt02w` shape with deferred gradient reduction.
 - Fit native DDP at `1 x 2`, for example with chunked loss so FP32 logits are
   not materialized for both sequences at once.
@@ -581,6 +622,7 @@ logits memory.
 
 | Job | Content | Exit |
 |---|---|---|
+| `12482597`-`12482599` | AGPT-2B loss A/B, FP32 vs BF16 ZeRO-1 storage, seeds `1`-`3`, `400` updates | `0` |
 | `12482585` | `z2rrt02w` shape, block-causal: FP32 vs BF16 ZeRO-1 model storage, alternated | `0` |
 | `12482583` | `z2rrt02w` shape: TT warm-up, TT block-causal, MDS with `MDS_PROFILE=1`, TT control | `0` |
 | `12482111` | MDS controls; TT DDP base, `1 x 2`, per-block compile, per-block `1 x 2` | `1` (both `1 x 2` arms: RoPE shape error) |
