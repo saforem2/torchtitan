@@ -1571,7 +1571,19 @@ def _agpt_v2_4k(
     num_tokens_per_microbatch consistently from seq_len) rather than
     patching those fields after the fact.
     """
-    cfg = agpt(flavor, hf_assets_path=hf_assets_path, seq_len=4096)
+    cfg = agpt(
+        flavor,
+        hf_assets_path=hf_assets_path,
+        seq_len=4096,
+        activation_checkpoint_mode="none",
+    )
+    # 2026-11-05: aurora_frameworks-2026.1.0 ships a torch_remat that is
+    # incompatible with the installed torch (missing
+    # torch._C._set_storage_data_ptr_access_error_msg, and the
+    # torchtitan 0.2.2 -> torch_remat preserve_rng_state mismatch). The
+    # FSDP divisibility fix (dp12 hidden dims) is valid, but cannot be
+    # validated until remat is bypassed. Restore Full/default once
+    # frameworks pins a compatible torch_remat. See job 9043941 traceback.
     return _use_hf_streaming(
         cfg,
         path="json",
