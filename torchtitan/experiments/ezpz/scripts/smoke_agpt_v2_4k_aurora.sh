@@ -145,7 +145,6 @@ for CFG in "${CONFIGS[@]}"; do
         --config "$CFG" \
         --training.steps "$STEPS" \
         --checkpoint.no-enable \
-        --metrics.enable-wandb False \
         2>&1 | tee "/tmp/smoke-${CFG}.log"
 
     RC=${PIPESTATUS[0]}
