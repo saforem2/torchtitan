@@ -98,6 +98,136 @@ The TT anchor `6tc71of4` re-run on its own code and runtime gives `88.00` vs
 
 ---
 
+## 2026-11-02: historical XPU throughput reconciliation
+
+- Recompute older Sunspot TT histories with the new report's exact model
+  FLOPs convention: `6tc71of4` gives `93.75`, `xcs4xrqe` gives `90.85`
+  TFLOP/s/tile. These use model-plus-loss compilation and larger microbatches.
+- Recompute Sunspot MDS 2B `8dscnx65`: `89.99` TFLOP/s/tile, GBS `384`,
+  accumulation `16`, AdamW, ZeRO-1. The latest compatibility control changes
+  accumulation to `2`, optimizer to SophiaG, and wrapper implementation.
+- Confirm Aurora MDS `audeuhea` records sustained native `125.35` TFLOP/s
+  on a larger `32 x 4096` model. The exact 2B XPU `120` window remains
+  unidentified; the previous Polaris example does not resolve that question.
+- Correct the [report's scope](experiments/agpt/sunspot/2026-11-02-recovery-comparison.md#reconciliation-with-earlier-xpu-throughput):
+  the fresh `3.2%` relative gap does not recover earlier absolute performance.
+
+## 2026-11-02: recovered Sunspot comparison and bucket experiment
+
+- Recovery proof `12481979` and four 32-update canaries pass. Each canary
+  has exact loaded-parameter audits and finite optimizer witnesses on `24/24`
+  ranks. The earlier site startup failure's root cause remains unverified.
+- Repair the experimental MDS launcher in `4831cd2d9`: preserve its Python
+  payload across the legacy Click CLI and use an isolated same-version
+  Click overlay. Both borrowed training environments remain unchanged.
+- `12482063` records fresh MDS controls, HSDP loss compilation, and native
+  DDP/ZeRO-1. Eager HSDP R12/S2 fails with OOM after one update; the other
+  four arms complete all `32` updates. The failed evidence is retained.
+- `12482081` completes matched HSDP R4/S6 eager and loss compilation:
+  `2.908` versus `2.730 s/update`, a `6.10%` time reduction.
+- `12482090` completes MDS controls and native DDP buckets `100`, `2048`,
+  and `8192 MiB`. Actual bucket counts are `25`, `3`, and `1`; all TT
+  settings remain near `2.418 s/update` versus `2.344 s` MDS. Larger buckets
+  reduce recognized collective exposure without a useful throughput gain.
+- Complete input hashes match. Loss trajectories do not establish numerical
+  equivalence. TFLOPs/MFU are normalized useful work per FLAT tile.
+- Publish the [measured report, figure, and numerical evidence](experiments/agpt/sunspot/2026-11-02-recovery-comparison.md).
+  Complete raw campaign evidence is archived in online W&B.
+
+## 2026-11-01: direct executable startup failure reproduced across queues
+
+- Submitted direct `/bin/hostname` controls `12481943` / `12481944` /
+  `12481945` through preflight from `dbb46e9bc`: normal home output,
+  `/dev/null`, and Sunspot's enabled `next-eval` / October 28 image pool.
+  All reached `21` startup attempts without `stime`.
+- Aggregate scheduler history contains six matching no-start failures across
+  three other accounts. The failure is shared beyond this account; exact
+  MOM/resource-hook cause remains unverified.
+- Qualified PALS probes fail at RPC level on assigned HSN nodes; TCP `7919`
+  connects on the next-eval node. UAN/pre-run baseline is unavailable.
+  No user-side daemon/hook/image changes or extra cancellations were made.
+- Support acknowledged `REQ-17196`; no diagnosis yet. The authorized follow-up
+  was sent at `11:25 CST` in the same thread, CC `foremans@anl.gov`, with four
+  diagnostic attachments. The `sent` entry, recipients, thread, and attachments
+  were verified. [Evidence and limits](experiments/agpt/sunspot/2026-11-01-startup-incident.md#direct-executable-isolation-and-cross-user-evidence).
+
+## 2026-11-01: reconcile Sunspot pane success with current startup failures
+
+- Verified `sunspot-tt-ezpz` job `12481889`: Oct 31 `22:00-22:05 CDT`, exit
+  `0`, three arm returns `0`, `VERDICT: ok`. Its earlier success is real.
+- The pane's later `12481940` / `12481941` / `12481942` each failed startup
+  `21` times with no `stime`, then finished without a numeric exit supplied.
+  Top-level PBS `R` updates had not established application execution.
+- Earlier successes and later failures share the recorded image and account/
+  queue. Failures now cover both submission paths for this account; no
+  cluster-wide or TorchTitan-specific cause is established.
+- [Chronology and scope](experiments/agpt/sunspot/2026-11-01-startup-incident.md#earlier-working-tt-jobs-and-later-failures).
+
+## 2026-11-01: Sunspot support report sent through AgentMail
+
+- Sent the prepared PBS/MOM incident report to `ALCF Support` from the
+  dedicated `AgentMail` inbox, with Sam on CC and four diagnostic attachments.
+  Verified message ID, `sent` label, recipients, subject, and attachment count.
+  Receipt and full sent text remain in private campaign control files.
+- Cancelled only `12481933` after explicit user approval; PBS confirms
+  finished with no numeric exit status. `12481932` and `12481935` remain held.
+- [Incident report and support follow-up](experiments/agpt/sunspot/2026-11-01-startup-incident.md).
+
+## 2026-11-01: Sunspot shell startup isolated; Aurora probe completed
+
+- Cancelled only `12481931` with explicit user approval; PBS finished after
+  `15` starts, without supplying numeric `Exit_status`.
+- `12481932` selected the earlier successful `c1` pair but reached a system
+  hold after `21` failed starts. Shell-only `12481933` and home-only
+  `12481935` also reached system holds after `21` failed starts each, without
+  their first marker. The specific
+  MOM/hook failure is unresolved; a site investigation draft is recorded.
+- The single monitor now reports substate `41` as pre-run, startup count,
+  and `stime`, and accepts finished cancellations without a numeric exit.
+- Aurora `9025634`, source `24985bc50`, finished first attempt / exit `0`.
+  All `24` device and accumulation records verified. Maximum gradient
+  difference `7.450580596923828e-09`; manual-wire and loss differences `0`.
+  Online `W&B` retained. This is an FP32 communication probe, not 2B training.
+- [Startup report and recovery gates](experiments/agpt/sunspot/2026-11-01-startup-incident.md).
+
+## 2026-11-01: follow-up ended before application startup
+
+- Exact historical `qstat -xf 12481908` records finished / exit `265`,
+  `run_count=21`, and `job held, too many failed attempts to run and terminated`.
+  There is no application log or `stime`. No loaded-parameter witness or
+  benchmark measurement was produced.
+- The completed fresh runs remain `12481905` / `12481906`: all `24` ranks,
+  `32` updates, and `1,536/1,536` matching consumed-input records. Timing and
+  loss discrepancies are explicit in the
+  [quantitative audit](experiments/agpt/sunspot/2026-11-01-handoff-audit.md).
+- Aurora native/DCP transfer hashes and the TT compute probe were recovered.
+  Aurora MDS overlay preparation is incomplete; no fallback training job was
+  submitted. The experimental source checkout retains that unfinished launcher
+  change separately from published runtime commits.
+
+## 2026-11-01: paired comparison startup and live-parameter gate
+
+- `12481907` ended with PBS exit `143` after explicit user approval to cancel
+  only that job. Its `24`-rank MDS device preflight passed, but the training
+  launch reported PALS `VNI request failed [308]` / `no response` and shepherd
+  `127`. Partial first-TT-arm output is retained. No paired throughput result
+  follows from this attempt.
+- The initial dropped-command diagnosis was wrong. The full execution block
+  retained Python; parser probes on installed ezpz `0.27.3` and `0.11.1`
+  preserve all child arguments. The unnecessary separator changes were reverted.
+- Native-DDP live-load canary `12481908`, source `b6dfa77e2`, requires all
+  `111` canonical hashes / `1,986,054,144` loaded elements to match before
+  training. PBS has repeatedly sent the allocation for execution, with no
+  application log or `stime` yet. Hold further Sunspot submissions until it
+  actually starts. A prepared opt-in HSDP witness uses official
+  `DTensor.full_tensor()` and labels its audit memory separately.
+- `12481904` finished with PBS exit `1`: `defbase=0`, `defce=124`,
+  `litebase=0`, `litece=124`. Both copy-engine variants report unsupported
+  `allgatherv` with a temporary buffer. Their complete large logs are preserved
+  losslessly in the single W&B evidence stream.
+- [Comparison plan and failure evidence](experiments/agpt/sunspot/2026-11-01-paired-performance.md).
+  [Recovered quantitative report](experiments/agpt/sunspot/2026-11-01-handoff-audit.md).
+
 ## 2026-11-01 (Sunspot) -- MDS/TT handoff audit and continuation
 
 Recovered Claude session `255a7e56-1404-4d91-be47-317b42c0aa0c` after its
@@ -106,6 +236,15 @@ versus `TT HSDP 12 x 2` `2.7041 s` (BF16 reduce) / `2.7134 s` (FP32 reduce)
 at `24` FLAT devices. Common accounting gives `83.29` / `67.78` / `67.55`
 model TFLOP/s/device. Full-model numerical equivalence and 256-node parity
 remain open. [Report and corrections](experiments/agpt/sunspot/2026-11-01-handoff-audit.md).
+
+Fresh jobs `12481905`/`12481906` completed 32 updates at 24 ranks. All
+`1,536` rank/microbatch input, label and raw-token hashes match. MDS direct
+iteration timing is `2.360975 s`; TT loss-event intervals average `2.902996 s`
+and its explicit synchronized all-rank maxima average `2.902788 s`. Timer
+boundaries differ across frameworks. Losses diverge from update 1 (`17.663555`
+MDS, `17.746710` TT) through update 32 (`10.828611`, `12.389167`). The native
+MDS load is logged; TT's converted-DCP path is configured, but neither run has
+a live post-wrap parameter hash. The cause remains unresolved. [Fresh evidence](experiments/agpt/sunspot/2026-11-01-fresh-905-906-evidence.json).
 
 The nominal stage-0 reproduction had selected the wrong DeepSpeed wrapper.
 Compatibility job `12481887` completed with `BF16_Optimizer` through a DS
@@ -118,14 +257,100 @@ At audit start, `48/52` online W&B runs had no logged evidence artifact.
 Recovery uploads use each run's immutable provenance and distinguish
 scheduler and application outcomes. Inherited job `12481904` remains under
 one campaign monitor; its copy-engine arm logged an unsupported-allgatherv
-error. A new pinned checkout at `e44f928c4` has the reviewed optional rank
-step timer. Its canary must pass exact-source preflight before submission.
+error. A new pinned checkout at `e44f928c4` completed jobs `12481905`/`12481906`;
+matched loss histories remain an open gate. Paired matrix job `12481907` is
+active from clean root `1ef281d7`, with six TT arms and before/after MDS controls.
+The planned [paired performance report](experiments/agpt/sunspot/2026-11-01-paired-performance.md)
+will record those results after completion. Archive status remains pending until
+uploader runtime and `requirements.txt` provenance are verified.
+
+---
+
+## 2026-10-31 (Polaris) -- 20B chain re-armed at step 6800, docs 2 months stale
+
+Re-checked live Polaris state: chain had advanced from documented step-5600 (Aug 16) to **step-6800** (Oct 18 12:41) across 4 legs that never landed in local docs. Last leg `7753580` (6501->6859) self-aborted via `GRAD_NORM_ABORT=20.0` at step 6859 (grad_norm 5.5, 28.9x median) -- first abort of its kind on this chain, exit 0, checkpoint 6800 intact. Queue was empty (idle 13 days). Re-queued at `select=132` (`128 train + 4 spare`, matching Oct legs) via `submit_agpt_20b_autoretry.sh` with `CHECKPOINT_ASYNC_MODE=async` (required on Polaris, sync deadlocks at 512 ranks): **7803246 Q** + **7803247 H** (afterany), chain 2-deep. Polaris HEAD `5be47f7cf` matches mbph `ezpz`. Updated `production/polaris/README.md` header, at-a-glance, checkpoints (56->68 dirs, 47->57B tokens), trajectory legs 19-22, and queue depth. Charts remain stale (2026-07-22) -- wiring is now on HEAD but not regenerated (needs W&B creds). W&B run `rq0kbuej` (eager-wind-4628) covers 6501-6859.
+
+## 2026-10-31 (Sunspot) -- final MDS/TT comparison
+
+- Corrected production scope: the plotted MDS reference is Aurora `256N`, `ZeRO0`, `SophiaG`, not the unrelated Polaris `118.86 TFLOP/s` example. Over `0.5-3.5T` tokens, full archived histories give median logged throughput `4787.15` for MDS, `3144.69` for TT-256, `2518.11 tok/s/device` for TT-512 (`1.52x`/`1.90x` MDS ratios). Production TT uses global FSDP. The optimized two-node HSDP benchmark does not establish production parity.
+
+- Added normalized updates `21-32` throughput: `MDS` `7904.55 tok/s/GPU`, `88.42 TFLOP/s/GPU`, `29.65% MFU`; eager `TT` `6850.25-6919.70`, `76.63-77.41`, `25.70-25.96%`; loss-compiled `TT` `7312.91-7570.36`, `81.81-84.69`, `27.43-28.40%`. All use `11,186,515,968 FLOPs/token` and `298.1888 TFLOP/s` per selected FLAT device.
+
+- All five measured jobs completed `32/32` updates and final checkpoint saves, with `PBS Exit_status=0`. `MDS` is `24.872761 s/update`; eager `TT` is `28.412792-28.700836 s`; loss compilation is `25.970769-26.885055 s`, `4.4-8.1%` behind this `MDS` control.
+- All-rank allocated/reserved peaks are `40.386580/42.726563 GiB` for `MDS`, `47.958935/53.812500 GiB` for eager `TT`, and `32.333996/38.187500 GiB` for loss compilation. Compiled `_compile.compile_inner` is `16.195741-16.868698 s/rank`; backward compilation is recorded separately.
+- Native weights and the complete `32`-update token stream match after the required representation mapping. Numerical equivalence is not established; same-path repeats differ too.
+- [Final report, JSON and figure](experiments/agpt/sunspot/2026-10-29-native-checkpoint-closure.md). Raw traces, complete histories, diagnostics and source are preserved in online `W&B`.
+
+## 2026-10-29 (Aurora) -- native-init failure isolated before another model retry
+
+Retry `8984481` finished exit143 after 00:07:29; first XPU broadcast in
+`set_determinism` segfaulted inside XCCL/oneCCL/SYCL, before dataset/model/DCP.
+Rank16 signal11 preceded survivor cleanup; “walltime” from the retry launcher
+is a classification of rc143, not actual walltime exhaustion. Runtime/source
+unchanged. The corrected dataset horizon was not exercised. Preserve both
+attempts and isolate communication first. Added a fail-closed all-allocated-host
+source/runtime/mount probe to the future production umbrella, plus tracked-edit
+guards; sixteen executable umbrella tests pass. Production remains gated.
+
+## 2026-10-29 (Aurora) -- first canary classified; corrected retry admitted
+
+Canary `8984401` finished exit 143 after 00:12:55, with no optimizer step or
+fresh checkpoint. Runtime/application initialization passed; the real sampler
+rejected offset 15482880 against the reduced smoke's 521841-sample horizon.
+Decoupled `dataloader.train_iters` from the short optimizer stop, retaining all
+immutable source/runtime/seed inputs. Six preflight tests now pass, including
+the large-offset horizon guard. Exact-runtime CLI and repository preflight
+passed again; corrected retry `8984481` is queued/unheld in four-node
+`debug-scaling`. Fresh notifier attached. Production remains gated. Full
+failure evidence and retry provenance are in the [restart report](production/2026-10-29-20b-restart.md).
+
+## 2026-10-29 (Aurora) -- repair failed umbrella; 20B restart canary admitted
+
+Monday umbrella `8951415` failed before training: absent bootstrap `ezpz`,
+broken generic venv Python, falsely successful environment banner, and 2058
+allocated nodes versus 2078 required by disjoint spare pools. Smoke `8957951`
+printed usage, not a passing validation. The repaired plan selects the original
+20B 512N/256N seats with historical GBS 12288/6144 and ten spares each (788N),
+requires explicit full-state seeds, fixes child ownership/waits, and keeps
+attempt-specific logs. Fourteen executable shell tests plus five canary
+preflight tests and existing launcher contracts pass.
+
+Preserved canonical source/checkpoints/runtime. Narrow position-counter
+backports are frozen separately at `dc6c150975f8b7abd5377c115436db3fa85fcf60`
+and `0fa34977be1e01eab79362b50ccbffd91a4a60de` (eleven tests each). Exact archive
+`e273ae228db8107adfb2f21ce67e3e3ec2f6f7973c373f3dc440c96543e7bccc` imports and
+both real legacy CLI parse gates pass on Aurora. Canary `8984401` is admitted
+unheld to four-node `debug-scaling`; initial readback is queued. It must restore
+step 10800, complete three finite updates, save a fresh full checkpoint and
+prove persisted sample position before production is submitted. No production
+replacement has yet been released. See the [restart report](production/2026-10-29-20b-restart.md).
+
+---
+
+## 2026-10-20 (Aurora) -- umbrella NaN, fixedpos fork, boost queued
+
+Umbrella `8938159` (`large`, `24:00:36`, `Exit -29` walltime) `F` at `2026-10-19 04:49 UTC` on `5be47f7c`. `20B-512` constlr NaN from `11101` every step (`loss=nan grad_norm=nan` through `11148` at 20% MFU, no learning; optimizer corrupted, not infra) while `20B-256` healthy at `20987` (`2.447/0.19`, 19.9% MFU) and `2B` done. Root cause is the data-position replay: every `20B` ckpt stores `consumed_samples=0` (pinned clones `f1c20ee7`/`086ff996` never increment), so restarts re-read from sample 0 (89.2% replay for 512N, 92.0% for 256N per `blendcorpus-resume-position.md`). Fix is the `fixedpos` fork at `a0a4ed9b3c` (PR #66) with `RESUME_SAMPLES` `15482880`/`10002432` GBS-aligned (`15482880%12288==0`, `10002432%6144==0`) into `outputs/checkpoints/*-constlr-from9000-fixedpos` via `BLENDCORPUS_RESUME_CONSUMED_SAMPLES` env + `--dataloader.resume-consumed-samples` per seat (`TRAINERS` 13th field). Boost scaffold `followup-umbrella-boost-20261020.pbs` (`prod` `select=2058` → `large`, `>2048N` eligible) wired from no-op to `exec` delegation, SHA frozen `a426ea...`, ckpt paths corrected to `outputs/checkpoints/`. Hard gate is `debug` `1N` smoke `8957951` (`Q`) proving `resuming at N` + finite loss before boost is trusted, then `prod` capacity `274N`/`512N` + boost `8951415` (`large:2058`, `Q`, `27:37` eligible, `454 free`). Stray `docs/production/followup-umbrella-boost-20261020.md` at repo root duplicates the canonical `torchtitan/experiments/ezpz/docs/production/` path — drop once boost `R` is confirmed. `docs/production/agpt/20b/README.md` still `2026-09-21` (last good heads `11,100`/`17,500` via `8880564`/`8880658`); `evals/agpt/20b/` current for those heads, `refresh_all.sh` will regenerate charts once `8951415` produces `11101+`.
 
 ---
 
 ## 2026-10-18 (Sunspot/Aurora/Polaris) -- MoE 4-machine verification closeout
 
 Hermes session `sunspot-tt-ezpz` (exported as `sunspot-tt-ezpz.md`, 17,534 lines) closed the sync-84 MoE/sync merge verification across three XPU/CUDA clusters: `agpt_debugmodel` and `moe_debugmodel` each ran `rc=0` on Sunspot `workq` (`xpu-torch214`/`2.14.0+xpu`, jobs `12478170`/`12478171`), Aurora production PBS `prod` (route queue into `small`/`medium`/`large`; at the time `next-eval` execution on `xpu-torch215`/`2.15.0.dev20260915+xpu`, e.g. `8837281`, `test_20260924` BKC) and Polaris `debug` (`sync84-torch214-cu`/`2.14.0+cu130`). As of 2026-10-19 `next-eval` still exists as an execution queue but `prod` is the canonical route for production. Perlmutter blocked on `no corpus`. This was **not** a Monarch/RL multi-node gate — RL docs remain on the `2026-09-25` Sunspot two-host `12478711` contract; see `production/rl/monarch.md`. For the Sonic MoE trial provenance, see `experiments/moe-expert-backends-4machine.md` and `Sync 84` in `upstream-sync.md:320`.
+
+---
+
+## 2026-10-15 (Sunspot) -- BlendCorpus data position verified on the merged tree
+
+`origin/ezpz` `786306ff18` (upstream sync `5a7a622f16` + #66 + #64), torch
+2.16 venv, 2 nodes. Saved `dataloader.consumed_samples` is 48 / 96 / 144 at
+steps 2 / 4 / 6 (24 per step). A restart from the reference run's `step-4`
+reproduces steps 5-6 (`10.26074`, `9.93350`). A counter-0 checkpoint resumes
+correctly with `--dataloader.resume-consumed-samples=96` and with
+`BLENDCORPUS_RESUME_CONSUMED_SAMPLES=96`, replays from 0 without either
+(`10.13866`, `9.77017`), and ignores a conflicting override when the stored
+counter is nonzero. Jobs `12481024` (first design), `12481025` (showed the
+4-step save run is on a different LR schedule), `12481026` (result). Details in
+`docs/upstream-sync.md`. Not covered: GAS > 1, TP/PP/CP, > 2 nodes, Aurora.
 
 ---
 
@@ -144,6 +369,116 @@ The `origin/ezpz` increment (`0f7f0c7f53`) overshoots by GAS when GAS > 1. It
 now adds `micro_batch_size * dp`. New `--dataloader.resume-consumed-samples`
 applies only to checkpoints storing 0. The position for the existing chains is
 open: [`guides/blendcorpus-resume-position.md`](guides/blendcorpus-resume-position.md).
+
+---
+
+## 2026-10-06 -- HF export PR feedback
+
+- Addressed unknown legacy model keys, atomic export publication, untracked
+  source files and circular conversion expectations from PR #63. The user
+  deferred expert-dispatch optimization; the inference code remains unchanged.
+- All 180 CPU cases passed. New checks cover concurrent writers, interrupted
+  exports, static dense assets, independent mappings and pinned-source guards.
+- Evidence: `outputs/evals/moe-12b2a-step27000/pr-review-fixes/`.
+  [Validation report](experiments/moe/aurora/2026-10-06-hf-export-pr-feedback.md).
+- Job `8907545` passed both two-rank cases and published the MoE export, then
+  failed the new wrapper validation on a training-only `ezpz` import in the
+  inference runtime (exit 1, 7m01s). Direct standard-library validation and an
+  isolated-runtime regression fix that dependency. Failed artifacts retained.
+- Job `8907576`, pinned to `a800018fd`, passed on `x4013c7s4b0n0`:
+  `job_state=F`, `Exit_status=0`, walltime 25m35s. Both two-rank cases and fresh
+  dense/MoE conversion plus seven-task smokes passed (56 documents/model);
+  document/prompt/target hashes and settings matched.
+- All 2,859 MoE and 219 dense tensors exactly match the earlier validated
+  exports; model/tokenizer assets are equivalent and MoE model syntax trees
+  are identical. All 24 FP32 routing biases remain exact. Native/Sonic relative
+  RMS is 0.449% / 0.536%, with unchanged top-1 agreement and final-token top-10.
+- Artifacts: `outputs/evals/moe-12b2a-step27000/pr-feedback-validation/`;
+  submission digests and terminal scheduler evidence in `pr-review-fixes/`.
+- Validation gate closed; issue 5 is deferred. PR #63 contains the correctness
+  fixes and accompanying validation evidence.
+
+## 2026-10-06 -- MoE HF export PR preparation
+
+- Integrated Sam's current `ezpz` base `d4449ba0e` in `c1c2847cc`, preserving
+  both journal entries. The branch is no longer behind the target base.
+- All 27 focused CPU checks passed after integration (23 converter/model/schema
+  cases plus four retained JSON config registrations on the meta device).
+  Initial config imports lacked existing Grain/renderers dependencies; an
+  isolated no-deps overlay resolved them without changing Torch. The two distributed
+  DTensor checks and full paired HF evaluation already passed in jobs
+  `8907019` / `8907189`. The upstream RL changes do not alter the evaluated
+  HF implementation.
+- Added standard license headers in `da71a884f`; syntax-tree comparison
+  confirmed identical executable code. Wrapper, PBS and preflight shell syntax
+  checks passed. All PR changes stay under `experiments/ezpz/`.
+- Evidence and submission text: `outputs/evals/pair-step27000/pr-readiness/`.
+  [Validation and PR note](experiments/moe/aurora/2026-10-06-hf-dense-moe-paired.md).
+- The user authorized local pre-commit verification as an exception to the
+  ezpz policy. The formatter changed 15 Python files without changing their
+  syntax trees; all PR-file hooks passed, with the repository-wide Pyrefly
+  hook checked separately in a temporary copy.
+- The post-format CPU rerun passed all 160 cases in the MoE and retained JSON
+  launch-config suites (156 ordinary and four meta-device checks). The
+  two-rank DTensor module retains its earlier compute-node evidence.
+- Pyrefly reports identical 35 core errors on the feature/base branches in
+  this environment. Repository-wide Lychee finds one existing broken skill
+  link in `experiments/graph_trainer/AGENTS.md:300`, reproduced on the base;
+  all PR-file links pass. See the linked report and readiness logs.
+- The generic GitHub CPU workflow does not cover these experiment tests;
+  inherited repository-wide lint failures remain a CI limitation.
+
+## 2026-10-06 — Matched dense/MoE HF evaluation
+
+- Added the dense `2b_50k` export and HF pipeline selection, shared Llama
+  tokenizer assets, explicit evaluation context and seed settings.
+- Nine focused CPU checks passed. The dense model was then moved to module
+  scope for stable configuration class identity; all three dense cases passed
+  again, including both DCP layouts and native/HF logits.
+- Job `8907189`, pinned to `4e6f3c99d`, completed on `x4112c4s4b0n0`:
+  `job_state=F`, `Exit_status=0`, walltime 49m38s. All seven zero-shot HF tasks
+  completed for both step-27000 checkpoints (20,465 documents/model).
+- All 219 dense HF tensors matched the source after BF16 conversion and
+  mapping. Native/HF relative RMS was 1.1917%, cosine 0.9997004, top-1 61/64.
+- Paired document/prompt/target hashes, settings and tokenizer assets matched.
+  MoE led six tasks: equal-task mean 54.41% vs 51.68%; document-weighted
+  60.20% vs 55.97%, gain +4.23pp (paired 95% CI +3.61 to +4.84pp).
+- Job `8907124` was cancelled while queued at the debug-scaling user limit;
+  `8907144` failed module initialization, and `8907155` exported successfully
+  but stopped on an incorrect native reference loader. Both launcher/reference
+  issues were fixed before the successful run; failed artifacts are preserved.
+- Artifacts: `outputs/evals/pair-step27000/hf-full/8907189/`, including paired
+  statistics, identity checks and scheduler terminal evidence. Launch records
+  and CPU logs: `outputs/evals/pair-step27000/hf-full-validation/`.
+- Evaluation gate closed; integration with current `origin/ezpz` remains a
+  separate PR gate.
+- [Run plan and results](experiments/moe/aurora/2026-10-06-hf-dense-moe-paired.md).
+
+## 2026-10-06 — MoE HF export review fixes and real-checkpoint validation
+
+- Fixed interleaved shared-expert mapping in both directions, preserved FP32
+  routing biases in BF16 exports, validated the explicit training tokenizer,
+  and exercised the existing conversion/evaluation wrapper with separate
+  converter and inference runtimes.
+- Initial debug job `8907007` exited 1 after 1m44s because spawned DTensor
+  workers could not import a test fixture; conversion never started. The
+  fixture factory now uses its fully qualified package path.
+- Replacement job `8907019`, pinned to `3df50f0f7`, ran on
+  `x4112c2s6b0n0` and ended `job_state=F`, `Exit_status=0`, walltime 16m34s.
+  Both two-rank layout tests passed; step-27000 exported successfully; lm-eval
+  completed 176 likelihood requests across seven tasks (eight documents each).
+  All 24 serialized and loaded FP32 routing biases matched the DCP exactly.
+- Native/Sonic relative RMS errors were 0.4401% / 0.5275%, cosine >= 0.999768,
+  and top-1 agreement 96.875% / 98.4375%; final-token top-10s matched both.
+- The final CPU run passed 20 tests, including existing dense converter checks.
+  A combined run had exposed uninitialized toy experts; explicit initialization
+  fixed the fixtures. With the two distributed cases, 22 checks passed.
+- Artifacts: `outputs/evals/moe-12b2a-step27000/hf-export-runs/8907019/`.
+  Logs and submission record: `outputs/evals/moe-12b2a-step27000/review-fixes/`.
+  [Validation report](experiments/moe/aurora/2026-10-06-hf-export-review-fixes.md).
+- Next gate: adding the prepared GitHub CPU workflow requires the requested
+  exception to the ezpz-only edit policy. Full-task benchmark metrics were
+  outside this bounded integration validation.
 
 ---
 
@@ -7752,3 +8087,28 @@ Need to investigate QK-Norm and Muon schedule tweak crashes.
 - Merged upstream main into ezpz branch
 - Upstream changes included GraphTrainer bucketing fixes,
   SAC + FSDP improvements, and Qwen3-VL fused QKV support
+
+---
+
+## 2026-10-02 — AGPT 12B2A Hugging Face export
+
+- Added an `AGPTMoEStateDictAdapter` to the existing DCP-to-HF converter and a
+  Transformers remote-code model that preserves the training model's GQA,
+  ComplexRoPE, top-3 biased selection, original unnormalized routing weights,
+  36 routed experts, and always-on shared expert.
+- The first real conversion (`8900811`) exposed non-contiguous Sonic expert
+  transpose views at the safetensors writer. Export tensors are now cast and
+  packed at the serialization boundary; the regression test covers both BF16
+  conversion and same-dtype exports.
+- Job `8900883` exported the historical step-27000 12B-total/2B-active DCP and
+  exited zero. The HF logits matched the current native reference at 0.448%
+  relative RMS / 0.999770 cosine / 96.875% top-1 agreement, and the frozen
+  Sonic oracle at 0.477% / 0.999770 / 98.438%. Final-token top-10 predictions
+  were identical to both references.
+- Job `8900986` then loaded the artifact through unmodified lm-eval-harness
+  0.4.10's `hf` backend with Transformers 4.57.6 and completed an ARC-Easy
+  likelihood smoke on XPU (8/8 requests, exit zero). The two-document 2/2
+  score is only an integration check, not a reportable model metric.
+- The focused CPU suite passed 12/12 tests, including the pre-existing dense
+  converter schema tests. The generated model also passed AutoModel save/load,
+  forward, and generation tests.

@@ -15,6 +15,16 @@ reduction: `22.9%` and `23.3%` longer than that MDS control. The historical
 Aurora production reference used a different DeepSpeed wrapper/runtime and
 `256` nodes. This two-node result does not measure production-scale parity.
 
+A fresh `24`-rank historical-wrapper compatibility control takes
+`2.3610 s/update`. The separate HSDP `4 x 6` canary takes `2.9030 s` and
+does not improve on the earlier `12 x 2` result. Its complete input stream
+matches MDS, but losses differ. The intended same-allocation comparison was
+cancelled after a PALS startup failure. The live-load canary then ended with
+scheduler exit `265` before application startup; the replacement comparison
+has not run. The Aurora fallback communication probe completed;
+[Sunspot startup isolation and exact recovery status](2026-11-01-startup-incident.md)
+records the failed-start reproductions and its scope.
+
 At `16` devices, the combined FSDP communication changes reach `2.2799 s`,
 versus `2.2525 s` for MDS ZeRO-1 and `2.3894 s` for the historical-wrapper
 compatibility arm. These are single-run estimates with different arithmetic
@@ -60,6 +70,45 @@ defines the parameter/attention formula and denominator. Compilation in these
 TT rows covers the loss only. Neither full-model compilation nor a matched
 production-scale run is represented.
 
+## Fresh 24-rank pair: complete input match, unresolved loss gap
+
+Jobs `12481905` and `12481906` both completed 32 updates with PBS exit 0. The
+TT run used `HSDP 4 x 6`, no activation checkpointing, deferred FP32 gradient
+reduction, no reshard after forward, and loss-only compilation. The MDS run used
+the nominal ZeRO-0 compatibility path selecting DeepSpeed `BF16_Optimizer`.
+Both used `24` ranks and global batch `48`.
+
+| Run | Update-21-32 timer | Mean s/update | tok/s/device | Model TFLOP/s/device | MFU % | Samples |
+|---|---|---:|---:|---:|---:|---:|
+| `12481906` MDS | Native iteration timer | `2.360975` | `6939.5` | `77.63` | `26.03` | `12` |
+| `12481905` TT | Loss-event intervals, anchored at update `20` | `2.902996` | `5643.8` | `63.13` | `21.17` | `12` |
+| `12481905` TT | Synchronized per-step maximum across `24` ranks | `2.902788` | `5644.2` | `63.14` | `21.17` | `12` |
+
+TT's adjacent cumulative `time_metrics/end_to_end(s)` differences average
+`2.902987 s`; the largest per-step difference from the loss-event intervals is
+`0.000153 s`. The explicit synchronized hook's largest step is `4.071005 s`.
+The two TT methods corroborate one another. MDS and TT timer boundaries are not
+proven equivalent, so their means are not a controlled timing ratio.
+
+All `1,536` `(rank, microbatch)` records match across input, labels, raw token
+rows, shapes, world size, and local sample index. Per-rank JSONL digests and all
+32 loss values are in the [fresh run evidence](2026-11-01-fresh-905-906-evidence.json).
+Losses do not agree: MDS moves from `17.663555` to `10.828611`; TT moves from
+`17.746710` to `12.389167`. Across 32 updates, TT minus MDS starts at
+`+0.083155`, ends at `+1.560556`, and has RMS `0.352058`.
+
+The MDS log confirms a successful load from native `mds-load`, tag
+`global_step138650`. The captured TT launcher sets `MDS_ANNEAL_BASE` to the
+converted `agpt-matched-native-weights/dcp/step-0`; the pinned config binds that
+path as a model-only initial load. Neither job captured a live post-wrap
+parameter hash. The loss gap is unexplained; identical input hashes do not
+prove identical loaded parameters or numerical agreement.
+
+Process high-water allocated/reserved memory was `46.396/50.613 GiB` for MDS
+and `35.112/40.039 GiB` for TT. These are maxima of the recorded allocator high-water marks across ranks,
+not update-window memory. TT's maximum-rank outer loss-compilation timer was
+`15.139 s`; nested compiler timer keys are not summed.
+
 The BF16 HSDP mean has within-run sample deviation `0.283 s`, versus
 `0.004 s` for the FP32 arm; the exact JSON retains every sample. Similar
 rounded times do not establish that FP32 reduction costs zero. Repeated
@@ -68,10 +117,14 @@ independent jobs are needed to resolve small differences.
 ## Peak memory and compilation cost
 
 All expected rank diagnostics are present. The table takes the maximum
-per-rank process-lifetime allocated and reserved high-water marks, captured
-before final witness reductions. These are not peaks restricted to updates
-`21-32`. The `GB`/`GiB` shorthand from the conversation is replaced with bytes
-converted consistently to `GiB`.
+recorded allocated and reserved high-water marks across ranks, captured
+before final witness reductions. In TT, the counters run from the metrics
+processor's initialization reset, before model initialization; the ezpz
+training override does not reset them at each log. They are not process-birth
+or update-`21-32` peaks. No reset was found in the pinned MDS source, but
+external DeepSpeed/runtime resets have not been audited. Identical memory
+measurement windows across frameworks are therefore not established.
+The `GB`/`GiB` shorthand is replaced with bytes converted consistently to `GiB`.
 
 | Run/variant | Rank coverage | Peak allocated GiB | Peak reserved GiB | Max-rank loss compile timer s |
 |---|---:|---:|---:|---:|
@@ -88,6 +141,8 @@ converted consistently to `GiB`.
 | `12481901-bf16` | `24/24` | `35.252` | `41.578` | `10.312` |
 | `12481901-fp32` | `24/24` | `38.948` | `44.736` | `2.516` |
 | `12481902-bf16` | `24/24` | `40.627` | `47.146` | `10.744` |
+| `12481906` MDS compatibility | `24/24` | `46.396` | `50.613` | `none recorded` |
+| `12481905` TT HSDP `4 x 6` | `24/24` | `35.112` | `40.039` | `15.139` |
 
 Compilation uses only the outer `_compile.compile_inner` timer. Nested timer
 keys are not added. These are compiler-accounted costs, not total cold-start
@@ -159,6 +214,7 @@ The following complete comparisons have no missing, extra or mismatched rows:
 | `12481887`, compatibility | `12481893`, DDP-ZeRO-1 b100 | `1,024 / 1,024` |
 | `12481860`, ZeRO-1 | `12481902`, global FSDP lite | `1,536 / 1,536` |
 | `12481860`, ZeRO-1 | `12481901`, HSDP FP32 lite | `1,536 / 1,536` |
+| `12481906`, MDS compatibility | `12481905`, TT HSDP `4 x 6` | `1,536 / 1,536` |
 
 The saved conversion audit covers all `1,986,054,144` parameters (`75` native
 and DCP tensors through `111` HF tensors), exact BF16 mapping and exact FP32
@@ -236,26 +292,53 @@ visible compute overlap. A later copy-engine microbenchmark reports
 all-gather transfer is absent from its GPU kernel/memcpy trace. The matching
 reduce-scatter trace shows only `0.003 ms` of overlap. This establishes a
 promising microbenchmark timing result, not trace-visible training overlap.
-Training follow-up `12481904` logs `allgatherv using copy engines not supported
-with tmp buffer`; the setting is not a usable training optimization on this
-path. Its final variant outcomes must be inspected after the job terminates.
+Training follow-up `12481904` ended with PBS exit `1`. Its `defbase` and
+`litebase` controls completed with return `0`; `defce` and `litece` timed out
+with return `124`, both logging `allgatherv using copy engines not supported
+with tmp buffer`. This setting is not a usable training optimization on this
+path. Complete timeout logs are retained losslessly with their original
+sizes and hashes.
 
-Canary `12481905` is running from immutable source `e44f928c4` on two
-Sunspot nodes, `24` ranks, `HSDP 4 x 6`, FP32 deferred reduction, no
-activation checkpointing, `32` updates and explicit per-rank timing. The
-exact-source parser/import gate and repository submit wrapper passed. It
-has built the requested mesh; training completion is not yet established.
+Jobs `12481905` and `12481906` completed 32 updates on two Sunspot nodes with
+`24` ranks. Full batch-hash comparison passed. The loss histories diverge despite
+the matching input stream; live post-wrap parameter hashes were not captured.
+The timing methods and result limits are recorded above and in the fresh JSON.
+
+## W&B evidence recovery
+
+At audit start, `48/52` group runs had no logged artifact despite online
+training metrics. The serialized recovery has committed evidence for `60`
+runs, including the fresh `12481905` and `12481906` arms. API verification
+covered all then-existing `59` artifacts; five seeded random downloads also
+passed source-SHA, manifest/file-presence and checkpoint-hash checks. Later
+artifacts require the same final coverage pass. Checkpoint payloads remain
+on project storage; W&B includes their full byte-count/SHA manifests.
+
+The first uploads resumed old training runs. That replaced some online
+package and machine metadata with the CPU uploader's environment and
+inflated displayed runtimes. Recovery restored `52` original files across
+`50` runs and `43` preserved runtime/hidden-SDK summaries. Seven failed runs
+lack a final original summary; initial probe `12481844` has no preserved
+original machine metadata. Server heartbeat/end timestamps still include
+archival activity. Use captured training timers and rank provenance for
+performance, not the current W&B UI elapsed span.
+
+Future uploads use one separately labeled archival run and the public
+`Run.log_artifact()` association API. The canary left training state, config,
+runtime, heartbeat and Git metadata unchanged. Large repeated timeout logs
+are stored as lossless gzip with original and compressed hashes and verified
+decompression; no log content is trimmed. Private agent transcripts are
+excluded.
 
 ## Continuation gates
 
-- Recover and upload full existing evidence to each online W&B run, using its
-  recorded source SHA rather than a later checkout HEAD. Preserve failed arms.
-- Run a pinned 24-rank canary with explicit per-rank step timing. Compare
-  even-shard HSDP degree `4` against padded degree `12`, then the final block-4
-  implementation and eager/loss-compiled paths. Keep FP32 reduction as a control.
-- Run a fresh 24-rank MDS `BF16_Optimizer` compatibility control before assigning
-  a production-numerics ratio to the TT candidates.
-- Audit initial live parameters and same-batch full-model numerics. Verify all
-  optimizer updates, rank coverage, CPU hashes and output checkpoints.
-- Scale only passing candidates through the Aurora compute/runtime gates.
-  No 256-node parity result is claimed here.
+- Finish the current failed/partial-arm uploads and final analysis artifact,
+  then repeat the API coverage check. Preserve each arm's actual source SHA
+  and its separate application/scheduler status.
+- Reconcile the `12481905`/`12481906` loss gap with live parameter audits and
+  same-batch numerical checks. Do not infer its cause from endpoint loss.
+- Compare the final block-4 implementation and eager/loss-compiled paths with
+  repeated jobs and FP32 reduction controls.
+- Scale only candidates that pass checkpoint-load, numerical and resource
+  gates through the Aurora compute/runtime path. No 256-node parity result is
+  claimed here.

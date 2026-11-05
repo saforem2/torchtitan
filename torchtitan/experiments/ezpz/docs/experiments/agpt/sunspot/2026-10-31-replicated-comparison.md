@@ -52,7 +52,7 @@ identical arithmetic from the dtype flags. The earlier native-weight audit
 established the checkpoint representation mapping; input equality must be
 audited again for the new global batches.
 
-## Gates and arms
+## Gates and arms (historical plan)
 
 The pinned `DeepSpeed 0.18.5` ZeRO-0/no-pipeline path defaults to BF16
 gradient accumulation and BF16 communication. The Megatron flag

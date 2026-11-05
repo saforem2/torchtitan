@@ -1,0 +1,339 @@
+{
+  "method": "ProfilerStep-clipped rank-zero intervals; kernel classification matches the shared analyzer; exposed intervals exclude overlap with all non-oneCCL kernels; coverage is not causal factor attribution",
+  "rows": [
+    {
+      "name": "MDS ZeRO-1",
+      "profile_step_s": 63.180455488,
+      "non_oneccl_kernel_union_s": 62.01087889282226,
+      "exposed_collective_s": 0.310043,
+      "remaining_s": 0.8595335951777374
+    },
+    {
+      "name": "TT eager HSDP",
+      "profile_step_s": 100.45779868700001,
+      "non_oneccl_kernel_union_s": 94.01653641748047,
+      "exposed_collective_s": 5.247346,
+      "remaining_s": 1.1939162695195407
+    },
+    {
+      "name": "TT compiled HSDP",
+      "profile_step_s": 98.348157363,
+      "non_oneccl_kernel_union_s": 91.91187660180664,
+      "exposed_collective_s": 4.945292,
+      "remaining_s": 1.4909887611933588
+    }
+  ],
+  "trace_audit": {
+    "MDS ZeRO-1": {
+      "trace_path": "/private/tmp/agpt-comparison-20261023/mds-12481353/x1921c3s5b0n0_713398.1792806329171471192.pt.trace.json.gz",
+      "step_name": "ProfilerStep#0",
+      "step_start_us": 1949237988419.679,
+      "step_duration_s": 63.180455488,
+      "step_clipped_kernel_event_count": 36033,
+      "step_clipped_oneccl_kernel_event_count": 240,
+      "step_clipped_nononeccl_kernel_event_count": 35793,
+      "step_clipped_all_kernel_union_ms": 62136.969133544924,
+      "step_clipped_oneccl_kernel_union_ms": 126.09024072265625,
+      "step_clipped_nononeccl_kernel_union_ms": 62010.878892822264,
+      "kernel_event_device_id_counts": {
+        "0": 36033
+      },
+      "oneccl_kernel_names": {
+        "oneccl_invoke_barrier": 122,
+        "oneccl_allgatherv_large_main<sycl::_V1::ext::oneapi::bfloat16, 4, 6>": 69,
+        "oneccl_allgatherv_small_gather<float, 1, 32, 1, 1, 6, 1>": 2,
+        "oneccl_reduce_scatter_large_main<sycl::_V1::ext::oneapi::bfloat16, true, 4, 6, 6100>": 31,
+        "oneccl_reduce_scatter_large_epilogue<sycl::_V1::ext::oneapi::bfloat16, true, 4, 6, 6102>": 4,
+        "oneccl_reduce_base<sycl::_V1::ext::oneapi::bfloat16, 1, 16, 1, 1, 6, 1>": 4,
+        "oneccl_reduce_pair<sycl::_V1::ext::oneapi::bfloat16, 4, 16>": 4,
+        "oneccl_reduce_scatter_small_general<sycl::_V1::ext::oneapi::bfloat16, 8, 32, 1, 1, 6, 1>": 1,
+        "oneccl_allgatherv_small_gather<sycl::_V1::ext::oneapi::bfloat16, 8, 32, 1, 1, 6, 1>": 1,
+        "oneccl_allgatherv_small_gather<sycl::_V1::ext::oneapi::bfloat16, 4, 32, 1, 1, 6, 1>": 2
+      },
+      "attention_and_matmul_cpu_op_counts_in_step": {
+        "aten::matmul": 4704,
+        "aten::mm": 4704,
+        "aten::_scaled_dot_product_efficient_attention_backward": 384,
+        "aten::scaled_dot_product_attention": 384,
+        "aten::_scaled_dot_product_efficient_attention": 384
+      },
+      "large_8192_score_matmul_input_type_counts": {},
+      "large_8192_score_matmul_input_dim_counts": {}
+    },
+    "TT eager HSDP": {
+      "trace_path": "/private/tmp/agpt-comparison-20261023/eager-hsdp-12481289/profiler/rank0_trace.json.gz",
+      "step_name": "ProfilerStep#6",
+      "step_start_us": 1922390767565.545,
+      "step_duration_s": 100.45779868700001,
+      "step_clipped_kernel_event_count": 46476,
+      "step_clipped_oneccl_kernel_event_count": 5895,
+      "step_clipped_nononeccl_kernel_event_count": 40581,
+      "step_clipped_all_kernel_union_ms": 97521.87688598633,
+      "step_clipped_oneccl_kernel_union_ms": 3505.3569484863283,
+      "step_clipped_nononeccl_kernel_union_ms": 94016.53641748047,
+      "kernel_event_device_id_counts": {
+        "0": 46476
+      },
+      "oneccl_kernel_names": {
+        "oneccl_invoke_barrier": 3264,
+        "oneccl_allgatherv_large_ipc<sycl::_V1::ext::oneapi::bfloat16, 4, 4>": 648,
+        "oneccl_reduce_base<float, 1, 16, 1, 1, 8>": 1,
+        "oneccl_reduce_scatter_large_main<float, true, 2, 4>": 1632,
+        "oneccl_reduce_scatter_large_epilogue<float, true, 2, 4>": 336,
+        "oneccl_reduce_pair<float, 2, 16>": 14
+      },
+      "attention_and_matmul_cpu_op_counts_in_step": {
+        "aten::mm": 4680,
+        "aten::matmul": 3480,
+        "aten::scaled_dot_product_attention": 576,
+        "aten::_scaled_dot_product_attention_math": 576,
+        "aten::bmm": 2304
+      },
+      "large_8192_score_matmul_input_type_counts": [
+        {
+          "op": "aten::bmm",
+          "input_dims": "[[16, 8192, 128], [16, 128, 8192]]",
+          "input_type": "['float', 'float']",
+          "count": 289
+        },
+        {
+          "op": "aten::bmm",
+          "input_dims": "[[16, 8192, 8192], [16, 8192, 128]]",
+          "input_type": "['float', 'float']",
+          "count": 290
+        },
+        {
+          "op": "aten::matmul",
+          "input_dims": "[[1, 16, 8192, 128], [1, 16, 128, 8192]]",
+          "input_type": "['float', 'float']",
+          "count": 290
+        },
+        {
+          "op": "aten::matmul",
+          "input_dims": "[[1, 16, 8192, 8192], [1, 16, 8192, 128]]",
+          "input_type": "['float', 'float']",
+          "count": 289
+        }
+      ],
+      "large_8192_score_matmul_input_dim_counts": {
+        "[[1, 16, 8192, 8192], [1, 16, 8192, 128]]": 289,
+        "[[16, 8192, 8192], [16, 8192, 128]]": 291,
+        "[[16, 8192, 8192], [], []]": 7,
+        "[[1, 16, 8192, 8192], []]": 11,
+        "[[1, 16, 8192, 8192]]": 15,
+        "[[[16, 8192, 8192], [16, 8192, 128]], []]": 1,
+        "[[16, 8192, 8192], []]": 8,
+        "[[1, 16, 8192, 8192], [1, 16, 8192, 8192], [1, 16, 8192, 8192], [], [], [], [], [], []]": 1,
+        "[[1, 16, 8192, 8192], [1, 16, 8192, 8192]]": 3,
+        "[[1, 16, 8192, 8192], [], []]": 4,
+        "[[8192, 8192], [], [], []]": 5,
+        "[[1, 16, 8192, 8192], [], [], [], [], [], []]": 1,
+        "[[8192, 8192], [], [], [], []]": 2,
+        "[[8192, 8192]]": 4,
+        "[[1, 16, 8192, 8192], [], [], [], []]": 3,
+        "[[16, 8192, 128], [16, 8192, 8192], [16, 8192, 8192]]": 1,
+        "[[1, 16, 8192, 8192], [], [1, 16, 8192, 8192], []]": 1,
+        "[[8192, 8192], []]": 4,
+        "[[1, 16, 8192, 8192], [], [], []]": 8,
+        "[[16, 8192, 8192], [16, 8192, 8192]]": 3,
+        "[[[16, 8192, 8192], [16, 8192, 8192], [16, 8192, 8192], [1, 16, 8192, 8192], [1, 16, 8192, 8192], [1, 16, 8192, 8192]], [1, 16, 8192, 8192], [], [], []]": 1,
+        "[[16, 8192, 8192], [], [], []]": 7,
+        "[[16, 8192, 8192]]": 3,
+        "[[1, 16, 8192, 8192], [], [], [], [], []]": 3,
+        "[[16, 128, 8192], [16, 8192, 8192], []]": 1,
+        "[[8192, 8192], [1, 16, 8192, 8192]]": 1,
+        "[[1, 16, 8192, 8192], [8192, 8192]]": 1,
+        "[[], [8192, 8192]]": 1,
+        "[[1, 16, 8192, 8192], [1, 16, 8192, 8192], []]": 3,
+        "[[1, 16, 8192, 8192], [1, 16, 8192, 128], []]": 1,
+        "[[16, 8192, 8192], [16, 8192, 128], []]": 1,
+        "[[1, 16, 8192, 8192], [1, 16, 8192, 8192], [1, 16, 8192, 8192], [], [], [], [], []]": 1,
+        "[[16, 8192, 8192], [], [], [], [], [], [], []]": 1,
+        "[[16, 128, 8192], [16, 8192, 8192]]": 1,
+        "[[1, 16, 8192, 8192], [], [], [], [], [], [], []]": 1,
+        "[[[16, 8192, 8192], [16, 8192, 128], [16, 8192, 128], [16, 8192, 128], [16, 8192, 8192], [16, 8192, 8192]], [], [], [16, 8192, 128]]": 1,
+        "[[8192, 8192], [], []]": 2,
+        "[[16, 8192, 8192], [], [], [], []]": 5,
+        "[[[16, 8192, 128], [16, 8192, 8192], [16, 8192, 8192]], []]": 1,
+        "[[16, 8192, 128], [16, 8192, 8192], [], [16, 8192, 8192], [16, 8192, 128], []]": 1,
+        "[[16, 8192, 128], [16, 8192, 8192], []]": 1,
+        "[[16, 8192, 8192], [], [], [], [], []]": 1,
+        "[[[16, 8192, 8192], [16, 8192, 128], [16, 8192, 128], [16, 128, 8192], [16, 8192, 8192], [16, 128, 8192]], [], [], [16, 128, 8192]]": 1,
+        "[[[16, 8192, 8192]], [], [], [16, 8192, 8192]]": 1,
+        "[[16, 8192, 8192], [], [], [], [], [], [], [], [], [], []]": 1
+      },
+      "exact_attention_score_matmul_cpu_ops": [
+        {
+          "op": "aten::bmm",
+          "input_dims": "[[16, 8192, 128], [16, 128, 8192]]",
+          "input_type": "['float', 'float']",
+          "count": 289
+        },
+        {
+          "op": "aten::bmm",
+          "input_dims": "[[16, 8192, 8192], [16, 8192, 128]]",
+          "input_type": "['float', 'float']",
+          "count": 290
+        },
+        {
+          "op": "aten::matmul",
+          "input_dims": "[[1, 16, 8192, 128], [1, 16, 128, 8192]]",
+          "input_type": "['float', 'float']",
+          "count": 290
+        },
+        {
+          "op": "aten::matmul",
+          "input_dims": "[[1, 16, 8192, 8192], [1, 16, 8192, 128]]",
+          "input_type": "['float', 'float']",
+          "count": 289
+        }
+      ],
+      "step_clipped_kernel_event_device_ids": [
+        "0"
+      ]
+    },
+    "TT compiled HSDP": {
+      "trace_path": "/private/tmp/agpt-comparison-20261023/compile-hsdp-12481298/profiler/rank0_trace.json.gz",
+      "step_name": "ProfilerStep#6",
+      "step_start_us": 1928991881684.549,
+      "step_duration_s": 98.348157363,
+      "step_clipped_kernel_event_count": 46164,
+      "step_clipped_oneccl_kernel_event_count": 5895,
+      "step_clipped_nononeccl_kernel_event_count": 40269,
+      "step_clipped_all_kernel_union_ms": 95427.76874658203,
+      "step_clipped_oneccl_kernel_union_ms": 3515.915202392578,
+      "step_clipped_nononeccl_kernel_union_ms": 91911.87660180664,
+      "kernel_event_device_id_counts": {
+        "0": 46164
+      },
+      "oneccl_kernel_names": {
+        "oneccl_invoke_barrier": 3264,
+        "oneccl_allgatherv_large_ipc<sycl::_V1::ext::oneapi::bfloat16, 4, 4>": 648,
+        "oneccl_reduce_scatter_large_main<float, true, 2, 4>": 1632,
+        "oneccl_reduce_scatter_large_epilogue<float, true, 2, 4>": 336,
+        "oneccl_reduce_base<float, 1, 16, 1, 1, 8>": 1,
+        "oneccl_reduce_pair<float, 2, 16>": 14
+      },
+      "attention_and_matmul_cpu_op_counts_in_step": {
+        "aten::mm": 4680,
+        "aten::matmul": 3480,
+        "aten::scaled_dot_product_attention": 576,
+        "aten::_scaled_dot_product_attention_math": 576,
+        "aten::bmm": 2304
+      },
+      "large_8192_score_matmul_input_type_counts": [
+        {
+          "op": "aten::bmm",
+          "input_dims": "[[16, 8192, 128], [16, 128, 8192]]",
+          "input_type": "['float', 'float']",
+          "count": 289
+        },
+        {
+          "op": "aten::bmm",
+          "input_dims": "[[16, 8192, 8192], [16, 8192, 128]]",
+          "input_type": "['float', 'float']",
+          "count": 290
+        },
+        {
+          "op": "aten::matmul",
+          "input_dims": "[[1, 16, 8192, 128], [1, 16, 128, 8192]]",
+          "input_type": "['float', 'float']",
+          "count": 290
+        },
+        {
+          "op": "aten::matmul",
+          "input_dims": "[[1, 16, 8192, 8192], [1, 16, 8192, 128]]",
+          "input_type": "['float', 'float']",
+          "count": 289
+        }
+      ],
+      "large_8192_score_matmul_input_dim_counts": {
+        "[[1, 16, 8192, 8192], [1, 16, 8192, 128]]": 289,
+        "[[16, 8192, 8192], [16, 8192, 128]]": 291,
+        "[[16, 8192, 8192], [], []]": 5,
+        "[[1, 16, 8192, 8192], []]": 11,
+        "[[1, 16, 8192, 8192]]": 16,
+        "[[[16, 8192, 8192], [16, 8192, 128]], []]": 1,
+        "[[16, 8192, 8192], []]": 8,
+        "[[1, 16, 8192, 8192], [1, 16, 8192, 8192], [1, 16, 8192, 8192], [], [], [], [], [], []]": 1,
+        "[[1, 16, 8192, 8192], [1, 16, 8192, 8192]]": 3,
+        "[[1, 16, 8192, 8192], [], []]": 4,
+        "[[8192, 8192], [], [], []]": 4,
+        "[[1, 16, 8192, 8192], [], [], [], [], [], []]": 1,
+        "[[8192, 8192], [], [], [], []]": 2,
+        "[[8192, 8192]]": 4,
+        "[[1, 16, 8192, 8192], [], [], [], []]": 3,
+        "[[16, 8192, 128], [16, 8192, 8192], [16, 8192, 8192]]": 1,
+        "[[1, 16, 8192, 8192], [], [1, 16, 8192, 8192], []]": 1,
+        "[[8192, 8192], []]": 3,
+        "[[1, 16, 8192, 8192], [], [], []]": 9,
+        "[[16, 8192, 8192], [16, 8192, 8192]]": 2,
+        "[[[16, 8192, 8192], [16, 8192, 8192], [16, 8192, 8192], [1, 16, 8192, 8192], [1, 16, 8192, 8192], [1, 16, 8192, 8192]], [1, 16, 8192, 8192], [], [], []]": 1,
+        "[[16, 8192, 8192], [], [], []]": 7,
+        "[[16, 8192, 8192]]": 4,
+        "[[1, 16, 8192, 8192], [], [], [], [], []]": 3,
+        "[[16, 128, 8192], [16, 8192, 8192], []]": 1,
+        "[[8192, 8192], [1, 16, 8192, 8192]]": 1,
+        "[[1, 16, 8192, 8192], [8192, 8192]]": 1,
+        "[[], [8192, 8192]]": 1,
+        "[[1, 16, 8192, 8192], [1, 16, 8192, 128], []]": 1,
+        "[[16, 8192, 8192], [16, 8192, 128], []]": 2,
+        "[[8192, 8192], [], []]": 4,
+        "[[1, 16, 8192, 8192], [1, 16, 8192, 8192], [1, 16, 8192, 8192], [], [], [], [], []]": 1,
+        "[[16, 128, 8192], [16, 8192, 8192]]": 1,
+        "[[16, 8192, 8192], [16, 8192, 8192], []]": 1,
+        "[[1, 16, 8192, 8192], [], [], [], [], [], [], []]": 1,
+        "[[[16, 8192, 8192], [16, 8192, 128], [16, 8192, 128], [16, 8192, 128], [16, 8192, 8192], [16, 8192, 8192]], [], [], [16, 8192, 128]]": 1,
+        "[[1, 16, 8192, 8192], [1, 16, 8192, 8192], []]": 2,
+        "[[16, 8192, 8192], [], [], [], []]": 5,
+        "[[[16, 8192, 128], [16, 8192, 8192], [16, 8192, 8192]], []]": 1,
+        "[[16, 8192, 128], [16, 8192, 8192], [], [16, 8192, 8192], [16, 8192, 128], []]": 1,
+        "[[16, 8192, 8192], [], [], [], [], [], []]": 1,
+        "[[1, 16, 8192, 8192], [], [], [], [], [], [], [], [], [], []]": 1,
+        "[[[16, 8192, 8192], [16, 8192, 128], [16, 8192, 128], [16, 128, 8192], [16, 8192, 8192], [16, 128, 8192]], [], [], [16, 128, 8192]]": 1,
+        "[[[1, 16, 8192, 8192]], [], [], [1, 16, 8192, 8192]]": 1,
+        "[[16, 8192, 8192], [], [], [], [], [], [], [], [], [], []]": 1
+      },
+      "exact_attention_score_matmul_cpu_ops": [
+        {
+          "op": "aten::bmm",
+          "input_dims": "[[16, 8192, 128], [16, 128, 8192]]",
+          "input_type": "['float', 'float']",
+          "count": 289
+        },
+        {
+          "op": "aten::bmm",
+          "input_dims": "[[16, 8192, 8192], [16, 8192, 128]]",
+          "input_type": "['float', 'float']",
+          "count": 290
+        },
+        {
+          "op": "aten::matmul",
+          "input_dims": "[[1, 16, 8192, 128], [1, 16, 128, 8192]]",
+          "input_type": "['float', 'float']",
+          "count": 290
+        },
+        {
+          "op": "aten::matmul",
+          "input_dims": "[[1, 16, 8192, 8192], [1, 16, 8192, 128]]",
+          "input_type": "['float', 'float']",
+          "count": 289
+        }
+      ],
+      "step_clipped_kernel_event_device_ids": [
+        "0"
+      ]
+    }
+  },
+  "hsdp_host_calls_per_update": {
+    "all_gather": 648,
+    "reduce_scatter": 336,
+    "all_reduce": 20
+  },
+  "hierarchy": {
+    "mds": "oneAPI 2025.3.1 module resets FLAT to COMPOSITE after launcher export; six visible devices per node",
+    "tt": "FLAT after module setup; trace lists twelve ~64-GiB devices per node; eight ranks used",
+    "physical_mapping": "MDS device properties unavailable; exact card/tile equivalence unverified"
+  },
+  "diagnostic_runs": "cadence controls prepared but not submitted"
+}

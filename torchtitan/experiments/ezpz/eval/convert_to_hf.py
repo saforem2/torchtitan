@@ -9,6 +9,7 @@
 
 import argparse
 import importlib
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,11 @@ from torch.distributed.checkpoint import HuggingFaceStorageWriter
 
 from torchtitan.components.checkpointer import ModelWrapper
 from torchtitan.config import TORCH_DTYPE_MAP
+from torchtitan.experiments.ezpz.eval.hf_export import (
+    staged_export,
+    validate_export,
+    write_export_manifest,
+)
 
 
 def _checkpoint_load_state_dict(
@@ -71,14 +77,35 @@ def _checkpoint_load_state_dict(
     return load_state_dict
 
 
+def _prepare_hf_state_dict(
+    state_dict: dict[str, torch.Tensor],
+    target_dtype: torch.dtype,
+    dtype_overrides: dict[str, torch.dtype] | None = None,
+) -> dict[str, torch.Tensor]:
+    """Cast and pack tensors for safetensors serialization.
+
+    State-dict adapters may return inexpensive transpose or slice views.  The
+    Hugging Face storage writer ultimately serializes with safetensors, which
+    requires every tensor to be contiguous.  Pack after the dtype conversion
+    so a lower-precision export does not first duplicate the full checkpoint
+    in FP32.
+    """
+    dtype_overrides = dtype_overrides or {}
+    return {
+        key: value.to(dtype=dtype_overrides.get(key, target_dtype)).contiguous()
+        for key, value in state_dict.items()
+    }
+
+
 @torch.inference_mode()
-def convert_to_hf(
+def _convert_to_hf(
     input_dir,
     output_dir,
     model_name,
     model_flavor,
     hf_assets_path,
     export_dtype,
+    hf_config_path=None,
 ):
     # load model and model args so that we can get the state dict shape
     # Support both core models (torchtitan.models.*) and experiment models
@@ -88,16 +115,19 @@ def convert_to_hf(
         model_module = importlib.import_module(f"torchtitan.models.{model_name}")
     model_config = model_module.model_registry(model_flavor)
 
-    with torch.device("cpu"):
-        model = model_config.build()
-    adapter_cls = type(model).state_dict_adapter_cls
-    model = ModelWrapper(model)
+    with torch.device("meta"):
+        model_probe = model_config.build()
+    adapter_cls = type(model_probe).state_dict_adapter_cls
+    del model_probe
 
     assert adapter_cls is not None, (
         "trying to convert checkpoint from DCP to HF safetensors format, "
         "but the model has no state dict adapter."
     )
     sd_adapter = adapter_cls(model_config, hf_assets_path)
+    validate_hf_assets = getattr(sd_adapter, "validate_hf_assets", None)
+    if validate_hf_assets is not None:
+        validate_hf_assets()
 
     # RoPE convention is NOT recoverable from the checkpoint: both rope caches
     # are registered with persistent=False, so nothing on disk says which one
@@ -133,15 +163,23 @@ def convert_to_hf(
         "docs/guides/known-bugs/rope-flavor-mismatch.md"
     )
 
-    # Allocate model memory, then match its state-dict representation to the
-    # exact schema recorded by this checkpoint. Historical AGPT checkpoints
-    # store logical split Q/K/V and gate/up tensors, while current model builds
-    # expose physically fused wqkv and w13 parameters.
-    state_dict = model._get_state_dict()
-    checkpoint_keys = set(
-        dcp.FileSystemReader(input_dir).read_metadata().state_dict_metadata
+    metadata = dcp.FileSystemReader(input_dir).read_metadata().state_dict_metadata
+    checkpoint_keys = set(metadata)
+    checkpoint_state_dict = getattr(sd_adapter, "checkpoint_state_dict", None)
+    custom_state_dict = (
+        checkpoint_state_dict(metadata) if checkpoint_state_dict is not None else None
     )
-    state_dict = _checkpoint_load_state_dict(state_dict, sd_adapter, checkpoint_keys)
+    if custom_state_dict is not None:
+        state_dict = custom_state_dict
+    else:
+        # Match the live model representation to the schema in this checkpoint.
+        # Historical dense AGPT checkpoints store logical Q/K/V and gate/up
+        # tensors, while current models expose physically fused parameters.
+        with torch.device("cpu"):
+            model = ModelWrapper(model_config.build())
+        state_dict = _checkpoint_load_state_dict(
+            model._get_state_dict(), sd_adapter, checkpoint_keys
+        )
     dcp.load(
         state_dict,
         checkpoint_id=input_dir,
@@ -158,42 +196,71 @@ def convert_to_hf(
         thread_count_consolidation=5,
     )
 
-    # map and apply export dtype if needed
+    # Map to the export dtype and materialize adapter-produced tensor views.
+    # safetensors rejects non-contiguous views (notably transposed MoE experts).
     target_dtype = TORCH_DTYPE_MAP[export_dtype]
-    if target_dtype != torch.float32:
-        hf_state_dict = {k: v.to(target_dtype) for k, v in hf_state_dict.items()}
+    dtype_overrides = getattr(sd_adapter, "hf_dtype_overrides", lambda: {})()
+    hf_state_dict = _prepare_hf_state_dict(hf_state_dict, target_dtype, dtype_overrides)
 
     dcp.save(
         hf_state_dict,
         storage_writer=storage_writer,
     )
 
+    write_hf_assets = getattr(sd_adapter, "write_hf_assets", None)
+    if write_hf_assets is not None:
+        write_hf_assets(output_dir, export_dtype)
+    elif hf_config_path is not None:
+        shutil.copy2(hf_config_path, Path(output_dir) / "config.json")
+        for name in (
+            "tokenizer.model",
+            "tokenizer.json",
+            "tokenizer_config.json",
+            "special_tokens_map.json",
+        ):
+            shutil.copy2(Path(hf_assets_path) / name, Path(output_dir) / name)
+
     # Provenance for the export: which flavor produced it, and therefore which
     # RoPE convention the weights are in. Without this there is no way to audit
     # an existing HF dir after the fact -- the weights look identical either way.
-    try:
-        import json
+    write_export_manifest(
+        output_dir,
+        {
+            "source_dcp": str(input_dir),
+            "model_name": model_name,
+            "model_flavor": model_flavor,
+            "rope": rope_name,
+            "export_dtype": export_dtype,
+        },
+    )
+    if write_hf_assets is not None or hf_config_path is not None:
+        validate_export(output_dir)
 
-        Path(output_dir).mkdir(parents=True, exist_ok=True)
-        with open(Path(output_dir) / "ezpz_export.json", "w") as fh:
-            json.dump(
-                {
-                    "source_dcp": str(input_dir),
-                    "model_name": model_name,
-                    "model_flavor": model_flavor,
-                    "rope": rope_name,
-                    "export_dtype": export_dtype,
-                },
-                fh,
-                indent=2,
-            )
-    except OSError as exc:
-        # Provenance is a nicety; never fail a good conversion over it.
-        print(f"[convert_to_hf] WARNING: could not write ezpz_export.json: {exc}")
+
+def convert_to_hf(
+    input_dir,
+    output_dir,
+    model_name,
+    model_flavor,
+    hf_assets_path,
+    export_dtype,
+    hf_config_path=None,
+):
+    with staged_export(output_dir) as staging:
+        _convert_to_hf(
+            input_dir,
+            staging,
+            model_name,
+            model_flavor,
+            hf_assets_path,
+            export_dtype,
+            hf_config_path,
+        )
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Convert DCP weights to HF format.")
+    parser.add_argument("--hf_config_path", type=Path, default=None)
     parser.add_argument(
         "input_dir", type=Path, help="Input directory with DCP weights."
     )
@@ -245,4 +312,5 @@ if __name__ == "__main__":
         args.model_flavor,
         args.hf_assets_path,
         args.export_dtype,
+        args.hf_config_path,
     )

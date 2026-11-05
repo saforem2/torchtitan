@@ -8,6 +8,7 @@
 # /tmp, missing ZE_FLAT_DEVICE_HIERARCHY, stale worktree, absent tokenizer or
 # data-list, and API signatures that changed under us.
 set -o pipefail
+SOURCE_GUARD="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/check_source.sh"
 W="${1:?usage: preflight.sh <worktree> <venv> [machine]}"
 V="${2:?usage: preflight.sh <worktree> <venv> [machine]}"
 M="${3:-$(hostname -s | sed 's/[0-9-].*//')}"
@@ -23,7 +24,13 @@ cd "$W" 2>/dev/null || { bad "worktree $W does not exist"; exit 1; }
 # --- worktree currency: a pinned worktree misses files recent commits moved ---
 if git rev-parse --git-dir >/dev/null 2>&1; then
   h=$(git rev-parse --short HEAD 2>/dev/null)
-  u=$(git rev-parse --short '@{u}' 2>/dev/null || echo "$h")
+  if [ -n "${PREFLIGHT_SOURCE_SHA:-}" ]; then
+    u=$(git rev-parse --short "$PREFLIGHT_SOURCE_SHA" 2>/dev/null)
+    bash "$SOURCE_GUARD" "$PWD" "$PREFLIGHT_SOURCE_SHA" \
+      || bad "pinned source worktree must be clean, including untracked files"
+  else
+    u=$(git rev-parse --short '@{u}' 2>/dev/null || echo "$h")
+  fi
   [ "$h" = "$u" ] && ok "worktree current ($h)" || bad "worktree $h != upstream $u -- fetch/checkout first"
 fi
 

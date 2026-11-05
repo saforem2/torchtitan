@@ -1,6 +1,6 @@
 # AuroraGPT-2B post-training: complete status
 
-**Last updated:** 2026-08-13. Covers all SFT and RL/GRPO work on the 2B model.
+**Last updated:** 2026-11-04. Covers all SFT and RL/GRPO work on the 2B model.
 Every number here is quoted from a run doc; links go to the source.
 
 > [!IMPORTANT]
@@ -47,6 +47,25 @@ is not a distinct artifact -- the MDS 2B is one continuous 140k-step run whose
 | [B3](sft/agpt/2b-mds/b3-instruct-cot-mix/design.md) | one combined SFT, +OpenR1 0.25, seq 8192 | 0.05 -- long-CoT dilution |
 | [B4a](sft/agpt/2b-mds/b4-finish-and-reweight/README.md) | bolt B2's finishing stage onto the B3 base | **0.02**, format collapsed to 0.26, 133/200 unclosed |
 | [B4b](sft/agpt/2b-mds/b4-finish-and-reweight/README.md) | reweight gsm8k-r1cot to 0.40 + length-filter, seq 4096 | 0.065 -- fixed the symptom, not the accuracy |
+| **B2v2** (this doc, 2026-11-04) | ckpt-900-hf -> gsm8k-r1cot, 3 ep, 2N Sunspot job 12482423 (`rl/scripts/sft/agpt2b_b2v2_distill_cot_2n.sh`) | **TRAINING COMPLETE, eval pending.** loss 0.8069, mean_token_accuracy 0.8198, W&B `xakno7kg`, ckpts 2/4/6+final. Extends B2's proven two-stage lineage (narrow GSM8K only); distill_cot_mix (OpenThoughts) shelved due to HF cache race at 2N |
+
+### B2v2 -- stronger stage-2 SFT on ckpt-900 (2026-11-04)
+
+**Lineage:** `global_step138650` -> `checkpoint-900` (tulu_math_uc_mix, 8N, 1 ep, IFEval 0.253) -> **B2v2**. B2 was `ckpt-900 -> gsm8k-r1cot` (7.4k ex, 93 steps, 3 ep) = **0.205** GSM8K-CoT; every single-stage rebuild (B3/B4) landed 0.02-0.065. B2v2 keeps the proven two-stage structure and tests whether more stage-2 epochs on the same narrow data can lift the ~0.2 ceiling.
+
+**Original intent:** `distill_cot_mix` = 50% OpenThoughts-114k-decontam + 50% gsm8k-r1cot (broad frontier CoT, GSM8K-test-decontaminated, same `<think>/<answer>\boxed{}` envelope, mix-spec tunable). **Shelved 2026-11-04** -- OpenThoughts streaming + multi-rank HF arrow-cache coherency fails at 2N (rank 0 writes new cache, others look for old shards). Falls back to **gsm8k-r1cot alone**, more epochs -- proven B2 path, just longer. Pre-tokenize or fix cache coherency to re-enable the distill mix.
+
+**Run:** 2N Sunspot (`select=2`), PBS job **12482423**, script `torchtitan/experiments/ezpz/rl/scripts/sft/agpt2b_b2v2_distill_cot_2n.sh`, base `outputs/sft/agpt-2b-gs138650-tulu-math-uc-mix-8n-gbs6144/checkpoint-900-hf`, TRL `SFTTrainer`, FSDP `full_shard`, LR 2e-5 cosine, batch 2 / GAS 8 / seq 2048 (GBS 384), 3 epochs (6 steps), `dataset_num_proc=8`, bf16, `save_strategy=epoch`.
+
+**Training outcome (from TRL logs):** loss **0.8069**, **mean_token_accuracy 0.8198**, W&B run **`xakno7kg`**, checkpoints at steps **2/4/6 + final**. Loss descends cleanly; no OOM or cache crash after fixes below.
+
+**Env fixes (5 commits 2026-11-04, see `git log --oneline -- rl/scripts/sft/agpt2b_b2v2*`):**
+- **venv:** `ezpz_get_job_env` clobbers `VIRTUAL_ENV` to stale `xpu-torch214` (no `trl`). Fix: export `VIRTUAL_ENV` + prepend `PATH`/`PYTHONPATH` to `rl-monarch-torch214-locality-20261001` (torch 2.14+xpu + trl + Monarch on compute). Verified with `python3 -c "import trl"`.
+- **`LD_LIBRARY_PATH`:** Sunspot x1921 nodes carry stale oneAPI 2026.0 UR/SYCL; prepend `${VENV}/lib` so venv-bundled UR/SYCL wins.
+- **`dataset_num_proc`:** 32 -> 8 (16 OOMs in `map` subprocesses; 8 is stable).
+- **HF cache race:** see shelved distill mix above. Also: staged `~/stage/utils.sh` (compute nodes have no outbound net; `curl https://bit.ly/ezpz-utils` fails).
+
+**Pending (next task):** eval GSM8K-CoT vs B2's **0.205** (same 200-problem harness), then extend to 6 epochs or fix the distill mix (pre-tokenize OpenThoughts).
 
 ### Two findings worth carrying
 
@@ -130,6 +149,8 @@ No LoRA adapter has been promoted to a production checkpoint.
 
 Also open: re-run the ckpt-900 GRPO with more walltime (it hit 6h at ~step 20,
 never converged); the 32N oneCCL scale fault that blocks the v2-256n base.
+
+**In flight 2026-11-04:** B2v2 stage-2 SFT training complete (job 12482423, loss 0.8069, acc 0.8198, W&B `xakno7kg`). **Pending:** GSM8K-CoT eval vs B2's 0.205, then 6-epoch extension or distill-mix fix.
 
 ## Known doc inconsistencies
 

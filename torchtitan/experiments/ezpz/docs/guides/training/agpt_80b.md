@@ -4,6 +4,20 @@ End-to-end guide for training the 80B AuroraGPT dense model on Aurora.
 Validated end-to-end on 2026-06-08 (4N smoke, step-10 sync DCP save
 landed cleanly — 904 GB, 48 `.distcp` shards).
 
+> [!IMPORTANT]
+> **Validation scope as of 2026-10-01.** Small-scale 80B functionality is
+> established; sustained production-scale 80B is not. There is no live 80B
+> production chain, and 80B is not one of the three active umbrella seats
+> (20B-512, 20B-256, 2B-256 stage-2).
+>
+> - Small-scale passes: TP=2 4N 20 steps (`12468157`), TP=4 4N 10 steps
+>   (`12472452`), TP=4 validator (`12469784`).
+> - High-`dp` remains unresolved: every optimizer diverged at GBS=6144/dp=186,
+>   and both fp32-residual variants delayed but did not remove the wall.
+> - 80B has **not** been run on the current `ConfigLoader` candidate
+>   `e3520c057ae699d45c5fe3d17036f84b73dda88b`; the verified current-software
+>   checkpoint lineages are 2B-256 stage-2, 20B-512, and 20B-256.
+
 For the underlying venv setup (torch 2.13 + uv + `ezpz yeet`) see
 [`running-with-newer-pytorch.md`](../running-with-newer-pytorch.md) —
 this guide assumes you've done that and have a working `.venv/` +
@@ -12,37 +26,55 @@ this guide assumes you've done that and have a working `.venv/` +
 > [!IMPORTANT]
 > Read these caveats first:
 >
-> - **Optimizer**: **mano** (~3e-6, safest -- broad U-min) or **sophiag**
->   (~1e-6, lowest loss but a narrower band). Only **Muon** is broken at 80B
->   (bf16 Newton-Schulz overflow at `dim=9216`). SophiaG is NOT broken at the
->   production batch: it NaN'd at GBS=192 but runs all 15 finder steps finite
->   at GBS=6144, where the larger batch smooths the Hessian estimate.
+> - **No optimizer/LR pair is production-safe at GBS=6144 yet.** The LR
+>   finder's picks -- mano ~3e-6, sophiag ~1e-6, AdamW ~5e-7 -- all NaN as
+>   constant LRs at the production batch: mano step 5, AdamW step 9, sophiag
+>   step 12
+>   ([2026-06-30 convergence run](../../experiments/agpt/sunspot/2026-06-30-80b-convergence-gbs6144.md)).
+>   A long warmup (>=200 steps) plus clipping is required before any of them
+>   is a candidate, and none has sustained validation at scale. Muon is
+>   additionally broken at 80B (bf16 Newton-Schulz overflow at `dim=9216`).
 > - **LR**: **do not use AdamW at `1e-6`.** At the production GBS=6144 the
 >   measured AdamW NaN onset is **1.36e-6** with a usable ceiling of ~7.4e-7,
 >   so `1e-6` sits PAST the last stable point -- which is why 8530891 NaN'd at
->   step 2. If you must stay on AdamW use ~5e-7; prefer mano or sophiag. The
->   small-batch "AdamW 1.1e-5" number does not transfer (~14x lower ceiling at
->   production batch). Measurements:
+>   step 2. The small-batch "AdamW 1.1e-5" number does not transfer (~14x
+>   lower ceiling at production batch). Measurements:
 >   [lr-finder/agpt/80b](../../experiments/lr-finder/agpt/80b/README.md).
+> - **Submitter defaults are not safe.** `scripts/submit_agpt_80b_autoretry.sh`
+>   and the legacy `submit_agpt_80b_aurora_venv_failover.sh` both default to
+>   AdamW `LR=1e-6`, which the bullet above rules out at GBS=6144. Pass `LR`
+>   (and the warmup) explicitly; the at-scale examples below inherit that
+>   default.
+> - **Root cause is unknown.** The bf16 residual-overflow diagnosis is
+>   refuted; see
+>   [`80b-nan-what-we-know.md`](../known-bugs/80b-nan-what-we-know.md).
 > - **`compile=OFF`**. `compile=ON` triggers a
 >   `DeviceMesh`-in-saved-tensors AOT autograd crash on torch 2.13 for
 >   every 80B-family config (smallest reproducer: `agpt_50b_wide`,
 >   ~48B params, 2N, ~30s to crash). Workaround until upstream fix:
 >   keep compile off.
-> - **TP=2**. Smaller TP exhausts memory at 80B.
+> - **TP**: this guide's 4N reference uses TP=2, and smaller TP exhausts
+>   memory at 80B. The current production submitter
+>   (`scripts/submit_agpt_80b_autoretry.sh`) defaults to the TP=4/LBS=1
+>   corner, which is also where the 4N `12472452` and validator `12469784`
+>   passes were obtained. Prefer TP=4 for new work.
 > - **Sync ckpt mode**. Already the default (`checkpoint.async-mode=disabled`).
 >   Don't enable async — it cascades to wrapper-unrecoverable failures
 >   at scale.
 
-## Working config (proven)
+## Working config (small-scale reference)
+
+This is the 4N reference corner, not a production recommendation. At the
+production batch its learning rate is past the measured stability point, and
+the later stable small-scale corner is TP=4.
 
 | Field             | Value |
 |-------------------|-------|
 | Model flavor      | `agpt_80b` |
-| Optimizer         | AdamW |
-| LR                | `1e-6` |
+| Optimizer         | AdamW (small-scale reference only) |
+| LR                | `1e-6` at 4N only — unsafe at GBS=6144, where NaN onset is `1.36e-6` and the usable ceiling is ~`7.4e-7` |
 | Master dtype      | `float32` (default since 2026-04-30 v2 restart) |
-| TP                | 2 |
+| TP                | 2 for this 4N reference; the current production submitter defaults to TP=4 |
 | AC                | full |
 | `compile`         | **OFF** |
 | Seq len           | 8192 |

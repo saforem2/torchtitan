@@ -323,6 +323,10 @@ def moe_debugmodel_ep() -> FaultTolerantTrainer.Config:
 def moe_debugmodel_flex_attn() -> FaultTolerantTrainer.Config:
     cfg = moe_debugmodel()
     cfg.model = model_registry("debugmodel_flex_attn")
+    # Flex builds its BlockMask only when the batch carries ``positions``;
+    # blendcorpus emits them only on opt-in. Without this the model gets
+    # attention_masks=None and asserts "must be instance of BlockMask".
+    cfg.dataloader.emit_positions = True
     return cfg
 
 

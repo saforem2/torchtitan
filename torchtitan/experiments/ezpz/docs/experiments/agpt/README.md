@@ -29,6 +29,13 @@ Dense transformer training benchmarks across ALCF machines.
 
 ### Sunspot
 
+- [Recovered Sunspot MDS/TT comparison (2026-11-02)](sunspot/2026-11-02-recovery-comparison.md): historical 90+ TFLOP/s TT rates remain unrecovered; fresh same-allocation TT native DDP at 2.418 s versus 2.344 s MDS; eager/compiled comparison; all-rank audits; bucket-size trial; TFLOPs, MFU, memory, traces, and explicit numerical limits.
+
+- [Sunspot startup isolation and Aurora fallback (2026-11-01)](sunspot/2026-11-01-startup-incident.md): shell-only pre-run failure; Aurora 24-rank probe completed.
+- [Same-allocation MDS/TT comparison and live-load gates (2026-11-01)](sunspot/2026-11-01-paired-performance.md): first attempt `12481907` cancelled after PALS startup failure; replacement awaits a working application-start gate.
+
+Latest: [MDS versus TorchTitan, final report](sunspot/2026-10-29-native-checkpoint-closure.md). Same native parameters and all 32 token batches verified. MDS `24.87`, TT eager `28.41-28.70`, TT loss compilation `25.97-26.89 s/update`; compiled TT is `4.4-8.1%` slower than this MDS control. Includes compilation cost, all-rank memory, trace analysis and numerical differences.
+
 | Date | Report | Configs | Nodes | Key Result |
 |------|--------|---------|-------|------------|
 | 2026-11-01 | [MDS/TT recovered comparison and audit](sunspot/2026-11-01-handoff-audit.md) | AGPT-2B, SophiaG, seq8192 | 2 | 24-rank TT HSDP 2.704-2.713 s vs MDS ZeRO-1 2.201 s; aligned timing and complete input hashes |
