@@ -38,6 +38,7 @@ _END_OF_TURN = "<end_of_turn>\n"
 
 # ── CoT envelope (byte-identical to rl/datasets_sft.py + eval) ──────────
 _OPENR1_BOXED_RE = re.compile(r"\\boxed\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}")
+_OPENR1_THINK_RE = re.compile(r"<think>(.*?)</think>", re.DOTALL | re.IGNORECASE)
 _OPENR1_SUFFIX = (
     "\nReason step by step inside <think></think>, then give the final "
     "answer inside <answer>\\boxed{}</answer>."
