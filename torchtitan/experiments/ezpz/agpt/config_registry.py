@@ -1536,6 +1536,60 @@ def agpt_10b_olmo2tok_smoke() -> FaultTolerantTrainer.Config:
     )
 
 
+# ---------------------------------------------------------------------------
+# agpt-v2 @ 4K seqlen, olmo3 tokenizer, dynamic streaming Grain + HF datasets
+# on Aurora. These ARE the "new {4,10,30}B" models the user asked to smoke
+# test: same 5B/10B/30B olmo2tok geometries (4.64B / 9.48B / 26.2B) at
+# seq_len=4096 with the OLMo-3 tokenizer (byte-identical to OLMo-2-1124-7B;
+# OLMo-3 renames the tokenizer without changing a byte) and the dynamic
+# streaming GrainDataLoader + HuggingFaceStreamingSource dataloader that
+# avoids the pre-tokenized blendcorpus (gemma-tokenized, wrong vocab).
+# Uses the precached olmo-mix-1124 wiki subset local parquet via the same
+# _olmo_mix_subset_dir("wiki") path as the 8K smokes -- the only data that
+# is actually present on Aurora (verified: 2 files, ~12 GB compressed,
+# ~2.7k char mean text length).
+# ---------------------------------------------------------------------------
+
+
+def _agpt_v2_4k(
+    flavor: str,
+    *,
+    hf_assets_path: str = "./assets/hf/OLMo-2-1124-7B",
+) -> FaultTolerantTrainer.Config:
+    """agpt-v2 helper: flavor at 4K seqlen with streaming Grain+HF dataloader.
+
+    Pins seq_len=4096 on both the model and the dataloader's packing length
+    so that every packed sequence is exactly one 4K row. Uses the standard
+    agpt() factory (which sets max_context_length and
+    num_tokens_per_microbatch consistently from seq_len) rather than
+    patching those fields after the fact.
+    """
+    cfg = agpt(flavor, hf_assets_path=hf_assets_path, seq_len=4096)
+    return _use_hf_streaming(
+        cfg,
+        path="json",
+        load_dataset_kwargs={"data_dir": _olmo_mix_subset_dir("wiki")},
+    )
+
+
+def agpt_v2_4b_4k() -> FaultTolerantTrainer.Config:
+    """4.64B (5B_olmo2tok geometry) at 4K seqlen, OLMo-3 tokenizer, streaming."""
+
+    return _agpt_v2_4k("5b_olmo2tok")
+
+
+def agpt_v2_10b_4k() -> FaultTolerantTrainer.Config:
+    """9.48B (10B_olmo2tok geometry) at 4K seqlen, OLMo-3 tokenizer, streaming."""
+
+    return _agpt_v2_4k("10b_olmo2tok")
+
+
+def agpt_v2_30b_4k() -> FaultTolerantTrainer.Config:
+    """26.2B (30B_olmo2tok geometry) at 4K seqlen, OLMo-3 tokenizer, streaming."""
+
+    return _agpt_v2_4k("30b_olmo2tok")
+
+
 # Optimizer-comparison arms for the OLMo-2 ladder.
 #
 # One factory instead of 12 near-identical functions. The LRs are deliberately

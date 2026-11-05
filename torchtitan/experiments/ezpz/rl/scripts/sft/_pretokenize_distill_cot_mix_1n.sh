@@ -76,13 +76,21 @@ export DISTILL_MAX_THINK_CHARS="${DISTILL_MAX_THINK_CHARS:-16000}"
 
 SUBMIT_DIR="${PBS_O_WORKDIR:-$(pwd)}"
 source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup_job
-cd "${SUBMIT_DIR}"
-source .venv/bin/activate
-python3 -c "import trl; print('trl', trl.__version__)" || { echo "FATAL: trl missing"; exit 1; }
+cd "${SUBMIT_DIR}" || exit 1
+VENV="${VENV:-/lus/tegu/projects/datascience/foremans/venvs/rl-monarch-torch214-locality-20261001}"
+if [[ -d "${VENV}/lib" ]]; then
+  _ld_first="${SUBMIT_DIR}/.cache/xpu-ld-first/$(basename "${VENV}")"
+  if [[ ! -e "${_ld_first}/.complete" ]]; then mkdir -p "${_ld_first}"; for _lib in "${VENV}"/lib/libur_* "${VENV}"/lib/libsycl.so* "${VENV}"/lib/libumf* "${VENV}"/lib/libtcm*; do [[ -e "${_lib}" ]] && ln -sf "${_lib}" "${_ld_first}/"; done; touch "${_ld_first}/.complete"; fi
+  export LD_LIBRARY_PATH="${_ld_first}:${LD_LIBRARY_PATH:-}"
+fi
+export VIRTUAL_ENV="${VENV}"
+export PATH="${VENV}/bin:/opt/pbs/bin:${PATH}"
+hash -r
+python3 -c "import trl; print('trl', trl.__version__)" || { echo "FATAL: trl missing in ${VENV}"; exit 1; }
 
 # num_proc override knob: walk down (e.g. NPROC=16) if the packing map OR the
 # decontam map SIGBUSes / a subprocess dies -- see header.
-NPROC="${NPROC:-32}"
+NPROC="${NPROC:-4}"
 BASE_MODEL="${HOME}/global_step138650"
 OUT_DIR="/tegu/datasets/datasets/agpt2b-distill-cot-mix-len8192"
 LOG_DIR="logs/pretokenize-distill-cot-mix-${PBS_JOBID%%.*}"
@@ -96,18 +104,27 @@ git log -1 --oneline -- torchtitan/experiments/ezpz/rl/train_sft.py \
     torchtitan/experiments/ezpz/rl/decontam_traces.py 2>&1 | tee -a "${LOG_DIR}/run.log"
 echo "" | tee -a "${LOG_DIR}/run.log"
 
-# Single-rank launch: pre-tokenize is a data job, no model training / no
-# collectives. `ezpz launch --np 1` keeps the ezpz env plumbing but runs one
-# rank.
+# No MPI needed for single-rank data job — run directly to avoid ezpz.doctor->torchinfo->torch circular import in rl-monarch venv
+python3 -m torchtitan.experiments.ezpz.rl.train_sft \
+    --sft_dataset distill_cot_mix \
+    --model_name_or_path "${BASE_MODEL}" \
+    --pretokenize_to "${OUT_DIR}" \
+    --max_length 8192 \
+    --dataset_num_proc "${NPROC:-4}" \
+    --output_dir "${LOG_DIR}/_pretok_scratch" \
+    --report_to none \
+    2>&1 | tee -a "${LOG_DIR}/run.log"
+if false; then  # keep old ezpz path for reference
 ezpz launch --np 1 python3 -m torchtitan.experiments.ezpz.rl.train_sft \
     --sft_dataset distill_cot_mix \
     --model_name_or_path "${BASE_MODEL}" \
     --pretokenize_to "${OUT_DIR}" \
     --max_length 8192 \
-    --dataset_num_proc "${NPROC:-32}" \
+    --dataset_num_proc "${NPROC:-4}" \
     --output_dir "${LOG_DIR}/_pretok_scratch" \
     --report_to none \
     2>&1 | tee -a "${LOG_DIR}/run.log"
+fi
 
 echo "" | tee -a "${LOG_DIR}/run.log"
 echo "=== decontam drop summary (from run.log) ===" | tee -a "${LOG_DIR}/run.log"
