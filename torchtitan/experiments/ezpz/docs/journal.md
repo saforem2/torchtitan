@@ -2,6 +2,19 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-11-04 (Sunspot) -- MDS trace at z2rrt02w; BF16 ZeRO-1 storage
+
+MDS rank-0 trace at the `z2rrt02w` shape (`12482583`, `MDS_PROFILE=1`):
+`8.008 s/update`, `7.83 s` busy, against `8.95 s` for TT block-causal. TT is
+`+0.54 s` in attention backward and `+0.50 s` in casts and elementwise work;
+its cast kernels run once per layer per microbatch because the ZeRO-1 model
+holds BF16 values in FP32 storage. New opt-in
+`BENCH_DDP_ZERO1_PARAMS=bfloat16` stores the model in BF16: `8.082`/`8.087
+s/update` against `8.956`-`9.463 s` (`12482585`), `0.9%` behind MDS, peak
+memory `20.3` vs `41.8 GiB`. Gradients accumulate in BF16; loss A/B
+`12482597`-`12482599` running.
+[Report](experiments/agpt/sunspot/2026-11-02-throughput-recovery.md#bf16-model-storage).
+
 ## 2026-11-04 (Sunspot) -- Block-causal stays opt-in
 
 Block-causal attention stays off by default; set

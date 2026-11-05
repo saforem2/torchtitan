@@ -33,6 +33,9 @@ At the wider 2025 MDS shape (`z2rrt02w`: hidden `4096`, sequence `4096`,
 accumulation `16`) TT DDP/ZeRO-1 is `26%` slower than MDS, and `14%` slower
 with block-causal attention
 ([TT at the 2025 high-throughput shape](#tt-at-the-2025-high-throughput-shape)).
+Storing the ZeRO-1 model in BF16 (opt-in `BENCH_DDP_ZERO1_PARAMS=bfloat16`)
+closes that to `0.9%`: `8.08 s/update`, `108.9` TFLOP/s/tile, half the peak
+memory ([BF16 model storage](#bf16-model-storage)). Its loss A/B is running.
 
 | Arm | Accumulation x microbatch | s/update | tok/s/tile | Model TFLOP/s/tile |
 |---|---|---:|---:|---:|
@@ -247,6 +250,30 @@ At AGPT-2B (accumulation `2`) casts are `0.22 s` of a `2.18 s` busy update
 (`12482301` control trace), the same `10%` share as here, so the cast cost
 does not by itself explain why TT is faster than MDS at AGPT-2B and slower
 here.
+
+### BF16 model storage
+
+`BENCH_DDP_ZERO1_PARAMS=bfloat16` (`native_ddp_zero1_param_dtype`) stores the
+replicated ZeRO-1 model in BF16, as MDS does; the FP32 master stays in each
+rank's optimizer shard. Autocast then has no weight casts, the residual stream
+is BF16, and DDP accumulates BF16 gradients across microbatches. It is off by
+default. Job `12482585` (`x1922c4s2b0n0`) alternated it with FP32 storage,
+both with block-causal attention (`4` chunks), after a discarded warm-up:
+
+| Arm (phase order) | s/update | sd | tok/s/tile | TFLOP/s/tile | Peak memory |
+|---|---:|---:|---:|---:|---:|
+| FP32 storage (2) | `9.463` | `0.325` | `6926` | `93.03` | `41.83 GiB` |
+| BF16 storage (3) | `8.082` | `0.005` | `8109` | `108.93` | `20.28 GiB` |
+| FP32 storage (4) | `8.956` | `0.007` | `7318` | `98.30` | `41.83 GiB` |
+| BF16 storage (5) | `8.087` | `0.006` | `8104` | `108.86` | `20.28 GiB` |
+
+BF16 storage is `9.7%` faster than the steadier FP32 run and `0.9%` slower
+than MDS (`8.008 s`, `12482583`, same node). The FP32 arms span `8.96`-`9.46
+s` in this job and `9.11 s` in `12482281`. In the update-`12` trace, casts
+drop from `1.00` to `0.48 s` and elementwise kernels from `0.80` to `0.51 s`;
+GEMM is `4.45 s`. Losses after `32` updates are `6.637`/`6.636` (BF16) and
+`6.642`/`6.668` (FP32), a smoke check. A three-seed loss A/B at AGPT-2B
+(`12482597`-`12482599`) is running.
 
 FSDP spends `3.01 s` in all-gather and `2.43 s` in reduce-scatter per
 update. This arm ran with the launcher default
@@ -554,6 +581,7 @@ logits memory.
 
 | Job | Content | Exit |
 |---|---|---|
+| `12482585` | `z2rrt02w` shape, block-causal: FP32 vs BF16 ZeRO-1 model storage, alternated | `0` |
 | `12482583` | `z2rrt02w` shape: TT warm-up, TT block-causal, MDS with `MDS_PROFILE=1`, TT control | `0` |
 | `12482111` | MDS controls; TT DDP base, `1 x 2`, per-block compile, per-block `1 x 2` | `1` (both `1 x 2` arms: RoPE shape error) |
 | `12482112` | MDS control, GAS 16, AdamW/ZeRO-1, historical; TT HSDP per-block `1 x 2` | `1` (HSDP arm: `inplace_wgrad_accum` rejected under compile) |
