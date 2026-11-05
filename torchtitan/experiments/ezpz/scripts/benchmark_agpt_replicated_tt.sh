@@ -150,7 +150,7 @@ cp "${ROOT}/torchtitan/experiments/ezpz/scripts/benchmark_agpt_entrypoint.py" "$
 module -t list 2> "${OUT}/provenance/modules.txt"
 echo "BEGIN $(date -Is) host=$(hostname -s) job=${PBS_JOBID} sha=${EXPECTED}"
 echo "BENCH_TAG=${BENCH_TAG:-} CCL_OP_SYNC=${CCL_OP_SYNC} fsdp_reshard=${BENCH_FSDP_RESHARD:-default} fsdp_reduce=${BENCH_FSDP_REDUCE_DTYPE:-float32} fsdp_defer=${BENCH_FSDP_DEFER:-0} deterministic=${BENCH_DETERMINISTIC:-0} reduce_probe=${BENCH_REDUCE_PROBE:-0}"
-echo "ddp_zero1=${BENCH_DDP_ZERO1:-0} ddp_bucket_mb=${DDP_BUCKET_MB:-25} ddp_bucket_first=${BENCH_DDP_BUCKET_FIRST:-0}"
+echo "ddp_zero1=${BENCH_DDP_ZERO1:-0} ddp_zero1_params=${BENCH_DDP_ZERO1_PARAMS:-float32} ddp_bucket_mb=${DDP_BUCKET_MB:-25} ddp_bucket_first=${BENCH_DDP_BUCKET_FIRST:-0}"
 echo "seed=${BENCH_SEED:-42} causal_blocks=${EZPZ_XPU_ATTN_CAUSAL_BLOCKS:-0}"
 echo "ARM=${ARM} nodes=${NODES} world=${NPROC} ppn=${PPN} optimizer=${OPTIMIZER} config=${TT_CONFIG} gbs=${GBS} microbatch=${MICROBATCH} gas=${GAS} seq=${SEQ} steps=${STEPS}"
 case "${COMPILE_MODE}" in
@@ -187,6 +187,17 @@ else
                 float32|bfloat16) PARALLEL+=(--parallelism.native-ddp-zero1
                     --parallelism.native-ddp-zero1-allgather-dtype="${ZERO1}") ;;
                 *) echo "BENCH_DDP_ZERO1 must be 0, float32 or bfloat16" >&2; exit 2;;
+            esac
+            # BF16 model storage and gradient accumulation (FP32 master shard).
+            case "${BENCH_DDP_ZERO1_PARAMS:-float32}" in
+                float32) ;;
+                bfloat16)
+                    [[ "${ZERO1}" == bfloat16 ]] || {
+                        echo "BENCH_DDP_ZERO1_PARAMS=bfloat16 needs BENCH_DDP_ZERO1=bfloat16" >&2
+                        exit 2
+                    }
+                    PARALLEL+=(--parallelism.native-ddp-zero1-param-dtype=bfloat16) ;;
+                *) echo "BENCH_DDP_ZERO1_PARAMS must be float32 or bfloat16" >&2; exit 2;;
             esac
             ;;
         fsdp-*|hsdp-*)

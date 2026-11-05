@@ -243,6 +243,15 @@ class EzpzTrainingEngine(TorchFTTrainingEngine):
             config.parallelism, "enable_data_parallel_native_ddp", False
         ):
             raise ValueError("native_ddp_zero1 requires native DDP")
+        param_dtype = getattr(config.parallelism, "native_ddp_zero1_param_dtype", "float32")
+        if param_dtype == "bfloat16" and not (
+            getattr(config.parallelism, "native_ddp_zero1", False)
+            and config.parallelism.native_ddp_zero1_allgather_dtype == "bfloat16"
+        ):
+            raise ValueError(
+                "native_ddp_zero1_param_dtype=bfloat16 requires native_ddp_zero1 "
+                "with native_ddp_zero1_allgather_dtype=bfloat16"
+            )
         if getattr(config.parallelism, "enable_data_parallel_native_ddp", False):
             validate_native_ddp(
                 model_name=self._model_name(),
@@ -274,6 +283,7 @@ class EzpzTrainingEngine(TorchFTTrainingEngine):
                     self.model_parts[0],
                     world_size=dp_mesh.size(),
                     rank=dp_mesh.get_local_rank(),
+                    dtype=getattr(torch, param_dtype),
                 )
             self.model_parts[0] = wrap_native_ddp(
                 self.model_parts[0],

@@ -50,7 +50,7 @@ _ELEMENTWISE_OPTIMIZERS = ("SophiaG", "AdamW", "Adam", "SGD")
 
 @dataclass
 class FlatParameterBuffer:
-    """Flat FP32 storage backing every trainable parameter of one module."""
+    """Flat storage (FP32 or BF16) backing every trainable parameter of one module."""
 
     flat: torch.Tensor
     params: list[nn.Parameter]
@@ -82,13 +82,20 @@ class FlatParameterBuffer:
 
 
 def flatten_parameters_(
-    module: nn.Module, *, world_size: int, rank: int
+    module: nn.Module,
+    *,
+    world_size: int,
+    rank: int,
+    dtype: torch.dtype = torch.float32,
 ) -> FlatParameterBuffer:
     """Rebind ``module``'s trainable parameters to views of one flat buffer.
 
     The buffer is padded to a multiple of ``world_size`` so that every rank
-    owns an equal contiguous shard.  Call this before wrapping with DDP.
+    owns an equal contiguous shard.  ``dtype`` is the buffer's storage dtype;
+    FP32 parameters are rounded into it.  Call this before wrapping with DDP.
     """
+    if dtype not in (torch.float32, torch.bfloat16):
+        raise ValueError(f"ZeRO-1 buffer dtype must be float32 or bfloat16, got {dtype}")
     if world_size < 1 or not 0 <= rank < world_size:
         raise ValueError(f"invalid rank {rank} for world size {world_size}")
     named = [(n, p) for n, p in module.named_parameters() if p.requires_grad]
@@ -107,7 +114,7 @@ def flatten_parameters_(
             raise ValueError(f"ZeRO-1 requires plain tensors, got DTensor: {name}")
     total = sum(p.numel() for _, p in named)
     padded = -(-total // world_size) * world_size
-    flat = torch.zeros(padded, dtype=torch.float32, device=next(iter(devices)))
+    flat = torch.zeros(padded, dtype=dtype, device=next(iter(devices)))
     offsets = []
     offset = 0
     with torch.no_grad():
@@ -151,14 +158,23 @@ class _Zero1State:
             self.master_initialized = True
             self.gather_buffer = None
         elif allgather_dtype == "bfloat16":
-            self.master = nn.Parameter(torch.empty_like(flat_shard), requires_grad=True)
+            self.master = nn.Parameter(
+                torch.empty_like(flat_shard, dtype=torch.float32), requires_grad=True
+            )
             self.master_initialized = False
-            self.gather_buffer = torch.empty(
-                buffer.flat.numel(), dtype=torch.bfloat16, device=buffer.flat.device
+            # A BF16 model buffer receives the all-gather directly.
+            self.gather_buffer = (
+                None
+                if buffer.flat.dtype == torch.bfloat16
+                else torch.empty(
+                    buffer.flat.numel(), dtype=torch.bfloat16, device=buffer.flat.device
+                )
             )
         else:
             raise ValueError(f"unsupported ZeRO-1 all-gather dtype {allgather_dtype}")
-        self.shard_grad = torch.zeros_like(flat_shard)
+        if buffer.flat.dtype != torch.float32 and allgather_dtype != "bfloat16":
+            raise ValueError("a BF16 ZeRO-1 model buffer requires the BF16 all-gather")
+        self.shard_grad = torch.zeros_like(flat_shard, dtype=torch.float32)
         self.steps = 0
         self.allgathers = 0
 
@@ -175,9 +191,9 @@ class _Zero1State:
             return
         start, end = self.buffer.shard_bounds
         self.master.copy_(self.buffer.flat[start:end])
-        assert self.gather_buffer is not None
-        self.gather_buffer.copy_(self.buffer.flat)
-        self.buffer.flat.copy_(self.gather_buffer)
+        if self.gather_buffer is not None:
+            self.gather_buffer.copy_(self.buffer.flat)
+            self.buffer.flat.copy_(self.gather_buffer)
         self.master_initialized = True
 
     @torch.no_grad()
@@ -200,15 +216,14 @@ class _Zero1State:
     def allgather(self) -> None:
         flat = self.buffer.flat
         if self.allgather_dtype == "bfloat16":
-            assert self.gather_buffer is not None
             send = self.master.detach().to(torch.bfloat16)
+            target = flat if self.gather_buffer is None else self.gather_buffer
             if self.buffer.world_size > 1:
-                dist.all_gather_into_tensor(
-                    self.gather_buffer, send, group=self.process_group
-                )
+                dist.all_gather_into_tensor(target, send, group=self.process_group)
             else:
-                self.gather_buffer.copy_(send)
-            flat.copy_(self.gather_buffer)
+                target.copy_(send)
+            if self.gather_buffer is not None:
+                flat.copy_(self.gather_buffer)
         elif self.buffer.world_size > 1:
             # A separate send buffer avoids relying on backend support for an
             # input that aliases its own slot in the output.
@@ -237,6 +252,7 @@ class _Zero1State:
             "shard_end": end,
             "shard_segments": len(self.segments),
             "allgather_dtype": self.allgather_dtype,
+            "param_dtype": str(self.buffer.flat.dtype).removeprefix("torch."),
             "optimizer_steps": self.steps,
             "allgathers": self.allgathers,
         }

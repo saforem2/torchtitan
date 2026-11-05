@@ -92,6 +92,17 @@ class EzpzParallelismConfig(ParallelismConfig):
     keeps the model parameters themselves as the FP32 masters.
     """
 
+    native_ddp_zero1_param_dtype: Literal["float32", "bfloat16"] = "float32"
+    """
+    Storage dtype of the replicated ZeRO-1 model parameters. ``bfloat16``
+    (requires ``native_ddp_zero1_allgather_dtype=bfloat16``) stores the
+    model in BF16, as Megatron-DeepSpeed does: autocast no longer casts the
+    weights on every microbatch, gradients accumulate in BF16 across
+    microbatches, and the FP32 master exists only in each rank's optimizer
+    shard. Changes numerics; ``float32`` keeps FP32 storage and FP32
+    gradient accumulation.
+    """
+
     native_ddp_bucketize_first_iteration: bool = False
     """
     Apply ``native_ddp_bucket_cap_mb`` when DDP constructs its initial

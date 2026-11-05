@@ -71,12 +71,22 @@ def test_install_zero1_rejects_coupled_optimizer() -> None:
         install_zero1(optimizer, buffer, process_group=None)
 
 
-def _worker(rank: int, rendezvous: str, workdir: str, dtype: str) -> None:
+def _worker(rank: int, rendezvous: str, workdir: str, mode: str) -> None:
     dist.init_process_group("gloo", init_method=rendezvous, rank=rank, world_size=WORLD)
+    # "bfloat16-params": BF16 model storage and gradient accumulation, BF16
+    # all-gather, FP32 master shard.  Compared with the same reference as the
+    # BF16 all-gather mode, at BF16 tolerances.
+    bf16_params = mode == "bfloat16-params"
+    dtype = "bfloat16" if bf16_params else mode
     try:
         reference = _model()
         model = _model()
-        buffer = flatten_parameters_(model, world_size=WORLD, rank=rank)
+        buffer = flatten_parameters_(
+            model,
+            world_size=WORLD,
+            rank=rank,
+            dtype=torch.bfloat16 if bf16_params else torch.float32,
+        )
         mesh = dist.device_mesh.init_device_mesh(
             "cpu", (WORLD,), mesh_dim_names=("dp_replicate",)
         )
@@ -101,7 +111,9 @@ def _worker(rank: int, rendezvous: str, workdir: str, dtype: str) -> None:
                 ddp.set_requires_all_reduce(micro == 1)
                 sl = slice(micro * 2, (micro + 1) * 2)
                 # DDP averages over ranks; the loss is already globally normalized.
-                (_loss(ddp, local_x[sl], local_y[sl]) * WORLD).backward()
+                with torch.autocast("cpu", dtype=torch.bfloat16, enabled=bf16_params):
+                    loss = _loss(ddp, local_x[sl], local_y[sl]) * WORLD
+                loss.float().backward()
             optimizer.update_hessian()
             container.step()
             container.zero_grad()
@@ -124,11 +136,23 @@ def _worker(rank: int, rendezvous: str, workdir: str, dtype: str) -> None:
         flat_ref = torch.cat([p.detach().reshape(-1) for p in ref_master.parameters()])
         start, end = buffer.shard_bounds
         stop = min(end, buffer.numel)
+        tol = {"rtol": 2e-2, "atol": 2e-3} if bf16_params else {"rtol": 1e-5, "atol": 1e-6}
         torch.testing.assert_close(
-            state.master.detach()[: stop - start], flat_ref[start:stop], rtol=1e-5, atol=1e-6
+            state.master.detach()[: stop - start], flat_ref[start:stop], **tol
         )
         model_flat = buffer.flat[: buffer.numel]
-        if dtype == "bfloat16":
+        if bf16_params:
+            assert model_flat.dtype == torch.bfloat16
+            assert all(p.dtype == torch.bfloat16 for p in model.parameters())
+            assert state.master.dtype == torch.float32
+            torch.testing.assert_close(
+                model_flat.float(), flat_ref.bfloat16().float(), rtol=3e-2, atol=3e-3
+            )
+            # The model holds exactly the BF16-rounded master of this shard.
+            assert torch.equal(
+                model_flat[start:stop], state.master.detach()[: stop - start].bfloat16()
+            )
+        elif dtype == "bfloat16":
             assert torch.equal(model_flat, model_flat.bfloat16().float())
             torch.testing.assert_close(
                 model_flat, flat_ref.bfloat16().float(), rtol=1e-2, atol=1e-3
@@ -144,7 +168,7 @@ def _worker(rank: int, rendezvous: str, workdir: str, dtype: str) -> None:
         assert exp_avg.numel() == buffer.shard_numel
 
         # DCP round trip of the sharded optimizer state.
-        checkpoint = os.path.join(workdir, f"ckpt-{dtype}")
+        checkpoint = os.path.join(workdir, f"ckpt-{mode}")
         saved = {k: v.clone() if torch.is_tensor(v) else v for k, v in container.state_dict().items()}
         assert any(f"rank{rank:05d}" in key for key in saved)
         dcp.save(container.state_dict(), checkpoint_id=checkpoint)
@@ -160,12 +184,12 @@ def _worker(rank: int, rendezvous: str, workdir: str, dtype: str) -> None:
 
 
 @pytest.mark.skipif(not dist.is_gloo_available(), reason="Gloo backend is unavailable")
-@pytest.mark.parametrize("dtype", ["float32", "bfloat16"])
-def test_zero1_native_ddp_matches_unsharded_reference(dtype: str) -> None:
+@pytest.mark.parametrize("mode", ["float32", "bfloat16", "bfloat16-params"])
+def test_zero1_native_ddp_matches_unsharded_reference(mode: str) -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         spawn(
             _worker,
-            args=(f"file://{tmpdir}/rendezvous", tmpdir, dtype),
+            args=(f"file://{tmpdir}/rendezvous", tmpdir, mode),
             nprocs=WORLD,
             join=True,
         )
