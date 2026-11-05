@@ -104,9 +104,17 @@ git log -1 --oneline -- torchtitan/experiments/ezpz/rl/train_sft.py \
     torchtitan/experiments/ezpz/rl/decontam_traces.py 2>&1 | tee -a "${LOG_DIR}/run.log"
 echo "" | tee -a "${LOG_DIR}/run.log"
 
-# Single-rank launch: pre-tokenize is a data job, no model training / no
-# collectives. `ezpz launch --np 1` keeps the ezpz env plumbing but runs one
-# rank.
+# No MPI needed for single-rank data job — run directly to avoid ezpz.doctor->torchinfo->torch circular import in rl-monarch venv
+python3 -m torchtitan.experiments.ezpz.rl.train_sft \
+    --sft_dataset distill_cot_mix \
+    --model_name_or_path "${BASE_MODEL}" \
+    --pretokenize_to "${OUT_DIR}" \
+    --max_length 8192 \
+    --dataset_num_proc "${NPROC:-32}" \
+    --output_dir "${LOG_DIR}/_pretok_scratch" \
+    --report_to none \
+    2>&1 | tee -a "${LOG_DIR}/run.log"
+if false; then  # keep old ezpz path for reference
 ezpz launch --np 1 python3 -m torchtitan.experiments.ezpz.rl.train_sft \
     --sft_dataset distill_cot_mix \
     --model_name_or_path "${BASE_MODEL}" \
@@ -116,6 +124,7 @@ ezpz launch --np 1 python3 -m torchtitan.experiments.ezpz.rl.train_sft \
     --output_dir "${LOG_DIR}/_pretok_scratch" \
     --report_to none \
     2>&1 | tee -a "${LOG_DIR}/run.log"
+fi
 
 echo "" | tee -a "${LOG_DIR}/run.log"
 echo "=== decontam drop summary (from run.log) ===" | tee -a "${LOG_DIR}/run.log"
