@@ -75,7 +75,8 @@ fi
 # variant carries the same Monarch stack as the validated rl-monarch-torch214)
 V="${V:-/lus/tegu/projects/datascience/foremans/venvs/rl-monarch-torch214-locality-20261001}"
 # Fallback to the non-locality sibling if the locality venv was GC'd
-if [[ ! -x "${V}/bin/python" ]]; then V="/lus/tegu/projects/datascience/foremans/venvs/rl-monarch-torch214"; fi
+# NOTE: non-locality sibling rl-monarch-torch214 is BROKEN (UR loader 0.12 mismatch) -- never fall back to it
+# if [[ ! -x "${V}/bin/python" ]]; then V="/lus/tegu/projects/datascience/foremans/venvs/rl-monarch-torch214"; fi
 [[ -x "${V}/bin/python" ]] || { echo "FATAL: venv not found: ${V}" >&2; exit 1; }
 
 # Offline: model + datasets + tokenizer are all on shared FS; no Hub calls from ranks
@@ -116,6 +117,19 @@ else
   else CKPT="${DEFAULT_CKPT_HF}"
   fi
 fi
+# LD-first for accelerate consolidate (must be before merge-weights call)
+if [[ -d "${V}/lib" ]]; then
+  _ld_first_cons="${WT}/.cache/xpu-ld-first/$(basename "${V}")"
+  if [[ ! -e "${_ld_first_cons}/.complete" ]]; then
+    mkdir -p "${_ld_first_cons}"
+    for _lib in "${V}"/lib/libur_* "${V}"/lib/libsycl.so* "${V}"/lib/libumf* "${V}"/lib/libtcm*; do
+      [[ -e "${_lib}" ]] && ln -sf "${_lib}" "${_ld_first_cons}/"
+    done
+    touch "${_ld_first_cons}/.complete"
+  fi
+  export LD_LIBRARY_PATH="${_ld_first_cons}:${LD_LIBRARY_PATH:-}"
+fi
+
 # If only sharded DCP exists (checkpoint-93 is FSDP, not HF), consolidate to -hf.
 # This is a one-time merge via accelerate (needs the SFT base tokenizer at ckpt-900-hf or agpt model).
 # SFT ckpt-93's tokenizer is the same gemma tokenizer as the base; we derive SRC from the stage-1 base.
@@ -133,7 +147,7 @@ if [[ ! -s "${CKPT}/config.json" ]] && [[ -d "${CKPT}/pytorch_model_fsdp_0" ]]; 
   if [[ -n "${SRC_HF}" && -f "${SRC_HF}/config.json" ]]; then
     mkdir -p "${DEFAULT_CKPT_HF}"
     "${V}/bin/python" -m accelerate.commands.merge_weights --help >/dev/null 2>&1 || echo "WARN: accelerate merge-weights not available, trying alt" >&2
-    "${V}/bin/accelerate" merge-weights "${CKPT}/pytorch_model_fsdp_0" "${DEFAULT_CKPT_HF}" 2>&1 | tail -5
+    LD_LIBRARY_PATH="${V}/lib:${LD_LIBRARY_PATH:-}" "${V}/bin/accelerate" merge-weights "${CKPT}/pytorch_model_fsdp_0" "${DEFAULT_CKPT_HF}" 2>&1 | tail -5
     cp "${SRC_HF}/config.json" "${DEFAULT_CKPT_HF}/" 2>/dev/null || true
     cp "${SRC_HF}"/tokenizer* "${DEFAULT_CKPT_HF}/" 2>/dev/null || true
     cp "${SRC_HF}/special_tokens_map.json" "${DEFAULT_CKPT_HF}/" 2>/dev/null || true
