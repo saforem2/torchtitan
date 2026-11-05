@@ -35,6 +35,8 @@ s/update`, `12482619`). Opt-in BF16 ZeRO-1 model storage makes TT `3.0%`
 faster than that MDS arm (`2.1387 s`, `85.70` TFLOP/s/tile); adding
 block-causal attention makes it `12.9%` faster (`1.9200 s`, `95.46`
 TFLOP/s/tile, [same-allocation comparison](#against-mds-adamwzero-1-at-agpt-2b)).
+That combination's loss stays inside the seed spread over `400` updates
+([combined loss A/B](#block-causal-and-bf16-storage-together)).
 
 At the wider 2025 MDS shape (`z2rrt02w`: hidden `4096`, sequence `4096`,
 accumulation `16`) TT DDP/ZeRO-1 is `26%` slower than MDS AdamW/ZeRO-1, and
@@ -332,8 +334,33 @@ discarded TT warm-up:
 The two MDS runs agree to `0.05%`. BF16 storage is `7.1%` faster than FP32
 storage at accumulation `2`, more than the `2.5`-`6.2%` of the one-node loss
 A/B. With block-causal attention TT is `12.9%` faster than MDS AdamW/ZeRO-1
-and above the July anchor's later launches (`92.6`-`95.1`). The combination is
-the configuration whose numerics are untested.
+and above the July anchor's later launches (`92.6`-`95.1`).
+
+### Block-causal and BF16 storage together
+
+Jobs `12482631`-`12482633` repeat the loss A/B with both changes on against
+the default (FP32 storage, default attention), seeds `1`-`3`, `400` updates;
+seed `2` runs the combination first. Combination minus default:
+
+| Updates | Seed 1 | Seed 2 | Seed 3 | Mean | Default seed spread |
+|---|---:|---:|---:|---:|---:|
+| 2-10 | `+0.034` | `+0.079` | `+0.041` | `+0.051` | `0.077` |
+| 11-50 | `-0.064` | `+0.003` | `-0.056` | `-0.039` | `0.073` |
+| 51-100 | `-0.062` | `+0.050` | `-0.039` | `-0.017` | `0.087` |
+| 101-200 | `-0.028` | `-0.004` | `-0.031` | `-0.021` | `0.063` |
+| 201-300 | `-0.029` | `-0.008` | `-0.016` | `-0.018` | `0.052` |
+| 301-400 | `-0.025` | `+0.005` | `-0.003` | `-0.007` | `0.048` |
+
+Updates `2`-`10` match the BF16-storage A/B to four digits, so that early
+offset is BF16 storage, not block-causal. The paired differences stay inside
+the seed spread; the mean is below zero from update `11` on. Final
+`10`-update windows are `4.035`/`4.017`/`4.030` (combination) and
+`4.058`/`4.011`/`4.027` (default), mixed in sign. At one node the
+combination takes `1.925`/`2.049`/`1.924 s/update` against
+`2.338`/`2.321`/`2.364`, `11.7`-`18.6%` faster; the smallest gain is seed
+`2`, which ran it first.
+
+Neither change has run multi-node for loss or past `400` updates.
 
 BF16 storage stays opt-in. It is the larger change: gradients accumulate in
 BF16 across microbatches and the residual stream is BF16. Before it is a
@@ -639,8 +666,8 @@ logits memory.
   both with block-causal attention; loss
   inside the seed spread at AGPT-2B over `400` updates, slightly higher in all
   three seeds over the last `10`. Needs a longer run and a multi-node run.
-  The `0.9%` configuration stacks it with block-causal attention; each was
-  loss-tested alone, the combination was not.
+  Stacked with block-causal attention it is also loss-tested over `400`
+  updates (`12482631`-`12482633`).
 - The remaining `z2rrt02w` gap is attention backward: TT's block-causal path
   takes `0.54 s` more per update than IPEX xetla
   ([TT and MDS kernels](#tt-and-mds-kernels-at-this-shape)).
@@ -656,6 +683,7 @@ logits memory.
 
 | Job | Content | Exit |
 |---|---|---|
+| `12482631`-`12482633` | AGPT-2B loss A/B, default vs BF16 storage + block-causal, seeds `1`-`3`, `400` updates | `0` |
 | `12482619` | AGPT-2B, `24` tiles: MDS AdamW/ZeRO-1 x2 around TT FP32 storage, BF16 storage, BF16 storage + block-causal | `0` |
 | `12482597`-`12482599` | AGPT-2B loss A/B, FP32 vs BF16 ZeRO-1 storage, seeds `1`-`3`, `400` updates | `0` |
 | `12482585` | `z2rrt02w` shape, block-causal: FP32 vs BF16 ZeRO-1 model storage, alternated | `0` |

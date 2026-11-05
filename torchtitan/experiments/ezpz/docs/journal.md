@@ -2,12 +2,23 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-11-05 (Sunspot) -- Block-causal plus BF16 storage loss A/B
+
+`agpt_2b_loss_ab`, three seeds, `400` updates, default vs BF16 ZeRO-1
+storage with block-causal attention (`12482631`-`12482633`). Combination
+minus default, mean over seeds: `+0.051` in updates `2`-`10` (the BF16
+storage offset), `-0.017` to `-0.039` through update `300`, `-0.007` in
+`301`-`400`; every seed/window inside the `0.048`-`0.087` seed spread. Final
+windows mixed in sign. `11.7`-`18.6%` faster at one node. Both stay opt-in
+pending a multi-node and a longer run.
+[Report](experiments/agpt/sunspot/2026-11-02-throughput-recovery.md#block-causal-and-bf16-storage-together).
+
 ## 2026-11-05 (Sunspot) -- TT vs MDS AdamW/ZeRO-1 at AGPT-2B
 
 Same allocation, `24` tiles (`12482619`): MDS AdamW/ZeRO-1 `2.2046`/`2.2056
 s/update`; TT FP32 storage `2.3023` (`4.4%` slower), BF16 storage `2.1387`
 (`3.0%` faster), BF16 storage with block-causal `1.9200` (`12.9%` faster,
-`95.46` TFLOP/s/tile). The last combination has no loss A/B.
+`95.46` TFLOP/s/tile).
 [Report](experiments/agpt/sunspot/2026-11-02-throughput-recovery.md#against-mds-adamwzero-1-at-agpt-2b).
 
 ## 2026-11-05 (Sunspot) -- BF16 ZeRO-1 storage loss A/B
