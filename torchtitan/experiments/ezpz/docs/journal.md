@@ -1,8 +1,49 @@
 # Development Journal
 
-Running log of what's happening, session by session. Most recent first.
+## 2026-11-05: 16N Sunspot fanout — pre-tokenized CPT/SFT + GRPO wired
 
-## 2026-11-02: historical XPU throughput reconciliation
+`685ce083b` fans Sunspot to 16N: `scripts/cpt_fineweb_edu_4n.sh`,
+`cpt_olmo25_dolmino75_4n.sh`, `sft_distill_cot_4n.sh`, `rl_grpo_b2_2n.sh`, plus
+`sft_distill_cot_pretok_8n.sh` / `_pretokenize_distill_cot_mix_1n.sh`.
+Pre-tokenization moves the 93M-row mix cost off the training job
+(`train_sft.py --pretokenize_to` → `load_from_disk --pretokenized_dataset`,
+shared `/tegu/datasets/agpt2b-distill-cot-mix-len8192`) — avoids both the HF
+streaming cache race and the TRL re-tokenize walltime that killed `12470281`.
+
+Repairs `40b29ca`/`d551d04`/`927dd1e`/`d49706b`/`d962fd6`/`39e65d9`/`4867112`
+fix `VENV` (`xpu-torch216` CPT vs `LD-first` RL consolidate), `HF consolidate`,
+`--optim.` `tyro` namespace, and `CPT` flags; `15f3e19`/`3665e3a`/`11df0ee3a`
+step `NPROC 32→16→8→4` for `SIGBUS`/`SIGSEGV` on `distill pack`. Scripts present
+on HEAD, no fanout job executed yet — gated on verified pre-tokenized dataset
+`dataset_info.json` + `[decontam]` counts. Monarch XPU gate remains
+[monarch.md](production/rl/monarch.md) (`12479177` `40/40` `auto→Gloo` `Exit 0`).
+
+## 2026-11-04: B2v2 stage-2 SFT eval on Sunspot — more epochs hurts
+
+Extends B2 lineage `global_step138650 -> checkpoint-900-hf (IFEval 0.253)` with
+`gsm8k-r1cot` alone (distill mix shelved — HF arrow-cache race at 2N). Training on
+Sunspot 2N `rl/scripts/sft/agpt2b_b2v2_distill_cot_2n.sh`: ep3 job **12482423**
+(`xakno7kg` loss 0.8069 acc 0.8198, 6 steps) and ep6 **12482485** (`ur6pqqhp`,
+12 steps), both `Exit_status=0`.
+
+Eval is Sunspot `workq` `frameworks/2026.1.0 vLLM 0.26 XPU fp32`
+`scripts/eval/submit_cot_eval.sh` → `scripts/eval/eval_cot_gsm8k.py` (200-problem
+GSM8K-CoT, `temperature 0.0 max_tokens 768`). First submission from `dd52d7208`
+`12482538` failed in `00:00:02` with `libsycl.so.9: cannot open` — `MKL/PTI LD`
+alone insufficient without `oneapi compiler libsycl + ccl`. Repaired in
+`7ebedf9d2`/`b68557278`/`ca3e3d1bb`/`668bc4b61`; passing jobs **12482572/73**
+(`00:01:38`/`00:01:39`, `x1922c4s2b0n0`/`x1922c4s5b0n0`, `Exit_status=0`) produced
+`outputs/evals/cot/gsm8k-cot-b2v2-ep3-final.jsonl` **0.09** (`format 0.86 gen 416`)
+and `ep6-final.jsonl` **0.105** (`0.91/378`) — both ~half of **B2 0.205**
+(`format 0.985/gen 282`). Training loss/acc looked healthy while eval halved;
+same failure mode as B3/B4 single-stage rebuilds.
+
+Artifacts: `/lus/tegu/.../torchtitan/submit_cot_eval.sh.o12482572` (and `...73`)
+and `/lus/tegu/.../torchtitan/outputs/evals/cot/gsm8k-cot-b2v2-ep{3,6}-final.jsonl`.
+Verdict and full table in [POST-TRAINING-2B B2v2](production/POST-TRAINING-2B.md#b2v2----stronger-stage-2-sft-on-ckpt-900-2026-11-04)
+and [production SFT index](production/sft/README.md). Next is pre-tokenized
+OpenThoughts-114k distill mix, not more narrow epochs — see 16N fanout below.
+
 
 - Recompute older Sunspot TT histories with the new report's exact model
   FLOPs convention: `6tc71of4` gives `93.75`, `xcs4xrqe` gives `90.85`
