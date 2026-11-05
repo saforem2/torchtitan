@@ -44,12 +44,17 @@ from torchtitan.experiments.ezpz.optimizer.containers import (
     default_muon,
     default_sophiag,
 )
-from torchtitan.experiments.ezpz.trainer import FaultTolerantTrainer
 from torchtitan.experiments.ezpz.validator import EzpzValidator
 from torchtitan.experiments.torchft.config.job_config import FaultTolerance
 from torchtitan.observability.metrics import MetricsProcessor
+
 from . import model_registry
-from .sft_data import tulu_math_uc_streaming_dataset
+from .sft_data import (
+    distill_cot_mix_streaming_dataset,
+    gsm8k_plus_distill_cot_streaming_dataset,
+    gsm8k_r1cot_streaming_dataset,
+    tulu_math_uc_streaming_dataset,
+)
 
 TT_CONFIG_JSON_ENV = "TT_CONFIG_JSON"
 
@@ -695,12 +700,64 @@ def agpt_2b_mds154391_tulu_math_uc_streaming() -> FaultTolerantTrainer.Config:
     # FaultTolerantTrainer retains ``checkpoint`` as a legacy CLI alias and its
     # post-init synchronizes that alias back into ``checkpointer``. Keep both
     # references identical so config parsing cannot erase this specialized
-    # manager or its MDS initialization/resume paths.
     cfg.checkpoint = cfg.checkpointer
     cfg.metrics.log_freq = 10
     cfg.metrics.enable_wandb = True
     cfg.validator = None
     return cfg
+
+
+def _cot_sft_config(dataset_fn, folder: str, *, lr: float = 2e-5, steps: int = 900, seq_len: int = 1024):
+    """Shared builder for Grain-native CoT SFT (same trainer as CPT)."""
+    base = Path(_MDS154391_SFT_BASE)
+    if not (base / "model-00001-of-00001.safetensors").is_file():
+        raise ValueError(f"MDS154391 HF checkpoint missing at {base}")
+    dcp_base = Path(_MDS154391_SFT_DCP)
+    if not (dcp_base / ".metadata").is_file():
+        raise ValueError(f"MDS154391 DCP checkpoint missing at {dcp_base}")
+    cfg = agpt("2b-mds", local_batch_size=2, activation_checkpoint_mode="none",
+               seq_len=seq_len, dtype="float32", compile=True, checkpoint_interval=300,
+               hf_assets_path=str(base))
+    cfg.dataloader = GrainDataLoader.Config(
+        dataset=dataset_fn(), seed=42, shuffle=True, repeat=True,
+        streaming_shuffle_buffer_size=10_000, num_prefetch_microbatches=2)
+    cfg.optim.optimizer = default_adamw(lr=lr)
+    cfg.optim.lr_scheduler.warmup_steps = 0
+    cfg.optim.lr_scheduler.decay_ratio = 0.0
+    cfg.optim.lr_scheduler.decay_type = "linear"
+    cfg.optim.lr_scheduler.min_lr_factor = 1.0
+    cfg.training.steps = steps
+    cfg.training.num_tokens_per_train_step = 6_144 * seq_len
+    prior = cfg.checkpointer
+    assert prior is not None
+    cfg.checkpointer = GrainStreamingCheckpointManager.Config(
+        **{field.name: getattr(prior, field.name) for field in fields(prior)})
+    cfg.checkpointer.initial_load_path = str(dcp_base)
+    cfg.checkpointer.initial_load_in_hf = False
+    cfg.checkpointer.initial_load_model_only = True
+    cfg.checkpointer.folder = folder
+    cfg.checkpointer.interval = 300
+    cfg.checkpointer.keep_latest_k = 0
+    cfg.checkpoint = cfg.checkpointer
+    cfg.metrics.log_freq = 10
+    cfg.metrics.enable_wandb = True
+    cfg.validator = None
+    return cfg
+
+
+def agpt_2b_mds_gsm8k_r1cot_streaming() -> FaultTolerantTrainer.Config:
+    """GSM8K alone via Grain streaming -- Stage-2 warm-up, no TRL."""
+    return _cot_sft_config(gsm8k_r1cot_streaming_dataset, "checkpoints/agpt2b-mds-gsm8k-r1cot-streaming")
+
+
+def agpt_2b_mds_distill_cot_streaming() -> FaultTolerantTrainer.Config:
+    """50/50 OpenThoughts + OpenR1 CoT via Grain -- replaces --pretokenize_to."""
+    return _cot_sft_config(distill_cot_mix_streaming_dataset, "checkpoints/agpt2b-mds-distill-cot-streaming")
+
+
+def agpt_2b_mds_gsm8k_plus_distill_streaming() -> FaultTolerantTrainer.Config:
+    """GSM8K + distill breadth via Grain (all 3 CoT sources)."""
+    return _cot_sft_config(gsm8k_plus_distill_cot_streaming_dataset, "checkpoints/agpt2b-mds-gsm8k-plus-distill-streaming")
 
 
 # --- data-mix A/B (stage-2 mid-training): flat won the anneal, so DATA is the
