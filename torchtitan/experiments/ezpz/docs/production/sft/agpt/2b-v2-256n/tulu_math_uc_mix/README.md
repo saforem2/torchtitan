@@ -67,9 +67,15 @@ format cold) and finished 0.77 over 729 steps.
 
 The prior production SFT
 ([tulu_math_uc_mix on gs138650](../../2b-mds/tulu_math_uc_mix/README.md))
-reached final loss 0.77 over 729 steps. This run applied the identical recipe
-to the completed v2 base, so an eval comparison (base-LM benchmarks +
-downstream GRPO signal) would have shown whether SFT on the completed 4.674T
-base beats SFT on the older lineage. **That comparison was never made** -- the
-run never produced a surviving checkpoint to evaluate, and the question is
-still open.
+reached final loss 0.77 over 729 steps and is the base for B2 (0.205 CoT).
+This run applied the identical recipe to the completed v2 base (4.674T, 256N
+chain) to test whether more pre-training helps SFT — an eval comparison
+(base-LM + downstream GRPO signal) would have answered that. **No surviving
+checkpoint exists to evaluate** — the output dir holds zero `checkpoint-*`
+(verified 2026-08-30), so the comparison stays open but unblockable from this
+run. Re-running requires fixing the 32N oneCCL scale crash first (see Run
+status above), and even then the question overlaps with the now-proven
+result that SFT structure and data matter more than base scale at this size
+(B2 0.205 vs every single-stage rebuild 0.02–0.105 — see
+[POST-TRAINING-2B](../../../../POST-TRAINING-2B.md)).
+
