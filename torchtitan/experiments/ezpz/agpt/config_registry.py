@@ -1578,23 +1578,34 @@ def _agpt_v2_4k(
         load_dataset_kwargs={"data_dir": _olmo_mix_subset_dir("wiki")},
     )
 
-
 def agpt_v2_4b_4k() -> FaultTolerantTrainer.Config:
-    """4.64B (5B_olmo2tok geometry) at 4K seqlen, OLMo-3 tokenizer, streaming."""
+    """4.64B (5B_olmo2tok geometry) at 4K seqlen, OLMo-3 tokenizer, streaming.
 
-    return _agpt_v2_4k("5b_olmo2tok")
+    Uses the dp12 hidden width (8448 vs 8192) so FSDP can even-shard w13
+    [2, F, D] on dim 1 at 24-way (2N Aurora/Sunspot debug, 12 tiles/node).
+    """
+
+    return _agpt_v2_4k("5b_olmo2tok_dp12")
 
 
 def agpt_v2_10b_4k() -> FaultTolerantTrainer.Config:
-    """9.48B (10B_olmo2tok geometry) at 4K seqlen, OLMo-3 tokenizer, streaming."""
+    """9.48B (10B_olmo2tok geometry) at 4K seqlen, OLMo-3 tokenizer, streaming.
 
-    return _agpt_v2_4k("10b_olmo2tok")
+    dp12 hidden 11520 vs 11264 for the same FSDP reason.
+    """
+
+    return _agpt_v2_4k("10b_olmo2tok_dp12")
 
 
 def agpt_v2_30b_4k() -> FaultTolerantTrainer.Config:
-    """26.2B (30B_olmo2tok geometry) at 4K seqlen, OLMo-3 tokenizer, streaming."""
+    """26.2B (30B_olmo2tok geometry) at 4K seqlen, OLMo-3 tokenizer, streaming.
 
-    return _agpt_v2_4k("30b_olmo2tok")
+    Already divisible via the existing 30B_olmo2tok_dp12 alias (16128 % 24 == 0).
+    """
+
+    return _agpt_v2_4k("30b_olmo2tok_dp12")
+
+
 
 
 # Optimizer-comparison arms for the OLMo-2 ladder.
