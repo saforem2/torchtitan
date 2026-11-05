@@ -202,8 +202,51 @@ TT with block-causal attention is still `14%` slower than MDS (`9.111` vs
 `7.977 s`). That compares two jobs on two nodes; the TT controls agree across
 jobs (`10.04`-`10.10` and `9.78`-`10.07 s`) and MDS agrees with `12482248`
 within `1%`. Non-GEMM, non-attention kernels take `2.2 s` per update in TT;
-that is the next place to look, with an MDS trace at this shape for
-comparison.
+the next section compares them with an MDS trace.
+
+### TT and MDS kernels at this shape
+
+Job `12482583` (`x1922c4s2b0n0`, the node of `12482281`) ran MDS with
+`MDS_PROFILE=1`, a rank-0 `torch.profiler` trace of update `12`, between TT
+arms. MDS takes `8.008 s/update` (updates `21`-`32`); the traced update takes
+`8.166 s`. `summarize_xpu_trace.py` buckets both traces by kernel name. The TT
+column is the block-causal (`4` chunks) trace from `12482281`, whose update
+`12` takes `9.216 s`. The block-causal trace from `12482583` is not used: its
+update `12` took `10.23 s` and includes `0.81 s` in two `int64`
+`oneccl_reduce_base` calls that no other trace has.
+
+| Seconds per update (rank 0) | MDS | TT block-causal | TT - MDS |
+|---|---:|---:|---:|
+| GEMM (`gemm_kernel`, `1968` calls in both) | `4.443` | `4.581` | `+0.14` |
+| Attention backward (with auxiliary kernels) | `1.099` | `1.635` | `+0.54` |
+| Attention forward | `0.608` | `0.473` | `-0.14` |
+| Casts, elementwise, copies, reductions, fills | `1.417` | `1.919` | `+0.50` |
+| Norms | `0.162` | `0.205` | `+0.04` |
+| Communication, optimizer | `0.104` | `0.139` | `+0.04` |
+| Busy (union of kernel intervals) | `7.833` | `8.950` | `+1.12` |
+
+The busy-time gap matches wall clock: `9.111` vs `8.008 s/update`, `+1.10 s`.
+MDS runs the same GEMMs `3%` faster. Its IPEX xetla attention backward is
+`0.54 s` faster than TT's block-causal path, and TT's CUTLASS forward is
+`0.14 s` faster than xetla's.
+
+The memory-traffic row is the other half of the gap. TT spends `1.00 s` in
+dtype casts (`triton_poi_fused__to_copy*`, `CopyScalarFunc`) against `0.25 s`
+for MDS, and `0.45 s` in FP32 elementwise adds that MDS does not have. Every
+TT cast kernel's call count is a multiple of `160` (`10` layers x `16`
+microbatches): `_to_copy_0` `640`, `_to_copy_1` `480`, `_to_copy_2` `160`. The
+FP32 add has `1280` calls, `80` per microbatch. With
+`BENCH_DDP_ZERO1=bfloat16` the model parameters hold BF16-rounded values in
+FP32 storage, so autocast casts every weight on every microbatch, and DDP
+accumulates FP32 gradients. MDS (DeepSpeed `bf16`) stores BF16 parameters, so
+it has no per-microbatch weight cast. MDS
+instead spends `0.35 s` in `CatArrayBatchedCopy`, which TT has no equivalent
+of.
+
+At AGPT-2B (accumulation `2`) casts are `0.22 s` of a `2.18 s` busy update
+(`12482301` control trace), the same `10%` share as here, so the cast cost
+does not by itself explain why TT is faster than MDS at AGPT-2B and slower
+here.
 
 FSDP spends `3.01 s` in all-gather and `2.43 s` in reduce-scatter per
 update. This arm ran with the launcher default
@@ -511,6 +554,7 @@ logits memory.
 
 | Job | Content | Exit |
 |---|---|---|
+| `12482583` | `z2rrt02w` shape: TT warm-up, TT block-causal, MDS with `MDS_PROFILE=1`, TT control | `0` |
 | `12482111` | MDS controls; TT DDP base, `1 x 2`, per-block compile, per-block `1 x 2` | `1` (both `1 x 2` arms: RoPE shape error) |
 | `12482112` | MDS control, GAS 16, AdamW/ZeRO-1, historical; TT HSDP per-block `1 x 2` | `1` (HSDP arm: `inplace_wgrad_accum` rejected under compile) |
 | `12482114` | TT anchor `4a72fa1bf`, local batch `2` and `1` | `0` |
