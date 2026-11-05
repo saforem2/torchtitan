@@ -38,12 +38,16 @@ _END_OF_TURN = "<end_of_turn>\n"
 
 # ── CoT envelope (byte-identical to rl/datasets_sft.py + eval) ──────────
 _OPENR1_BOXED_RE = re.compile(r"\\boxed\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}")
-_OPENR1_THINK_RE = re.compile(r"<think>(.*?)</think>", re.DOTALL | re.IGNORECASE)
 _OPENR1_SUFFIX = (
     "\nReason step by step inside <think></think>, then give the final "
     "answer inside <answer>\\boxed{}</answer>."
 )
-OPENR1_MAX_THINK_CHARS = int(os.environ.get("OPENR1_MAX_THINK_CHARS", "1200"))
+# Verified against HF API: median OpenR1 trace is ~13k chars (n=75 sample),
+# only 6.7% fall under 4000. The 1200 inherited from TRL makes _openr1_messages
+# return [] for every row, so _cot_ok drops 100% before tokenization. Use the
+# same generous ceiling as OpenThoughts (16k) — the B3 verbosity concern was
+# about a 2B *generating* run-ons, not about training on frontier traces.
+OPENR1_MAX_THINK_CHARS = int(os.environ.get("OPENR1_MAX_THINK_CHARS", "16000"))
 DISTILL_MAX_THINK_CHARS = int(os.environ.get("DISTILL_MAX_THINK_CHARS", "16000"))
 _OT_THOUGHT_RE = re.compile(
     r"<\|begin_of_thought\|>(.*?)<\|end_of_thought\|>", re.DOTALL
@@ -152,7 +156,7 @@ def _has_usable_assistant_turn(sample: dict[str, Any], *, source: str) -> bool:
             str(sample.get("generated_solution", "")).strip()
         )
     # CoT datasets arrive as raw HF rows (question/answer, problem/generations,
-    # conversations) — not preformatted messages. Their validity (including
+    # conversations) -- not preformatted messages. Their validity (including
     # verified + boxed checks) is enforced by _cot_ok; this filter just
     # ensures the raw fields are non-empty so we don't waste cycles.
     if source == "gsm8k_r1cot":
