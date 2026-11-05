@@ -46,15 +46,25 @@ load_pinned_ezpz_utils || exit $?
 ezpz_load_modules
 ezpz_setup_job
 
-# CPT VENV: fw-2026.1 with Grain (verified: has ezpz cli + torchtitan + grain 0.2.18)
-VENV="${VENV:-/lus/tegu/projects/datascience/foremans/venvs/fw-2026.1-rc2-grain-historical}"
-# Fallback for alternative names
-[[ -x "${VENV}/bin/python" ]] || VENV=/lus/tegu/projects/datascience/foremans/venvs/fw213-2026.1.0-spmd
+# CPT VENV: xpu-torch216 with Grain 0.2.18 + torch_remat (verified; fw-2026.1 lacks remat)
+VENV="${VENV:-/lus/tegu/projects/datascience/foremans/venvs/xpu-torch216-sync-5a7a622f16}"
+# LD-first: venv libs win over system for UR/SYCL (same as data_resume job)
+if [[ -d "${VENV}/lib" ]]; then
+  _ld_first="${SUBMIT_DIR}/.cache/xpu-ld-first/$(basename "${VENV}")"
+  if [[ ! -e "${_ld_first}/.complete" ]]; then
+    mkdir -p "${_ld_first}"
+    for _lib in "${VENV}"/lib/libur_* "${VENV}"/lib/libsycl.so* "${VENV}"/lib/libumf* "${VENV}"/lib/libtcm*; do
+      [[ -e "${_lib}" ]] && ln -sf "${_lib}" "${_ld_first}/"
+    done
+    touch "${_ld_first}/.complete"
+  fi
+  export LD_LIBRARY_PATH="${_ld_first}:${LD_LIBRARY_PATH:-}"
+fi
 export VIRTUAL_ENV="${VENV}"
 export PATH="${VENV}/bin:/opt/pbs/bin:${PATH}"
-export LD_LIBRARY_PATH="${VENV}/lib:${LD_LIBRARY_PATH:-}"
+hash -r
 [[ "$(command -v python)" == "${VENV}/bin/python" ]] || { echo "FATAL: venv python mismatch: $(command -v python) != ${VENV}/bin/python" >&2; exit 93; }
-python3 -c "from ezpz.cli import main; print('ezpz+venv ok')" || { echo "FATAL: ezpz cli missing in ${VENV}" >&2; exit 1; }
+python3 -c "import torch_remat, grain; print('CPT venv ok:', grain.__version__)" || { echo "FATAL: CPT venv missing deps" >&2; exit 1; }
 
 PPN="${NGPU_PER_HOST:-12}"
 NGPUS_ACTIVE=$(( NHOSTS_TRAIN * PPN ))

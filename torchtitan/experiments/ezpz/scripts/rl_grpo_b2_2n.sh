@@ -158,6 +158,18 @@ STORE="${WT}/.multihost-rl-${PBS_JOBID%%.*}.store"
 rm -f "${STORE}"
 PORT=$((35000 + ${PBS_JOBID%%.*} % 20000))
 
+# LD-first for UR/SYCL (rl-monarch venv, same as SFT B2v2)
+if [[ -d "${V}/lib" ]]; then
+  _ld_first="${WT}/.cache/xpu-ld-first/$(basename "${V}")"
+  if [[ ! -e "${_ld_first}/.complete" ]]; then
+    mkdir -p "${_ld_first}"
+    for _lib in "${V}"/lib/libur_* "${V}"/lib/libsycl.so* "${V}"/lib/libumf* "${V}"/lib/libtcm*; do
+      [[ -e "${_lib}" ]] && ln -sf "${_lib}" "${_ld_first}/"
+    done
+    touch "${_ld_first}/.complete"
+  fi
+  export LD_LIBRARY_PATH="${_ld_first}:${LD_LIBRARY_PATH:-}"
+fi
 export PATH="${V}/bin:/opt/pbs/bin:${PATH}"
 export PYTHONPATH="${WT}${PYTHONPATH:+:${PYTHONPATH}}"
 
