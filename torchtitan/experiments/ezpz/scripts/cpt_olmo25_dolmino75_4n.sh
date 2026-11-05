@@ -117,17 +117,12 @@ else
 fi
 
 ezpz launch --nproc "${NGPUS_ACTIVE}" --nproc_per_node "${PPN}" --auto-retry --spare-nodes auto --timeout 1800 -- \
-  python3 -m torchtitan.experiments.ezpz.train --module=ezpz.agpt --config=agpt_2b_real \
-  --checkpoint.enable --checkpoint.folder="${CKPT_DIR}" --checkpoint.interval="${CKPT_INTERVAL}" \
-  --checkpoint.keep-latest-k="${CKPT_KEEP_LATEST_K}" --checkpoint.no-last-save-model-only \
-  --checkpoint.async-mode=disabled \
+  python3 -m torchtitan.experiments.ezpz.train --module=ezpz.agpt --config=agpt_2b_mds_mix_edu \
+  --checkpoint.interval="${CKPT_INTERVAL}" \
+  --checkpoint.keep-latest-k="${CKPT_KEEP_LATEST_K}" \
+  --checkpoint.folder="${CKPT_DIR}" \
   "${DATASET_FLAGS[@]}" \
   --validator.enable --validator.freq=100 --validator.steps=10 \
-  --optimizer=sophiag --optimizer.lr=2e-6 \
-  --training.local-batch-size="${LBS}" --training.global-batch-size="${GBS}" \
-  --training.seq-len="${SEQ_LEN}" --training.steps="${TRAINING_STEPS}" \
-  --checkpoint.initial-load-path="${BASE_CKPT}" \
-  --checkpoint.initial-load-model-only \
-  --optim.lr-scheduler.warmup-steps=20 --optim.lr-scheduler.decay-ratio=0.0 --optim.lr-scheduler.min-lr-factor=1.0 \
+  --training.steps="${TRAINING_STEPS}" \
   "${extra_args[@]}" \
   "$@"
