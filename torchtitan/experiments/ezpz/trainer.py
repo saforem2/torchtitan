@@ -243,7 +243,9 @@ class EzpzTrainingEngine(TorchFTTrainingEngine):
             config.parallelism, "enable_data_parallel_native_ddp", False
         ):
             raise ValueError("native_ddp_zero1 requires native DDP")
-        param_dtype = getattr(config.parallelism, "native_ddp_zero1_param_dtype", "float32")
+        param_dtype = getattr(
+            config.parallelism, "native_ddp_zero1_param_dtype", "float32"
+        )
         if param_dtype == "bfloat16" and not (
             getattr(config.parallelism, "native_ddp_zero1", False)
             and config.parallelism.native_ddp_zero1_allgather_dtype == "bfloat16"

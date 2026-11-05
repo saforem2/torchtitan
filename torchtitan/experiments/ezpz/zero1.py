@@ -95,7 +95,9 @@ def flatten_parameters_(
     FP32 parameters are rounded into it.  Call this before wrapping with DDP.
     """
     if dtype not in (torch.float32, torch.bfloat16):
-        raise ValueError(f"ZeRO-1 buffer dtype must be float32 or bfloat16, got {dtype}")
+        raise ValueError(
+            f"ZeRO-1 buffer dtype must be float32 or bfloat16, got {dtype}"
+        )
     if world_size < 1 or not 0 <= rank < world_size:
         raise ValueError(f"invalid rank {rank} for world size {world_size}")
     named = [(n, p) for n, p in module.named_parameters() if p.requires_grad]

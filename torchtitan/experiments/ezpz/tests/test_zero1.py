@@ -136,7 +136,11 @@ def _worker(rank: int, rendezvous: str, workdir: str, mode: str) -> None:
         flat_ref = torch.cat([p.detach().reshape(-1) for p in ref_master.parameters()])
         start, end = buffer.shard_bounds
         stop = min(end, buffer.numel)
-        tol = {"rtol": 2e-2, "atol": 2e-3} if bf16_params else {"rtol": 1e-5, "atol": 1e-6}
+        tol = (
+            {"rtol": 2e-2, "atol": 2e-3}
+            if bf16_params
+            else {"rtol": 1e-5, "atol": 1e-6}
+        )
         torch.testing.assert_close(
             state.master.detach()[: stop - start], flat_ref[start:stop], **tol
         )
