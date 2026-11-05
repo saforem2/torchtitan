@@ -90,7 +90,7 @@ python3 -c "import trl; print('trl', trl.__version__)" || { echo "FATAL: trl mis
 
 # num_proc override knob: walk down (e.g. NPROC=16) if the packing map OR the
 # decontam map SIGBUSes / a subprocess dies -- see header.
-NPROC="${NPROC:-16}"
+NPROC="${NPROC:-8}"
 BASE_MODEL="${HOME}/global_step138650"
 OUT_DIR="/tegu/datasets/datasets/agpt2b-distill-cot-mix-len8192"
 LOG_DIR="logs/pretokenize-distill-cot-mix-${PBS_JOBID%%.*}"
@@ -110,7 +110,7 @@ python3 -m torchtitan.experiments.ezpz.rl.train_sft \
     --model_name_or_path "${BASE_MODEL}" \
     --pretokenize_to "${OUT_DIR}" \
     --max_length 8192 \
-    --dataset_num_proc "${NPROC:-16}" \
+    --dataset_num_proc "${NPROC:-8}" \
     --output_dir "${LOG_DIR}/_pretok_scratch" \
     --report_to none \
     2>&1 | tee -a "${LOG_DIR}/run.log"
@@ -120,7 +120,7 @@ ezpz launch --np 1 python3 -m torchtitan.experiments.ezpz.rl.train_sft \
     --model_name_or_path "${BASE_MODEL}" \
     --pretokenize_to "${OUT_DIR}" \
     --max_length 8192 \
-    --dataset_num_proc "${NPROC:-16}" \
+    --dataset_num_proc "${NPROC:-8}" \
     --output_dir "${LOG_DIR}/_pretok_scratch" \
     --report_to none \
     2>&1 | tee -a "${LOG_DIR}/run.log"
