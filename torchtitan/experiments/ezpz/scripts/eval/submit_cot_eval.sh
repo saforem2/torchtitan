@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash --login
 #PBS -A datascience
 #PBS -l walltime=00:40:00
 #PBS -l select=1
