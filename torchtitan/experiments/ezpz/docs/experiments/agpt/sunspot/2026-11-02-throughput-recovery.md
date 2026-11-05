@@ -29,9 +29,12 @@ later launches on the same node give `92.6`-`95.1`. The slow first launch
 costs TT `2`-`7%` and its cause is still open
 ([Anchor launch environment](#anchor-launch-environment)).
 
-Against MDS's own fastest AGPT-2B configuration (AdamW, ZeRO-1,
-`2.203`-`2.214 s/update`, separate allocations) the same TT arm is `3`-`5%`
-slower; same-allocation job `12482619` compares them directly.
+Against MDS's own fastest AGPT-2B configuration (AdamW, ZeRO-1) the same TT
+arm is `4.4%` slower in one allocation (`2.3023` vs `2.2046`/`2.2056
+s/update`, `12482619`). Opt-in BF16 ZeRO-1 model storage makes TT `3.0%`
+faster than that MDS arm (`2.1387 s`, `85.70` TFLOP/s/tile); adding
+block-causal attention makes it `12.9%` faster (`1.9200 s`, `95.46`
+TFLOP/s/tile, [same-allocation comparison](#against-mds-adamwzero-1-at-agpt-2b)).
 
 At the wider 2025 MDS shape (`z2rrt02w`: hidden `4096`, sequence `4096`,
 accumulation `16`) TT DDP/ZeRO-1 is `26%` slower than MDS AdamW/ZeRO-1, and
@@ -41,8 +44,8 @@ Storing the ZeRO-1 model in BF16 (opt-in `BENCH_DDP_ZERO1_PARAMS=bfloat16`)
 with block-causal attention closes that to `0.9%`: `8.08 s/update`, `108.9`
 TFLOP/s/tile, half the peak
 memory ([BF16 model storage](#bf16-model-storage)). At AGPT-2B over `400`
-updates and three seeds its loss stays inside the seed spread; it is
-`2.5`-`6.2%` faster there. It stays opt-in.
+updates and three seeds its loss stays inside the seed spread. It stays
+opt-in.
 
 | Arm | Accumulation x microbatch | s/update | tok/s/tile | Model TFLOP/s/tile |
 |---|---|---:|---:|---:|
@@ -311,6 +314,26 @@ At accumulation `2` the speedup is smaller: `2.146`/`2.235`/`2.166` against
 `2.289`/`2.294`/`2.284 s/update`, `2.5`-`6.2%`. The smallest gain is seed
 `2`, where BF16 ran first in the job, and step time drifts by up to `5%`
 within one arm, so this range is not a precise estimate.
+
+### Against MDS AdamW/ZeRO-1 at AGPT-2B
+
+Job `12482619` (`24` tiles, two nodes, `2 x 1` accumulation, AdamW in both
+frameworks) brackets the TT arms with two MDS AdamW/ZeRO-1 runs, after a
+discarded TT warm-up:
+
+| Arm (phase order) | s/update | sd | tok/s/tile | TFLOP/s/tile | Peak memory |
+|---|---:|---:|---:|---:|---:|
+| MDS AdamW, ZeRO-1 (2) | `2.2046` | -- | `7432` | `83.13` | -- |
+| TT, FP32 storage (3) | `2.3023` | `0.0024` | `7116` | `79.61` | `52.91 GiB` |
+| TT, BF16 storage (4) | `2.1387` | `0.0016` | `7661` | `85.70` | `32.05 GiB` |
+| TT, BF16 storage, block-causal `4` (5) | `1.9200` | `0.0024` | `8533` | `95.46` | -- |
+| MDS AdamW, ZeRO-1 (6) | `2.2056` | -- | `7428` | `83.09` | -- |
+
+The two MDS runs agree to `0.05%`. BF16 storage is `7.1%` faster than FP32
+storage at accumulation `2`, more than the `2.5`-`6.2%` of the one-node loss
+A/B. With block-causal attention TT is `12.9%` faster than MDS AdamW/ZeRO-1
+and above the July anchor's later launches (`92.6`-`95.1`). The combination is
+the configuration whose numerics are untested.
 
 BF16 storage stays opt-in. It is the larger change: gradients accumulate in
 BF16 across microbatches and the residual stream is BF16. Before it is a
@@ -612,7 +635,8 @@ logits memory.
   and three seeds ([Loss-curve A/B](#loss-curve-ab)). Revisit after a
   multi-node run and a run past `400` updates.
 - BF16 ZeRO-1 model storage (`BENCH_DDP_ZERO1_PARAMS=bfloat16`) stays opt-in:
-  `0.9%` behind MDS at the `z2rrt02w` shape with block-causal attention; loss
+  `0.9%` behind MDS at the `z2rrt02w` shape and `12.9%` ahead at AGPT-2B,
+  both with block-causal attention; loss
   inside the seed spread at AGPT-2B over `400` updates, slightly higher in all
   three seeds over the last `10`. Needs a longer run and a multi-node run.
   The `0.9%` configuration stacks it with block-causal attention; each was
@@ -632,6 +656,7 @@ logits memory.
 
 | Job | Content | Exit |
 |---|---|---|
+| `12482619` | AGPT-2B, `24` tiles: MDS AdamW/ZeRO-1 x2 around TT FP32 storage, BF16 storage, BF16 storage + block-causal | `0` |
 | `12482597`-`12482599` | AGPT-2B loss A/B, FP32 vs BF16 ZeRO-1 storage, seeds `1`-`3`, `400` updates | `0` |
 | `12482585` | `z2rrt02w` shape, block-causal: FP32 vs BF16 ZeRO-1 model storage, alternated | `0` |
 | `12482583` | `z2rrt02w` shape: TT warm-up, TT block-causal, MDS with `MDS_PROFILE=1`, TT control | `0` |

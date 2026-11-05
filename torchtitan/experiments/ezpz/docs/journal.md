@@ -2,6 +2,14 @@
 
 Running log of what's happening, session by session. Most recent first.
 
+## 2026-11-05 (Sunspot) -- TT vs MDS AdamW/ZeRO-1 at AGPT-2B
+
+Same allocation, `24` tiles (`12482619`): MDS AdamW/ZeRO-1 `2.2046`/`2.2056
+s/update`; TT FP32 storage `2.3023` (`4.4%` slower), BF16 storage `2.1387`
+(`3.0%` faster), BF16 storage with block-causal `1.9200` (`12.9%` faster,
+`95.46` TFLOP/s/tile). The last combination has no loss A/B.
+[Report](experiments/agpt/sunspot/2026-11-02-throughput-recovery.md#against-mds-adamwzero-1-at-agpt-2b).
+
 ## 2026-11-05 (Sunspot) -- BF16 ZeRO-1 storage loss A/B
 
 `agpt_2b_loss_ab`, three seeds, `400` updates, FP32 vs BF16 ZeRO-1 model
