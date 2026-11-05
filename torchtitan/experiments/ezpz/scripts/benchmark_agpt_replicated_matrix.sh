@@ -59,7 +59,7 @@ for phase in ${PHASES}; do
                 bash --login "${SCRIPTS}/benchmark_agpt_replicated_mds.sh"
             ;;
         mdsshape)
-            env "${overrides[@]}" \
+            env BENCH_TAG="${tag}" "${overrides[@]}" \
                 timeout --kill-after=60 "${BENCH_MDS_TIMEOUT:-1500}" \
                 bash --login "${SCRIPTS}/benchmark_mds_historical_shape.sh"
             ;;

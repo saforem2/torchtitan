@@ -15,7 +15,9 @@
 #   10 layers, hidden 4096, 32 heads, 8 KV heads, FFN 11008, Llama2 vocab,
 #   seq 4096, microbatch 1, GBS 192 (accumulation 16 on 12 ranks), ZeRO-1,
 #   AdamW, FP32 allreduce accumulation, flash-attention builder.
-# MDS_SEQ (default 4096) and MDS_STEPS (default 32) are the only knobs.
+# Knobs: MDS_SEQ (default 4096), MDS_STEPS (default 32), and MDS_PROFILE=1,
+# which records a rank-0 torch.profiler trace of update 12 into
+# ${OUT}/tensorboard (MDS --profile pt), the update TT traces.
 set -o pipefail
 ulimit -c 0
 
@@ -38,6 +40,15 @@ BOOKS_LIST="${MDS_ROOT}/ALCF/data-lists/sunspot/books.txt"
 TOKENIZER="${MDS_ROOT}/ALCF/tokenizer.model"
 MDS_SEQ="${MDS_SEQ:-4096}"
 MDS_STEPS="${MDS_STEPS:-32}"
+MDS_PROFILE="${MDS_PROFILE:-0}"
+PROFILE_ARGS=()
+if [[ "${MDS_PROFILE}" == 1 ]]; then
+    ((MDS_STEPS >= 12)) || { echo "MDS_PROFILE=1 needs MDS_STEPS >= 12" >&2; exit 2; }
+    PROFILE_ARGS=(--profile pt --profile_steps "12,12" --profile-ranks 0)
+elif [[ "${MDS_PROFILE}" != 0 ]]; then
+    echo "MDS_PROFILE must be 0 or 1" >&2
+    exit 2
+fi
 
 # shellcheck disable=SC1091
 source "${EZPZ_HELPER_ENV}/lib/python3.12/site-packages/ezpz/bin/utils.sh" || exit 90
@@ -54,7 +65,7 @@ hash -r
 [[ -s "${TOKENIZER}" && -s "${BOOKS_LIST}" ]] || exit 99
 
 JOB="${PBS_JOBID%%.*}"
-RUN_NAME="mds-z2rrt02w-shape-seq${MDS_SEQ}-${JOB}"
+RUN_NAME="mds-z2rrt02w-shape-seq${MDS_SEQ}${BENCH_TAG:+-${BENCH_TAG}}-${JOB}"
 OUT="${CAMPAIGN_ROOT}/outputs/${RUN_NAME}"
 mkdir -p "${OUT}/tensorboard" "${OUT}/wandb" "${OUT}/index-cache"
 LOG="${OUT}/train.log"
@@ -84,7 +95,7 @@ export WANDB_NAME="${RUN_NAME}" WANDB_RUN_NAME="${RUN_NAME}" WANDB_RUN_ID="${RUN
 export WANDB_DIR="${OUT}/wandb"
 
 {
-    echo "BEGIN $(date -Is) host=$(hostname -s) job=${JOB} seq=${MDS_SEQ} steps=${MDS_STEPS}"
+    echo "BEGIN $(date -Is) host=$(hostname -s) job=${JOB} seq=${MDS_SEQ} steps=${MDS_STEPS} profile=${MDS_PROFILE}"
     echo "torch=$(python -c 'import torch; print(torch.__version__)') deepspeed=$(python -c 'import deepspeed; print(deepspeed.__version__)') mds_head=${MDS_HEAD}"
 } | tee "${LOG}"
 
@@ -116,7 +127,7 @@ ezpz launch --nproc 12 --nproc_per_node 12 -- \
     --train-iters="${MDS_STEPS}" --distributed-backend=ccl --weight-decay=0.1 \
     --adam-beta1=0.9 --adam-beta2=0.95 --adam-eps=0.00001 --clip-grad=1.0 \
     --num-attention-heads=32 --data-cache-path="${OUT}/index-cache" \
-    --data-file-list="${BOOKS_LIST}" \
+    --data-file-list="${BOOKS_LIST}" "${PROFILE_ARGS[@]}" \
     >> "${LOG}" 2>&1
 rc=$?
 echo "END $(date -Is) rc=${rc} output=${OUT}" | tee -a "${LOG}"
