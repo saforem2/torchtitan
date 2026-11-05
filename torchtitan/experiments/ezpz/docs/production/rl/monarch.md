@@ -1,6 +1,6 @@
 # Production RL with Monarch, TorchStore, and vLLM on XPU
 
-**Current production runbook. Last updated: 2026-10-20.** Guoqiong's Aurora GRPO trial is now merged on `ezpz` (PR #69 → `66744493dc`, `fix/xpu-trial-review` → `043c4b8dd9` doc/divisibility fixes at `a769b21418`) under `rl/xpu_trial/` (`Qwen3-0.6B` `alphabet_sort`, `torch 2.14+xpu`, `monarch xpu-all 5009e95d / torchstore xpu-all 2afb113`). `prod` is now Aurora's canonical route queue (replaces `next-eval` execution queue, which still exists on `test_20260924` BKC); docs retaining `next-eval` are historical only.
+> **Re-affirmed 2026-11-05:** gate unchanged — latest passing job remains Sunspot `12479177` `40/40 v0-3 auto→Gloo Exit 0` (2026-09-30); 16N fanout `685ce083b` wired on top of this stack (`rl_grpo_b2_2n.sh`) but not yet executed. `Journal 2026-11-05` and `POST-TRAINING-2B.md` carry the newer SFT/CPT work on the same base.
 
 > [!IMPORTANT]
 > This page is the canonical operator guide for the current upstream-style

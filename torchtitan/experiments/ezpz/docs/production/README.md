@@ -91,14 +91,14 @@ Continued-pretraining, supervised fine-tuning, and RL-GRPO runs that build ON
 a pre-trained base. No `% target` (they don't consume the 4.67T budget); each
 has its own token/step goal in the linked page.
 
-| Stage | Base | Recipe / trajectory | State | Progress | Notes |
-|-------|------|--------------------|-------|----------|-------|
 | CPT | 2b-256n (plateaued) | [olmo×dolmino sweep](cpt/README.md) | **pilot complete** ✅ | step 5,960, loss **2.49** | 🟢 dolmino CPT beats olmo plateau (2.49 vs 2.80); more dolmino = lower loss |
 | SFT | [2b-mds](sft/agpt/2b-mds/tulu_math_uc_mix/README.md) | tulu_math_uc_mix (metamathqa-swap, ~4.5B tok) | **complete** ✅ | 729 steps, loss **0.77** | 🏁 the reused SFT deliverable (checkpoint-729-hf); input to GRPO |
 | SFT | [2b-mds](sft/agpt/2b-mds/tulu_math_uc_mix_full/README.md) | tulu_math_uc_mix_full (FULL OpenMathInstruct-2, ~54B tok) | **complete** ✅ | **deliverable=ckpt-900** (8672 overfit) | 🏁 8672 reached epoch 1.0 but forgot (base-LM->chance, IFEval flat); ckpt-900 = IFEval 0.253 >= metamathqa + base-LM intact + GRPO 0.31->0.74 |
+| SFT | **2b-mds B2v2** | [ckpt-900 → gsm8k-r1cot 3/6ep](sft/README.md) ([POST-TRAINING-2B](POST-TRAINING-2B.md#b2v2----stronger-stage-2-sft-on-ckpt-900-2026-11-04), [journal](../docs/journal.md)) | **complete, eval 0.09/0.105 vs B2 0.205 — worse** | 6/12 steps, loss 0.8069, acc 0.8198 | 🔴 2N Sunspot 12482423/12482485 Exit 0; eval 12482572/73 (frameworks 2026.1.0 vLLM 0.26 XPU) 0.09 (0.86/416) / 0.105 (0.91/378) — more narrow epochs hurt, same as B3/B4 |
+| CPT/SFT/RL | 2b-mds | **16N Sunspot fanout** ([journal](../docs/journal.md), wired `685ce083b`) | **wired, not yet executed** | — | `cpt_fineweb_edu_4n.sh` + `cpt_olmo25_dolmino75_4n.sh` + `sft_distill_cot_4n.sh` + `rl_grpo_b2_2n.sh`; pre-tokenized distill via `_pretokenize_distill_cot_mix_1n.sh` → `/tegu/datasets/agpt2b-distill-cot-mix-len8192` |
 | SFT | [2b-v2-256n](sft/agpt/2b-v2-256n/tulu_math_uc_mix/README.md) | tulu_math_uc_mix | **blocked** | — | 🔴 v2-base 384-rank oneCCL scale crash at 32N |
+| RL | B2 ckpt-93 (0.205) | Monarch+XPU GRPO — [monarch.md](rl/monarch.md), [journal](../docs/journal.md) | **Sunspot validated** ✅ | 40/40 v0-3, 4 pushes/pulls, 3 finite grads | 🟢 job 12479177 auto→Gloo Exit 0 (Sunspot 2-host); Aurora `prod` gate still required |
 | RL | 2b-mds-sft-729 | [sum_digits arithmetic (GRPO)](rl/grpo/aurora2b/sft_arithmetic/README.md) | **complete** ✅ | 1000 steps, acc **0.76** | 🏁 8N GRPO on the SFT'd model; 8× over baseline |
-
 > Full SFT index: [production/sft/README.md](sft/README.md) · GRPO index:
 > [production/rl/grpo/README.md](rl/grpo/README.md) · CPT: [production/cpt/README.md](cpt/README.md).
 
