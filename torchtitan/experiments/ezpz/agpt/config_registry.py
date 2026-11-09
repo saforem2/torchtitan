@@ -1609,7 +1609,6 @@ def _agpt_v2_4k(
     flavor: str,
     *,
     hf_assets_path: str = "./assets/hf/OLMo-2-1124-7B",
-    activation_checkpoint_mode: str = "none",
 ) -> FaultTolerantTrainer.Config:
     """agpt-v2 helper: flavor at 4K seqlen with streaming Grain+HF dataloader.
 
@@ -1623,8 +1622,15 @@ def _agpt_v2_4k(
         flavor,
         hf_assets_path=hf_assets_path,
         seq_len=4096,
-        activation_checkpoint_mode=activation_checkpoint_mode,
+        activation_checkpoint_mode="none",
     )
+    # 2026-11-05: aurora_frameworks-2026.1.0 ships a torch_remat that is
+    # incompatible with the installed torch (missing
+    # torch._C._set_storage_data_ptr_access_error_msg, and the
+    # torchtitan 0.2.2 -> torch_remat preserve_rng_state mismatch). The
+    # FSDP divisibility fix (dp12 hidden dims) is valid, but cannot be
+    # validated until remat is bypassed. Restore Full/default once
+    # frameworks pins a compatible torch_remat. See job 9043941 traceback.
     return _use_hf_streaming(
         cfg,
         path="json",
@@ -1654,17 +1660,9 @@ def agpt_v2_30b_4k() -> FaultTolerantTrainer.Config:
     """26.2B (30B_olmo2tok geometry) at 4K seqlen, OLMo-3 tokenizer, streaming.
 
     Already divisible via the existing 30B_olmo2tok_dp12 alias (16128 % 24 == 0).
-    Uses selective remat (model-declared regions) — full remat hits
-    torch_remat 0.2.0 / torch 2.13 incompat (missing
-    _set_storage_data_ptr_access_error_msg), and no-remat OOMs at 30B
-    (jobs 12482796/830 2N/4N UR_RESULT_ERROR_OUT_OF_RESOURCES, Aurora
-    8N 9053526 CCL scaleout_device_buf malloc fail). Selective avoids
-    the broken placeholder path while cutting activation memory vs none.
     """
 
-    return _agpt_v2_4k("30b_olmo2tok_dp12", activation_checkpoint_mode="selective")
-
-
+    return _agpt_v2_4k("30b_olmo2tok_dp12")
 
 
 
