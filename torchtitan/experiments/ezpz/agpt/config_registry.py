@@ -1816,6 +1816,42 @@ def _olmo_mix_raw_files() -> list[str]:
     return files
 
 
+# Union of the top-level JSON columns across the olmo-mix-1124 subsets in the
+# manifest. The subsets disagree (Dolma-style added/attributes/doc, DCLM
+# url/warcinfo/fasttext scores, pes2o/wiki source/version), and their nested
+# `metadata` structs differ, so the HF JSON builder cannot merge them from
+# inferred schemas (job 9055219: "Couldn't cast array of type struct<author,
+# ...> to {arxiv_id, ...}"). Declaring every column as a string makes the
+# builder add missing columns as null, serialize nested structs to JSON text
+# and stringify numbers, so every shard casts identically. Only `text` is
+# consumed (TextProcessor).
+_OLMO_MIX_RAW_COLUMNS = (
+    "added",
+    "attributes",
+    "bff_contained_ngram_count_before_dedupe",
+    "created",
+    "doc",
+    "fasttext_openhermes_reddit_eli5_vs_rw_v2_bigram_200k_train_prob",
+    "id",
+    "language_id_whole_page_fasttext",
+    "metadata",
+    "previous_word_count",
+    "source",
+    "text",
+    "url",
+    "version",
+    "warcinfo",
+)
+
+
+def _olmo_mix_raw_features():
+    import datasets
+
+    return datasets.Features(
+        {name: datasets.Value("string") for name in _OLMO_MIX_RAW_COLUMNS}
+    )
+
+
 def _agpt_v2_4k_olmo_mix(flavor: str) -> FaultTolerantTrainer.Config:
     """``_agpt_v2_4k`` geometry streaming the full raw olmo-mix-1124 corpus.
 
@@ -1831,7 +1867,10 @@ def _agpt_v2_4k_olmo_mix(flavor: str) -> FaultTolerantTrainer.Config:
     return _use_hf_streaming(
         cfg,
         path="json",
-        load_dataset_kwargs={"data_files": _olmo_mix_raw_files()},
+        load_dataset_kwargs={
+            "data_files": _olmo_mix_raw_files(),
+            "features": _olmo_mix_raw_features(),
+        },
     )
 
 
