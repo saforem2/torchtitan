@@ -85,6 +85,7 @@ if [[ -d "${VENV}/lib" ]]; then
 fi
 export VIRTUAL_ENV="${VENV}"
 export PATH="${VENV}/bin:/opt/pbs/bin:${PATH}"
+export PYTHONPATH="${SUBMIT_DIR}:${PYTHONPATH:-}"
 hash -r
 python3 -c "import trl; print('trl', trl.__version__)" || { echo "FATAL: trl missing in ${VENV}"; exit 1; }
 
