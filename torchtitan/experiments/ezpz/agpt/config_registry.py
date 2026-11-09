@@ -1665,6 +1665,59 @@ def agpt_v2_30b_4k() -> FaultTolerantTrainer.Config:
     return _agpt_v2_4k("30b_olmo2tok_dp12")
 
 
+def _olmo_mix_raw_files() -> list[str]:
+    """Raw olmo-mix-1124 JSON shards listed in ``$AGPT_V2_DATA_MANIFEST``.
+
+    One absolute path per line. The manifest, not a glob, fixes the file set
+    and its order, so every rank and every restart sees identical shards.
+    HF ``split_dataset_by_node`` assigns whole files to DP ranks only when
+    the file count is divisible by the DP world size; otherwise every rank
+    reads the whole stream and keeps 1/N of it. The manifest builder
+    (``scripts/build_olmo_mix_manifest.py``) sizes the list for that.
+    """
+    manifest = os.environ.get("AGPT_V2_DATA_MANIFEST", "")
+    if not manifest:
+        raise ValueError(
+            "AGPT_V2_DATA_MANIFEST must name a raw olmo-mix file manifest"
+        )
+    files = [line.strip() for line in Path(manifest).read_text().splitlines()]
+    files = [f for f in files if f]
+    if not files:
+        raise ValueError(f"empty data manifest: {manifest}")
+    return files
+
+
+def _agpt_v2_4k_olmo_mix(flavor: str) -> FaultTolerantTrainer.Config:
+    """``_agpt_v2_4k`` geometry streaming the full raw olmo-mix-1124 corpus.
+
+    Text is tokenized on the fly with the OLMo-3 (== OLMo-2-1124) tokenizer
+    by the Grain ``TextProcessor``; no pre-tokenized corpus is involved.
+    """
+    cfg = agpt(
+        flavor,
+        hf_assets_path="./assets/hf/OLMo-2-1124-7B",
+        seq_len=4096,
+        activation_checkpoint_mode="none",
+    )
+    return _use_hf_streaming(
+        cfg,
+        path="json",
+        load_dataset_kwargs={"data_files": _olmo_mix_raw_files()},
+    )
+
+
+def agpt_v2_4b_4k_olmo_mix() -> FaultTolerantTrainer.Config:
+    """4.64B at 4K seqlen on the full raw olmo-mix-1124 (umbrella seat)."""
+
+    return _agpt_v2_4k_olmo_mix("5b_olmo2tok_dp12")
+
+
+def agpt_v2_10b_4k_olmo_mix() -> FaultTolerantTrainer.Config:
+    """9.48B at 4K seqlen on the full raw olmo-mix-1124 (umbrella seat)."""
+
+    return _agpt_v2_4k_olmo_mix("10b_olmo2tok_dp12")
+
+
 
 
 # Optimizer-comparison arms for the OLMo-2 ladder.
