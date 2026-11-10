@@ -917,6 +917,21 @@ def agpt_2b_mds_mix_owm_edu_9010() -> FaultTolerantTrainer.Config:
     return _agpt_2b_mds_mix_blend(0.90, 0.10, "checkpoints/agpt-2b-mds-mix-owm90-edu10")
 
 
+def agpt_2b_mds_mix_owm_edu_6040() -> FaultTolerantTrainer.Config:
+    """60/40 FineWeb-Edu kind-shift (SmolLM2 stage-1 recipe).
+
+    60% FineWeb-Edu / 40% open-web-math: the ``60/40'' kind-shift arm
+    motivated by arXiv:2502.02737 Sec 4.3 / arXiv:2406.17557 (FineWeb-Edu
+    33.6% MMLU @ 38B, ablation DCLM 35.5 -> FWE 37.5 on MMLU while DCLM
+    still wins HellaSwag). Current pre-training is 94.8% DCLM, so this is
+    a distribution-*kind* change, not a degree tweak. Extending narrow SFT
+    (B2v2 ep3/ep6 0.09/0.105 vs B2 0.205, jobs 12482572/73) already showed
+    the ceiling is data-distribution, not more tokens on the same 7.4k.
+    """
+    return _agpt_2b_mds_mix_blend(0.40, 0.60, "checkpoints/agpt-2b-mds-mix-owm60-edu40")
+
+
+
 # --- Wave 3: SCIENCE-corpus 25% blends. The 75/25 owm/edu winner showed the
 # 25% slot is the lever; these swap generic edu for SCIENCE-dense corpora (the
 # DOE-mission version). Same recipe (MDS fork, constant LR, 10B tok, 75/25),

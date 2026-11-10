@@ -1,30 +1,26 @@
 #!/bin/bash --login
 #PBS -A datascience
 #PBS -N cpt-fwe-4n
-#PBS -l walltime=12:00:00
+#PBS -l walltime=02:00:00
 #PBS -l filesystems=tegu:home
-#PBS -l select=5
+#PBS -l select=4
 #PBS -q workq
 #PBS -j oe
-# select=5 = NHOSTS_TRAIN=4 + 1 spare; submit: qsub -l select=5 -v NHOSTS_TRAIN=4 torchtitan/experiments/ezpz/scripts/cpt_fineweb_edu_4n.sh
-# pack: 4N(FWE)+4N(2575)+4N(SFT)+2N(GRPO)+2N(test.sh)=16N active; spares are PBS overprovision not counted
+# PPN=8 proven at 12483025 (F0): 2N=16 ranks, hidden_dim 11008 % 32 == 0 but
+# 11008 % 12/24 != 0, so PPN=12 (48r @4N) and PPN=12 (60r @5N) FSDP-fail on
+# [2,11008,2048] dim 1. Use 4N x PPN=8 = 32r (walltime 02:00:00, workq).
+# Submit: qsub -l select=4 -l walltime=02:00:00 -v NHOSTS_TRAIN=4,NGPU_PER_HOST=8 torchtitan/experiments/ezpz/scripts/cpt_fineweb_edu_4n.sh
+# pack: 4N(FWE)+4N(mix)+4N(SFT)+2N(GRPO)+2N(test) = 16N active on workq (max 128N)
 #
-# CPT 4N from plateaued 2B-256N base step-92859 on FineWeb-Edu 100BT via Grain.
-# Base: /lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan/outputs/checkpoints/agpt-2b-sophiag-olmo-mix-1124-n256-gbs6144/step-92859
-#       verified on Sunspot: ls .../step-92859/.metadata exists (9.4M __0_0.distcp, 24G total, 2026-06-29)
-#       _OLMO_ANNEAL_BASE in config_registry.py:881 points to outputs/checkpoints/.../step-92859 (same DCP)
-# Data: /lus/tegu/projects/datasets/datasets/fineweb-edu-100BT/sample/100BT 140 parquet (2.1G each), 16 shards
-#       verified: ssh sunspot ls .../100BT/*.parquet | wc -l ==140; sorted 000_00000..001_00005 are first 16
-#       _fineweb_edu_shards() config_registry.py:1268-1288 sorts glob and slices 16; _FINEWEB_EDU_DIR same path
-#       datasets.py:468 registers fineweb_edu_local -> that TEGU dir; Grain HuggingFaceRandomAccessSource parquet
-#       Each shard ~1.4B tokens; 16 shards ~22B tokens > 10-100B budget so no repeat (registry comment lines 1262-1267)
-# GBS: LBS=2 * PPN=12 * NHOSTS_TRAIN=4 => NGPUS_ACTIVE=48 => GBS=48*2*1/(1*1*1)=96; TP=1 so GBS=96 microbatch
-#      tokens/microbatch/rank = LBS*SEQ_LEN=16384; tokens/step=GBS*8192=786432
-#      TRAIN_TOKENS 100B => TRAINING_STEPS=127156 (100e9/786432); 12h walltime ~chained, resume from CKPT_DIR
-# LR: 2e-6 const warmup20 (decay_ratio 0.0 min_lr_factor 1.0) avoids 2.28e-5 re-warm shock that tanked CPT HS -7.4pp
-#     (cpt/README.md:68-88 gentle retry hypothesis)
-# Extra: EXTRA_ARGS="--checkpoint.initial-load-path=<step92859> --checkpoint.initial-load-model-only" supported
+# CPT 4N: MDS gs138650 step-0 (2B-mds, 11008) -> 60/40 owm/FineWeb-Edu blend on Sunspot.
+# Base: MDS_ANNEAL_BASE=/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan/outputs/checkpoints/agpt-2b-mds-gs138650/step-0
+#       verified: .metadata exists (TEGU); Sunspot ~/torchtitan has NO outputs/ so the default relative path is wrong
+# Data: /lus/tegu/projects/datasets/datasets/fineweb-edu-100BT/sample/100BT 140 parquet, 16 shards (registry _fineweb_edu_shards)
+# GBS: LBS=2 * PPN=8 * 4N=32r => GBS=64 (TP=1), tokens/step=64*8192=524288; 100B => 190734 steps (chain via CKPT_DIR resume)
+# LR: 2e-6 const warmup20 (decay_ratio 0.0) -- anneal-proven flat schedule
+# Extra: EXTRA_ARGS="--training.steps=NNN --checkpoint.interval=NNN ..." for overrides
 
+export MDS_ANNEAL_BASE="${MDS_ANNEAL_BASE:-/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan/outputs/checkpoints/agpt-2b-mds-gs138650/step-0}"
 if [[ -z "${NHOSTS_TRAIN:-}" ]]; then echo "ERROR: NHOSTS_TRAIN required (qsub -v NHOSTS_TRAIN=4)"; exit 1; fi
 
 export ZE_FLAT_DEVICE_HIERARCHY=FLAT
@@ -66,27 +62,23 @@ hash -r
 [[ "$(command -v python)" == "${VENV}/bin/python" ]] || { echo "FATAL: venv python mismatch: $(command -v python) != ${VENV}/bin/python" >&2; exit 93; }
 python3 -c "import torch_remat, grain; print('CPT venv ok:', grain.__version__)" || { echo "FATAL: CPT venv missing deps" >&2; exit 1; }
 
-PPN="${NGPU_PER_HOST:-12}"
+PPN="${NGPU_PER_HOST:-8}"
 NGPUS_ACTIVE=$(( NHOSTS_TRAIN * PPN ))
 NNODES="$NHOSTS_TRAIN"
 LBS=2; GAS=1; SEQ_LEN=8192; TP=1; PP=1; CP=1
 GBS=$(( NGPUS_ACTIVE * LBS * GAS / (TP * PP * CP) ))
-# 100B CPT screening; prior pilot 300B at 256N GBS6144 was 5960 steps — 4N GBS96 scales steps by 64x
 TRAIN_TOKENS=100000000000
 TRAINING_STEPS=$(( TRAIN_TOKENS / (GBS * SEQ_LEN) ))
 CKPT_INTERVAL=200
 CKPT_KEEP_LATEST_K=0
 CKPT_DIR="outputs/checkpoints/agpt-2b-cpt-fineweb-edu-n${NNODES}-gbs${GBS}"
-BASE_CKPT="/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan/outputs/checkpoints/agpt-2b-sophiag-olmo-mix-1124-n256-gbs6144/step-92859"
 
-# EXTRA_ARGS passthrough for CPT fork flags (qsub -v EXTRA_ARGS="--checkpoint.initial-load-path=... ...")
+# EXTRA_ARGS passthrough for CPT fork flags
 extra_args=()
 [[ -n "${EXTRA_ARGS:-}" ]] && read -ra extra_args <<< "${EXTRA_ARGS}"
 
 ezpz launch --nproc "${NGPUS_ACTIVE}" --nproc_per_node "${PPN}" --auto-retry --spare-nodes auto --timeout 1800 -- \
-  # Use agpt_2b_mds_mix_edu — it already sets fineweb_edu_local + MDS base step-92859
-  # Override only training.steps for 100B budget; batch/seq from flavor (GBS scales with N via DataLoader)
-  python3 -m torchtitan.experiments.ezpz.train --module=ezpz.agpt --config=agpt_2b_mds_mix_edu \
+  python3 -m torchtitan.experiments.ezpz.train --module=ezpz.agpt --config=agpt_2b_mds_mix_owm_edu_6040 \
   --checkpoint.interval="${CKPT_INTERVAL}" \
   --checkpoint.keep-latest-k="${CKPT_KEEP_LATEST_K}" \
   --checkpoint.folder="${CKPT_DIR}" \
