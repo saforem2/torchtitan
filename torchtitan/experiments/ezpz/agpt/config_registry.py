@@ -801,6 +801,13 @@ def agpt_debugmodel_gsm8k_r1cot_streaming() -> FaultTolerantTrainer.Config:
                            flavor="debugmodel", local_batch_size=8, seq_len=1024)
 
 
+def agpt_debugmodel_gsm8k_plus_distill_streaming() -> FaultTolerantTrainer.Config:
+    """GSM8K + distill breadth (all 3 CoT sources) on debugmodel -- Sunspot PPN=12 safe."""
+    return _cot_sft_config(gsm8k_plus_distill_cot_streaming_dataset,
+                           "checkpoints/agpt-debug-broad-streaming",
+                           flavor="debugmodel", local_batch_size=8, seq_len=1024)
+
+
 def agpt_debugmodel_distill_cot_streaming() -> FaultTolerantTrainer.Config:
     """OpenThoughts+OpenR1 smoke on debugmodel -- Sunspot PPN=12 safe."""
     return _cot_sft_config(distill_cot_mix_streaming_dataset,
