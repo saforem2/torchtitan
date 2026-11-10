@@ -62,7 +62,7 @@ hash -r
 [[ "$(command -v python)" == "${VENV}/bin/python" ]] || { echo "FATAL: venv python mismatch: $(command -v python) != ${VENV}/bin/python" >&2; exit 93; }
 python3 -c "import torch_remat, grain; print('CPT venv ok:', grain.__version__)" || { echo "FATAL: CPT venv missing deps" >&2; exit 1; }
 
-PPN="${NGPU_PER_HOST:-8}"
+PPN=8
 NGPUS_ACTIVE=$(( NHOSTS_TRAIN * PPN ))
 NNODES="$NHOSTS_TRAIN"
 LBS=2; GAS=1; SEQ_LEN=8192; TP=1; PP=1; CP=1
@@ -77,8 +77,9 @@ CKPT_DIR="outputs/checkpoints/agpt-2b-cpt-fineweb-edu-n${NNODES}-gbs${GBS}"
 extra_args=()
 [[ -n "${EXTRA_ARGS:-}" ]] && read -ra extra_args <<< "${EXTRA_ARGS}"
 
-ezpz launch --nproc "${NGPUS_ACTIVE}" --nproc_per_node "${PPN}" --auto-retry --spare-nodes auto --timeout 1800 -- \
-  python3 -m torchtitan.experiments.ezpz.train --module=ezpz.agpt --config=agpt_2b_mds_mix_owm_edu_6040 \
+"${VENV}/bin/python" -c 'from ezpz.cli import main; main()' launch \
+  --nproc "${NGPUS_ACTIVE}" --nproc_per_node "${PPN}" -- \
+  "${VENV}/bin/python" -m torchtitan.experiments.ezpz.train --module=ezpz.agpt --config=agpt_2b_mds_mix_owm_edu_6040 \
   --checkpoint.interval="${CKPT_INTERVAL}" \
   --checkpoint.keep-latest-k="${CKPT_KEEP_LATEST_K}" \
   --checkpoint.folder="${CKPT_DIR}" \

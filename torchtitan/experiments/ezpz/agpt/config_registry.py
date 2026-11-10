@@ -872,24 +872,52 @@ def agpt_2b_mds_mix_edu() -> FaultTolerantTrainer.Config:
 def _agpt_2b_mds_mix_blend(
     owm_weight: float, edu_weight: float, folder: str
 ) -> FaultTolerantTrainer.Config:
-    """Shared builder for owm/edu weighted-blend mix arms."""
-    from torchtitan.components.data.text_datasets import (
-        HFDataSource,
-        InterleavedHuggingFaceTextDataLoader,
-    )
+    """Shared builder for owm/edu weighted-blend mix arms.
 
+    InterleavedHuggingFaceTextDataLoader was removed in #4088; the Grain
+    replacement is ``GrainDataLoader(ConcatThenSplitPacking(DatasetMix(...)))``
+    with weights counting post-packing rows (fixed-length token blocks), not
+    documents. Document-level mixing would weight by attempt-index, including
+    filtered-out attempts, so the packed-row mix is the token-weighted one.
+    """
     cfg = _agpt_2b_mds_mix_base()
-    # Replace the whole dataloader Config -- the base is a BlendCorpusDataLoader
-    # .Config whose .sources field does not exist, so setting it would no-op.
-    cfg.dataloader = InterleavedHuggingFaceTextDataLoader.Config(
-        sources=[
-            HFDataSource(
-                dataset="open-web-math/open-web-math", weight=owm_weight, infinite=True
+    # Build per-source datasets, then mix after packing so weights count tokens.
+    # open-web-math streams from HF (small, math-dense); FWE reads 16 local parquet
+    # shards materialized under HuggingFaceRandomAccessSource (verified TEGU path).
+    from torchtitan.components.data import DatasetMixConfig, WeightedDataset
+
+    owm_packed = ConcatThenSplitPackingConfig(
+        dataset=SingleDatasetConfig(
+            source=HuggingFaceStreamingSource.Config(
+                path="open-web-math/open-web-math",
+                split="train",
             ),
-            HFDataSource(dataset="fineweb_edu_local", weight=edu_weight, infinite=True),
-        ],
-        seed=42,
-        stopping_strategy="all_exhausted",
+            processor=TextProcessor.Config(),
+            post_filters=(lambda sample: sample is not None,),
+        )
+    )
+    edu_packed = ConcatThenSplitPackingConfig(
+        dataset=SingleDatasetConfig(
+            source=HuggingFaceRandomAccessSource.Config(
+                path="parquet",
+                split="train",
+                load_dataset_kwargs={"data_files": _fineweb_edu_shards()},
+            ),
+            processor=TextProcessor.Config(),
+            post_filters=(lambda sample: sample is not None,),
+        )
+    )
+    # NOTE: weights count fixed-length 8192-token rows (post-packing), which is
+    # the token-weighted equivalent of the old token-mixture ratio. A 40/60 OWM/FWE
+    # mix therefore weights 40% of TRAINED TOKENS from math, matching the paper's
+    # intended ratio once document lengths average out.
+    cfg.dataloader = GrainDataLoader.Config(
+        dataset=DatasetMixConfig(
+            datasets=(
+                WeightedDataset(dataset=owm_packed, weight=owm_weight),
+                WeightedDataset(dataset=edu_packed, weight=edu_weight),
+            ),
+        )
     )
     cfg.checkpointer.folder = folder
     return cfg
@@ -945,24 +973,11 @@ def _agpt_2b_mds_mix_blend_src(
 ) -> FaultTolerantTrainer.Config:
     """Generalized owm/<science-src> weighted-blend builder (mirrors
     _agpt_2b_mds_mix_blend; src_dataset is any registered local-parquet name)."""
-    from torchtitan.components.data.text_datasets import (
-        HFDataSource,
-        InterleavedHuggingFaceTextDataLoader,
+    raise NotImplementedError(
+        "agpt_2b_mds_mix_blend_src: port to Grain DatasetMixConfig as for "
+        "_agpt_2b_mds_mix_blend; see "
+        "docs/guides/known-bugs/datamix-hfdatasource-gone.md"
     )
-
-    cfg = _agpt_2b_mds_mix_base()
-    cfg.dataloader = InterleavedHuggingFaceTextDataLoader.Config(
-        sources=[
-            HFDataSource(
-                dataset="open-web-math/open-web-math", weight=owm_weight, infinite=True
-            ),
-            HFDataSource(dataset=src_dataset, weight=src_weight, infinite=True),
-        ],
-        seed=42,
-        stopping_strategy="all_exhausted",
-    )
-    cfg.checkpointer.folder = folder
-    return cfg
 
 
 def agpt_2b_mds_mix_owm_cosmo_7525() -> FaultTolerantTrainer.Config:
