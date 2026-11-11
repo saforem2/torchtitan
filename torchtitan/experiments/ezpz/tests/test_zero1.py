@@ -74,6 +74,39 @@ def test_install_zero1_rejects_coupled_optimizer() -> None:
         install_zero1(optimizer, buffer, process_group=None)
 
 
+@pytest.mark.parametrize("param_dtype", [torch.float32, torch.bfloat16])
+def test_bf16_master_rebuilt_from_weights_loaded_after_optimizer_state(
+    param_dtype: torch.dtype,
+) -> None:
+    """A resume must not all-gather the pre-load weights over the checkpoint.
+
+    Mirrors the DCP resume order: the optimizer's Stateful ``state_dict()``
+    (which builds optimizer state by stepping) and ``load_state_dict()`` run
+    BEFORE the trainer copies the checkpoint's model weights in.
+    """
+    model = _model()
+    torch.manual_seed(1)
+    ckpt = {k: torch.randn_like(v) for k, v in model.state_dict().items()}
+    buffer = flatten_parameters_(model, world_size=1, rank=0, dtype=param_dtype)
+    container = default_sophiag(lr=1e-3).build(model_parts=[model])
+    install_zero1(
+        container, buffer, process_group=None, allgather_dtype="bfloat16", module=model
+    )
+    container.load_state_dict(container.state_dict())
+    model.load_state_dict(ckpt)
+
+    x, y = _batch(0)
+    nn.functional.mse_loss(model(x.to(param_dtype)).float(), y).backward()
+    container.step()
+    container.zero_grad()
+
+    for name, param in model.named_parameters():
+        expected = ckpt[name].to(torch.bfloat16).float()
+        # One lr=1e-3 step plus BF16 rounding (ULP <= 2**-7 for |w| < 4);
+        # the pre-load weights would differ by O(1).
+        torch.testing.assert_close(param.float(), expected, atol=0.05, rtol=0)
+
+
 def _worker(rank: int, rendezvous: str, workdir: str, mode: str) -> None:
     dist.init_process_group("gloo", init_method=rendezvous, rank=rank, world_size=WORLD)
     # "bfloat16-params": BF16 model storage and gradient accumulation, BF16

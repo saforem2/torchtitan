@@ -163,6 +163,13 @@ def validate_native_ddp(
         raise ValueError("native DDP currently requires standard CrossEntropyLoss")
     if gradient_accumulation_steps < 1:
         raise ValueError("native DDP requires at least one gradient accumulation step")
+    if getattr(parallelism, "fsdp_defer_gradient_reduction", False):
+        # The training engine casts the model to FSDPModule to defer the
+        # reduction; NativeDDP has no set_is_last_backward and would raise
+        # AttributeError on the first accumulation step.
+        raise ValueError(
+            "native DDP does not support parallelism.fsdp_defer_gradient_reduction"
+        )
     if fault_tolerance_enabled:
         raise ValueError("native DDP does not support fault tolerance")
     if create_seed_checkpoint:

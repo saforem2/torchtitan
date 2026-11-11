@@ -339,14 +339,28 @@ def install_zero1(
 
     optimizer.zero_grad = zero_grad  # type: ignore[method-assign]
 
-    if module is not None and not state.master_initialized:
-        handle = None
+    if allgather_dtype == "bfloat16":
+        # A checkpoint resume builds optimizer state (init_optim_state runs a
+        # step, which fires pre_step -> ensure_master) BEFORE the checkpoint's
+        # model weights are copied in.  Without this reset the FP32 master
+        # latches the pre-load weights and the first real step all-gathers
+        # them over the restored model.  Re-derive the master from whatever
+        # the model holds at the next forward / step instead.
+        #
+        # Limitation: the FP32 master itself is not checkpointed.  On resume
+        # it is rebuilt from the model state_dict, which holds BF16-rounded
+        # values, so each resume truncates the master to BF16 precision.
+        def reset_master(_optimizer):
+            state.master_initialized = False
 
-        def first_forward(_module, _args):
+        optimizer.register_load_state_dict_post_hook(reset_master)
+
+    if module is not None and allgather_dtype == "bfloat16":
+        # Kept registered (not one-shot) so a reset by reset_master is picked
+        # up on the next forward; ensure_master is a no-op once initialized.
+        def before_forward(_module, _args):
             state.ensure_master()
-            if handle is not None:
-                handle.remove()
 
-        handle = module.register_forward_pre_hook(first_forward)
+        module.register_forward_pre_hook(before_forward)
     optimizer._ezpz_zero1 = state  # type: ignore[attr-defined]
     return state

@@ -52,7 +52,9 @@ def _parallelism(**overrides: object) -> EzpzParallelismConfig:
     return EzpzParallelismConfig(**values)
 
 
-def _validate(*, pp: int = 1, policy: str = "autocast", loss_fn=None) -> None:
+def _validate(
+    *, pp: int = 1, policy: str = "autocast", loss_fn=None, **parallelism: object
+) -> None:
     validate_native_ddp(
         model_name="ezpz.agpt",
         parallel_dims=_parallel_dims(pp=pp),
@@ -61,7 +63,7 @@ def _validate(*, pp: int = 1, policy: str = "autocast", loss_fn=None) -> None:
             mixed_precision_param="bfloat16",
             mixed_precision_reduce="float32",
         ),
-        parallelism=_parallelism(native_ddp_compute_policy=policy),
+        parallelism=_parallelism(native_ddp_compute_policy=policy, **parallelism),
         loss_fn=loss_fn or CrossEntropyLoss(CrossEntropyLoss.Config()),
         gradient_accumulation_steps=1,
         fault_tolerance_enabled=False,
@@ -78,6 +80,11 @@ def test_native_ddp_rejects_pipeline_parallelism() -> None:
 def test_native_ddp_rejects_non_autocast_policy() -> None:
     with pytest.raises(ValueError, match="only supports the autocast compute policy"):
         _validate(policy="ddp_mixed_precision")
+
+
+def test_native_ddp_rejects_deferred_fsdp_gradient_reduction() -> None:
+    with pytest.raises(ValueError, match="fsdp_defer_gradient_reduction"):
+        _validate(fsdp_defer_gradient_reduction=True)
 
 
 def test_native_ddp_validates_original_loss_before_wrapping() -> None:
