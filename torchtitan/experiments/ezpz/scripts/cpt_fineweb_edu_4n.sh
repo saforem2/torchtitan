@@ -10,7 +10,7 @@
 # 11008 % 12/24 != 0, so PPN=12 (48r @4N) and PPN=12 (60r @5N) FSDP-fail on
 # [2,11008,2048] dim 1. Use 4N x PPN=8 = 32r (walltime 02:00:00, workq).
 # Submit: qsub -l select=4 -l walltime=02:00:00 -v NHOSTS_TRAIN=4,NGPU_PER_HOST=8 torchtitan/experiments/ezpz/scripts/cpt_fineweb_edu_4n.sh
-# pack: 4N(FWE)+4N(mix)+4N(SFT)+2N(GRPO)+2N(test) = 16N active on workq (max 128N)
+# pack: 4N(FW-Edu)+4N(mix)+4N(SFT)+2N(GRPO)+2N(test) = 16N active on workq (max 128N)
 #
 # CPT 4N: MDS gs138650 step-0 (2B-mds, 11008) -> 60/40 owm/FineWeb-Edu blend on Sunspot.
 # Base: MDS_ANNEAL_BASE=/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan/outputs/checkpoints/agpt-2b-mds-gs138650/step-0

@@ -139,5 +139,7 @@ def prepare_cp_linear_attention_metadata(
         num_conv_history_tokens=attention_metadata.num_conv_history_tokens,
         cp_routing=routing,
     )
+
+
 # Compat: ezpz cp_gdn/cp_kda still import the old name.
 prepare_linear_attention_cp_metadata = prepare_cp_linear_attention_metadata

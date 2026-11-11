@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Build a raw olmo-mix-1124 file manifest for ``agpt_v2_*_4k_olmo_mix``.
 
 HF ``split_dataset_by_node`` gives each DP rank whole files only when the
