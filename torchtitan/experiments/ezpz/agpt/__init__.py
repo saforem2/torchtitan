@@ -964,6 +964,33 @@ agpt_configs = {
         vocab_size=100352,
         hidden_dim=compute_ffn_hidden_dim(4096, multiple_of=1024),
     ),
+    # 2N Aurora/Sunspot debug (24-way FSDP: 12 tiles/node x 2) needs
+    # hidden % 24 == 0 for even sharding of w13 [2, F, D] on dim 1.
+    # Canonical hiddens 8192 and 11264 both leave remainder 8, so plain
+    # 5B/10B die with "FSDP does not support uneven sharding on dim 1:
+    # torch.Size([2, hidden, dim]) (world size: 24)". Keep canonical
+    # flavors for production checkpoints and add dp12-named variants that
+    # round up to the next 12/24-divisible 256-aligned width (8448 and
+    # 11520, each +256 / +2-3%). Mirrors 30B_olmo2tok_dp12 (16128) which
+    # already does this for the same reason.
+    "5B_olmo2tok_dp12": _build_agpt_config(
+        dim=3072,
+        n_layers=40,
+        n_heads=24,
+        n_kv_heads=8,
+        rope_theta=500000,
+        vocab_size=100352,
+        hidden_dim=8448,
+    ),
+    "10B_olmo2tok_dp12": _build_agpt_config(
+        dim=4096,
+        n_layers=48,
+        n_heads=32,
+        n_kv_heads=8,
+        rope_theta=500000,
+        vocab_size=100352,
+        hidden_dim=11520,
+    ),
     "50B": _build_agpt_config(
         dim=8192,
         n_layers=56,
@@ -1116,6 +1143,8 @@ agpt_configs["30b_olmo2tok"] = agpt_configs["30B_olmo2tok"]
 agpt_configs["30b_olmo2tok_dp12"] = agpt_configs["30B_olmo2tok_dp12"]
 agpt_configs["5b_olmo2tok"] = agpt_configs["5B_olmo2tok"]
 agpt_configs["10b_olmo2tok"] = agpt_configs["10B_olmo2tok"]
+agpt_configs["5b_olmo2tok_dp12"] = agpt_configs["5B_olmo2tok_dp12"]
+agpt_configs["10b_olmo2tok_dp12"] = agpt_configs["10B_olmo2tok_dp12"]
 agpt_configs["20b_flex_attn"] = agpt_configs["20B_flex_attn"]
 agpt_configs["50b"] = agpt_configs["50B"]
 agpt_configs["50b_wide"] = agpt_configs["50B_wide"]

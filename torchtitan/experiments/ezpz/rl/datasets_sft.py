@@ -470,11 +470,11 @@ _OPENR1_SUFFIX = (
     "answer inside <answer>\\boxed{}</answer>."
 )
 
-# Max <think> trace length (chars) kept from OpenR1. The B3 regression traced to
-# long-form R1 run-on traces (mean gen_len 601, 26/200 never closed </answer>)
-# that taught a verbose style diluting a 2B's short-arithmetic competence. Drop
-# traces above this so only short, useful reasoning is trained. Env-tunable.
-OPENR1_MAX_THINK_CHARS = int(os.environ.get("OPENR1_MAX_THINK_CHARS", "1200"))
+# Max <think> trace length (chars) kept from OpenR1. HF API sample: median
+# trace ~13k chars, 0/75 under 1200. The old 1200 filtered 100% of rows
+# (see sft_data.py fix 4b5bff5b6); the B3 verbosity concern was about the 2B
+# *generating* run-ons, not training on frontier traces. Env-tunable.
+OPENR1_MAX_THINK_CHARS = int(os.environ.get("OPENR1_MAX_THINK_CHARS", "16000"))
 
 
 def _openr1_format_row(ex):
