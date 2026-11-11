@@ -1,8 +1,15 @@
 #!/usr/bin/env bash
 # Load one immutable ezpz utils revision after verifying its content hash.
 
-EZPZ_UTILS_COMMIT=f7deda794532a5727ec34345f94fe3f33a3051a6
-EZPZ_UTILS_SHA256=b817504d9417968fd33f0033db38c00c22a3f04828bc50cfdb0919a224cc5be0
+# A caller may pin a different revision by setting BOTH overrides; unset, the
+# default pin below applies, so existing launchers are unaffected.
+EZPZ_UTILS_COMMIT="${EZPZ_UTILS_PIN_COMMIT:-f7deda794532a5727ec34345f94fe3f33a3051a6}"
+EZPZ_UTILS_SHA256="${EZPZ_UTILS_PIN_SHA256:-b817504d9417968fd33f0033db38c00c22a3f04828bc50cfdb0919a224cc5be0}"
+if [[ -n "${EZPZ_UTILS_PIN_COMMIT:-}" && -z "${EZPZ_UTILS_PIN_SHA256:-}" ]] \
+    || [[ -z "${EZPZ_UTILS_PIN_COMMIT:-}" && -n "${EZPZ_UTILS_PIN_SHA256:-}" ]]; then
+    echo "load_pinned_ezpz_utils: set both EZPZ_UTILS_PIN_COMMIT and EZPZ_UTILS_PIN_SHA256" >&2
+    return 95 2>/dev/null || exit 95
+fi
 EZPZ_UTILS_URL="https://raw.githubusercontent.com/saforem2/ezpz/${EZPZ_UTILS_COMMIT}/src/ezpz/bin/utils.sh"
 
 load_pinned_ezpz_utils() {

@@ -65,7 +65,12 @@ case "${MACHINE}" in
         ACCEL=cuda; PPN=4
         DEF_VENV=/home/foremans/torchtitan/.venv
         # Sirius mounts tegu but not Sunspot's project directories.
-        DEF_ASSETS=/home/foremans/assets/hf/gemma-7b ;;
+        DEF_ASSETS=/home/foremans/assets/hf/gemma-7b
+        # The default utils pin predates ezpz_load_modules_sirius (it was a
+        # no-op), so no MPI module loads and mpi4py cannot find libmpi.
+        # saforem2/ezpz 4a2aba37 delegates Sirius to the Polaris loader.
+        export EZPZ_UTILS_PIN_COMMIT="${EZPZ_UTILS_PIN_COMMIT:-4a2aba376eb855004baeaebc5f953cc2a95b1850}"
+        export EZPZ_UTILS_PIN_SHA256="${EZPZ_UTILS_PIN_SHA256:-12c2e056d45c8a4ce15f5097f83eda86caa08353ac645cde0133c9087a3cc8cd}" ;;
     *) echo "VERDICT: setup_failed (unsupported SMOKE_MACHINE=${MACHINE})"; exit 2 ;;
 esac
 
@@ -121,6 +126,10 @@ if [[ "${ACCEL}" == xpu ]]; then
 else
     # The venv's mpi4py is not built against Cray GTL.
     export MPICH_GPU_SUPPORT_ENABLED=0
+    # Production NVIDIA launchers (submit_agpt_olmo3_polaris.sh) put this
+    # libmpi.so.12 shim first for mpi4py; do the same when it exists.
+    [[ -d "${HOME}/.local/mpi-compat" ]] \
+        && export LD_LIBRARY_PATH="${HOME}/.local/mpi-compat:${LD_LIBRARY_PATH:-}"
 fi
 
 source "${SUBMIT_DIR}/torchtitan/experiments/ezpz/scripts/load_pinned_ezpz_utils.sh"
