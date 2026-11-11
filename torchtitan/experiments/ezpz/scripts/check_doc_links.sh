@@ -20,7 +20,9 @@
 # referenced from a script goes unnoticed until that script runs at scale.
 #
 # Usage:  bash torchtitan/experiments/ezpz/scripts/check_doc_links.sh
-# Exit 0 = clean, 1 = dangling references found (count printed).
+# Exit 0 = clean, 1 = dangling references or unreadable paths (count printed).
+# Links are checked case-sensitively, with optional titles, and #fragments are
+# checked against the destination's GitHub-style heading slugs.
 
 set -o pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
@@ -32,19 +34,109 @@ if not os.path.isdir(docs):
     print("docs dir not found:", docs, file=sys.stderr); sys.exit(2)
 
 bad = []
+walk_errors = []
+
+
+def walk(top):
+    """os.walk that records unreadable directories instead of skipping them."""
+    return os.walk(top, onerror=walk_errors.append)
+
+
+def read(path):
+    try:
+        with open(path, errors="replace") as f:
+            return f.read()
+    except OSError as e:
+        walk_errors.append(e)
+        return ""
+
+
+_listing = {}
+
+
+def exists_exact(path):
+    """os.path.exists, but case-sensitive on case-insensitive filesystems.
+
+    The published URLs are case-sensitive, so a link that only resolves
+    because macOS ignores case is still broken.
+    """
+    path = os.path.normpath(path)
+    if not os.path.exists(path):
+        return False
+    rel = os.path.relpath(path, root)
+    if rel.startswith(".."):
+        return True
+    cur = root
+    for part in rel.split(os.sep):
+        if part in (".", ""):
+            continue
+        if cur not in _listing:
+            try:
+                _listing[cur] = set(os.listdir(cur))
+            except OSError:
+                return True
+        if part not in _listing[cur]:
+            return False
+        cur = os.path.join(cur, part)
+    return True
+
+
+# ](target) or ](target "title") / 'title' / (title), optional <...> around target.
+MD_LINK = re.compile(
+    r"\]\(\s*<?([^)\s>]+)>?(?:\s+(?:\"[^\"]*\"|'[^']*'|\([^)]*\)))?\s*\)"
+)
+URL = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://\S+")
+FENCE = re.compile(r"^\s*(```|~~~)")
+_anchors = {}
+
+
+def anchors(path):
+    """GitHub-style heading slugs plus explicit id/name anchors in a .md file."""
+    if path in _anchors:
+        return _anchors[path]
+    out, counts, fenced = set(), {}, False
+    for line in read(path).splitlines():
+        if FENCE.match(line):
+            fenced = not fenced
+            continue
+        if fenced:
+            continue
+        for m in re.finditer(r'(?:id|name)=["\']([^"\']+)["\']', line):
+            out.add(m.group(1))
+        h = re.match(r"^\s{0,3}#{1,6}\s+(.*?)\s*#*\s*$", line)
+        if not h:
+            continue
+        text = re.sub(r"<[^>]+>", "", h.group(1))
+        text = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", text)
+        slug = re.sub(r"[^\w\- ]", "", text.strip().lower()).replace(" ", "-")
+        n = counts.get(slug, 0)
+        counts[slug] = n + 1
+        out.add(slug if n == 0 else "%s-%d" % (slug, n))
+    _anchors[path] = out
+    return out
+
+
+def check_md_link(src, base_dir, target, md_only):
+    """Append to bad if target (relative to base_dir) or its #fragment is missing."""
+    if target.startswith(("http://", "https://", "#", "mailto:", "/")):
+        return
+    path, _, frag = target.partition("#")
+    if not path or (md_only and not path.endswith(".md")):
+        return
+    dest = os.path.join(base_dir, path)
+    if not exists_exact(dest):
+        bad.append("%s -> %s" % (os.path.relpath(src, root), path))
+    elif frag and dest.endswith(".md") and frag.lower() not in anchors(dest):
+        bad.append("%s -> %s (no heading #%s)" % (os.path.relpath(src, root), path, frag))
 
 # 1. docs -> docs
-for r, dirs, files in os.walk(docs):
+for r, dirs, files in walk(docs):
     dirs[:] = [d for d in dirs if not d.startswith(".")]
     for fn in files:
         if not fn.endswith(".md"): continue
         p = os.path.join(r, fn)
-        for m in re.finditer(r'\]\(([^)\s]+\.md)(?:#[^)]*)?\)',
-                             open(p, errors="replace").read()):
-            t = m.group(1)
-            if t.startswith(("http://", "https://", "#")): continue
-            if not os.path.exists(os.path.join(r, t)):
-                bad.append("%s -> %s" % (os.path.relpath(p, root), t))
+        for m in MD_LINK.finditer(read(p)):
+            check_md_link(p, r, m.group(1), md_only=True)
 
 # 1b. markdown OUTSIDE docs/ that links INTO it
 # Check 1 only walks docs/. But experiments/ezpz/README.md is the landing page
@@ -53,18 +145,13 @@ for r, dirs, files in os.walk(docs):
 # file lives one level up. Any .md under experiments/ezpz but outside docs/
 # counts.
 ezpz = os.path.join(root, "torchtitan/experiments/ezpz")
-for r, dirs, files in os.walk(ezpz):
+for r, dirs, files in walk(ezpz):
     dirs[:] = [d for d in dirs if not d.startswith(".") and d != "docs"]
     for fn in files:
         if not fn.endswith(".md"): continue
         p = os.path.join(r, fn)
-        for m in re.finditer(r'\]\(\s*([^)\s]+?)\s*(?:"[^"]*")?\)',
-                             open(p, errors="replace").read()):
-            t = m.group(1).split("#")[0]
-            if not t or t.startswith(("http://", "https://", "#", "mailto:", "/")):
-                continue
-            if not os.path.exists(os.path.join(r, t)):
-                bad.append("%s -> %s" % (os.path.relpath(p, root), t))
+        for m in MD_LINK.finditer(read(p)):
+            check_md_link(p, r, m.group(1), md_only=False)
 
 # 2. code -> docs
 # Match BOTH reference spellings -- the full 'experiments/ezpz/docs/...' and
@@ -79,12 +166,12 @@ pat = re.compile(
     r'([A-Za-z0-9_./-]+?\.md|[A-Za-z0-9_-]+(?:/[A-Za-z0-9_-]+)*/)'
 )
 seen = set()
-for r, dirs, files in os.walk(os.path.join(root, "torchtitan/experiments/ezpz")):
+for r, dirs, files in walk(os.path.join(root, "torchtitan/experiments/ezpz")):
     dirs[:] = [d for d in dirs if not d.startswith(".") and d != "docs"]
     for fn in files:
         if not fn.endswith((".py", ".sh")): continue
         p = os.path.join(r, fn)
-        src = open(p, errors="replace").read()
+        src = read(p)
         # Skip lines opted out with `docs-link-check: ignore`. Some code names
         # a path that is SUPPOSED to be absent: a branch-tolerant resolver
         # lists both the pre- and post-move location and picks whichever
@@ -96,11 +183,11 @@ for r, dirs, files in os.walk(os.path.join(root, "torchtitan/experiments/ezpz"))
         for i, line in enumerate(lines):
             if "docs-link-check: ignore" in line:
                 continue
-            for m in pat.finditer(line):
+            for m in pat.finditer(URL.sub("", line)):
                 key = (os.path.relpath(p, root), m.group(1))
                 if key in seen: continue
                 seen.add(key)
-                if not os.path.exists(os.path.join(docs, m.group(1))):
+                if not exists_exact(os.path.join(docs, m.group(1))):
                     bad.append("(code) %s:%d -> experiments/ezpz/docs/%s"
                                % (key[0], i + 1, key[1]))
 
@@ -122,19 +209,20 @@ known_tops = set(os.listdir(docs)) | {
     "configs", "meeting-notes", "upstream-issues", "competitions", "baselines",
     "journal", "upstream-sync",
 }
-for r, dirs, files in os.walk(os.path.join(root, "torchtitan/experiments/ezpz")):
+for r, dirs, files in walk(os.path.join(root, "torchtitan/experiments/ezpz")):
     dirs[:] = [d for d in dirs if not d.startswith(".")]
     for fn in files:
         if not fn.endswith((".md", ".py", ".sh")): continue
         if fn in ("reorg_move.py", "check_doc_links.sh"): continue
         p2 = os.path.join(r, fn)
-        for i, line in enumerate(open(p2, errors="replace").read().splitlines(), 1):
+        for i, line in enumerate(read(p2).splitlines(), 1):
             if "docs-link-check: ignore" in line: continue
-            for m in bare.finditer(line):
+            # External URLs can contain docs/<top>/... paths that are not ours.
+            for m in bare.finditer(URL.sub("", line)):
                 rel = m.group(1).rstrip("/.,)`'\"*;:")
                 if not rel or any(c in rel for c in "*{}$"): continue
                 if rel.split("/")[0] not in known_tops: continue
-                if os.path.exists(os.path.join(docs, rel)): continue
+                if exists_exact(os.path.join(docs, rel)): continue
                 bad.append("(path) %s:%d -> docs/%s does not exist"
                            % (os.path.relpath(p2, root), i, rel))
 
@@ -159,12 +247,12 @@ live_dirs = {d for d in os.listdir(docs)
 retired = {"production", "evals", "guides", "experiments", "summaries",
            "meeting-notes", "scaling", "upstream-issues", "competitions",
            "configs"} - live_dirs
-for r, dirs, files in os.walk(os.path.join(root, "torchtitan/experiments/ezpz")):
+for r, dirs, files in walk(os.path.join(root, "torchtitan/experiments/ezpz")):
     dirs[:] = [d for d in dirs if not d.startswith(".")]
     for fn in files:
         if not fn.endswith((".py", ".sh")): continue
         p2 = os.path.join(r, fn)
-        for i, line in enumerate(open(p2, errors="replace").read().splitlines(), 1):
+        for i, line in enumerate(read(p2).splitlines(), 1):
             if "docs-link-check: ignore" in line: continue
             for m in seg.finditer(line):
                 if m.group(1) in retired:
@@ -180,21 +268,27 @@ for r, dirs, files in os.walk(os.path.join(root, "torchtitan/experiments/ezpz"))
 # else, loads nothing, and emits an empty figure that refresh_all.sh commits.
 # Checks (1) and (2) are blind to it -- they only look at markdown links.
 depth = re.compile(r'Path\(__file__\)\.resolve\(\)\.parents\[(\d+)\]')
-for r, dirs, files in os.walk(docs):
+for r, dirs, files in walk(docs):
     dirs[:] = [d for d in dirs if not d.startswith(".")]
     for fn in files:
         if not fn.endswith(".py"): continue
         p = os.path.join(r, fn)
-        for m in depth.finditer(open(p, errors="replace").read()):
+        for m in depth.finditer(read(p)):
             bad.append(
                 "(depth) %s -> parents[%s] breaks silently if this file moves; "
                 "use a marker-anchored _repo_root() walk"
                 % (os.path.relpath(p, root), m.group(1))
             )
 
+if walk_errors:
+    errs = sorted({str(e) for e in walk_errors})
+    print("UNREADABLE paths (%d) -- results incomplete:" % len(errs))
+    for e in errs: print("  ", e)
 if bad:
     print("DANGLING references (%d):" % len(bad))
     for b in sorted(bad): print("  ", b)
+    sys.exit(1)
+if walk_errors:
     sys.exit(1)
 print("all internal doc links resolve")
 PYEOF

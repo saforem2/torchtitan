@@ -326,7 +326,7 @@ agpt, which depends on the current behavior.
 
 Fix the conversion, not the reshape.
 
-### All three early-returns ELIMINATED (2026-08-27, measured locally)
+### Two early-returns eliminated, third unlikely (2026-08-27, measured locally)
 
 Run on a laptop -- no GPU, no cluster. `torch`, `spmd_types`, `ezpz` and
 `sentencepiece` all install fine outside a training env, which makes this whole
@@ -341,16 +341,18 @@ agpt  inner.sharding_config = ShardingConfig    inner.local_map = LocalMapConfig
 ```
 
 So `_sharding_config is None` and `local_map is None` are both out. And the
-declared axes are **byte-identical** between the two models:
+declared axis sets match between the two models:
 
 ```
 moe   in q_TNH/k_TNH/v_TNH, out, 3x grad   ->  all ['cp', 'dp', 'tp']
 agpt  in q_TNH/k_TNH/v_TNH, out, 3x grad   ->  all ['cp', 'dp', 'tp']
 ```
 
-`resolve_shared_mesh` therefore receives identical input from both, so
-`resolved_mesh is None` cannot distinguish them either. **All three exits are
-eliminated.**
+This compares axis *sets* only, not the full placement layouts: the q and k/v
+`partition_spec`s were not compared, and `resolve_shared_mesh` was not called.
+So `resolved_mesh is None` is unlikely to be the difference but is **not ruled
+out**. Two of the three exits are eliminated; checking the third needs the
+resolver's actual return value (see "Next" below).
 
 Also checked and identical: both `parallelize_moe` and `parallelize_llama` take
 the same `partial_dtensor` branch and call `model.parallelize(parallel_dims)`
@@ -376,7 +378,7 @@ exists once a real mesh is built.
 | 7 | `cp` branch splits the layout | both branches yield the same axes |
 | 8 | `_sharding_config is None` | both are `ShardingConfig` |
 | 9 | `local_map is None` | both are `LocalMapConfig` |
-| 10 | `resolved_mesh is None` | identical axes in, so identical mesh out |
+| 10 | `resolved_mesh is None` | *open*: axis sets match, but partition specs and the resolver result were not checked |
 | 11 | different parallelize branch | both take the same one |
 
 ### Next, and it does need ranks
@@ -385,13 +387,17 @@ Instrument `_apply_local_map` itself at TP=2 -- print whether it returns the
 wrapped or unwrapped `fn` for each model, and what `resolved_mesh` actually
 came back as. Everything cheaper than that has been tried.
 
-Reproduce the local checks with:
+Reproduce the local checks with the snippet below. It was written against the
+2026-08 tree. Since the 2026-10-15 upstream sync, `ShardingConfig` no longer
+has a `local_map` field, so on current `ezpz` it stops at the `print` with an
+`AttributeError`. Treat it as a record of what was measured, not a runnable
+check.
 
 ```bash
 .venv/bin/python -c "
 from torchtitan.experiments.ezpz.moe.config_registry import moe_debugmodel
 cfg = moe_debugmodel(); cfg.parallelism.tensor_parallel_degree = 2
-m = cfg.model_spec.model; m.update_from_config(config=cfg)
+m = cfg.model; m.update_from_config(config=cfg)
 sc = m.layers[0].attention.inner_attention.sharding_config
 print(sc.local_map, {k: sorted(a.value for a in v.axes())
                      for k, v in (sc.in_dst_shardings or {}).items()})"
