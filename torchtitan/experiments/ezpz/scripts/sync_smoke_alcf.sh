@@ -123,13 +123,6 @@ if [[ "${ACCEL}" == xpu ]]; then
     export ZE_FLAT_DEVICE_HIERARCHY=FLAT
     export CCL_PROCESS_LAUNCHER=pmix
     export CCL_OP_SYNC=1
-else
-    # The venv's mpi4py is not built against Cray GTL.
-    export MPICH_GPU_SUPPORT_ENABLED=0
-    # Production NVIDIA launchers (submit_agpt_olmo3_polaris.sh) put this
-    # libmpi.so.12 shim first for mpi4py; do the same when it exists.
-    [[ -d "${HOME}/.local/mpi-compat" ]] \
-        && export LD_LIBRARY_PATH="${HOME}/.local/mpi-compat:${LD_LIBRARY_PATH:-}"
 fi
 
 source "${SUBMIT_DIR}/torchtitan/experiments/ezpz/scripts/load_pinned_ezpz_utils.sh"
@@ -137,6 +130,17 @@ load_pinned_ezpz_utils || { echo "VERDICT: setup_failed (ezpz utils)"; exit 2; }
 ezpz_setup_job || { echo "VERDICT: setup_failed (ezpz_setup_job)"; exit 2; }
 ezpz_load_modules || { echo "VERDICT: setup_failed (ezpz_load_modules)"; exit 2; }
 cd "${SUBMIT_DIR}" || exit 2
+
+if [[ "${ACCEL}" == cuda ]]; then
+    # After the module loader, which sets MPICH_GPU_SUPPORT_ENABLED=1: the
+    # venv's mpi4py is not linked against Cray GTL, and MPI_Init aborts with
+    # "GPU_SUPPORT_ENABLED is requested, but GTL library is not linked"
+    # (Sirius job 33436). Same order as submit_agpt_olmo3_polaris.sh, which
+    # also puts its libmpi.so.12 shim first.
+    export MPICH_GPU_SUPPORT_ENABLED=0
+    [[ -d "${HOME}/.local/mpi-compat" ]] \
+        && export LD_LIBRARY_PATH="${HOME}/.local/mpi-compat:${LD_LIBRARY_PATH:-}"
+fi
 
 if [[ "${ACCEL}" == xpu && -d "${VENV}/lib" ]]; then
     # A torch wheel newer than the loaded oneAPI module needs its own Unified
