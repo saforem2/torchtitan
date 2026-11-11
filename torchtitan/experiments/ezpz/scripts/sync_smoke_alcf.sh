@@ -64,7 +64,8 @@ case "${MACHINE}" in
     sirius)
         ACCEL=cuda; PPN=4
         DEF_VENV=/home/foremans/torchtitan/.venv
-        DEF_ASSETS=/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan/assets/hf/gemma-7b ;;
+        # Sirius mounts tegu but not Sunspot's project directories.
+        DEF_ASSETS=/home/foremans/assets/hf/gemma-7b ;;
     *) echo "VERDICT: setup_failed (unsupported SMOKE_MACHINE=${MACHINE})"; exit 2 ;;
 esac
 
