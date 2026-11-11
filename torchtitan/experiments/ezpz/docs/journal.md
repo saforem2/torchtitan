@@ -1,5 +1,33 @@
 # Development Journal
 
+## 2026-11-11: 2088N umbrella `9053470` killed by one node; per-seat resubmit
+
+Placeholder `9053470` (`select=2088`, `large`) held four seats: 20B-512,
+20B-256, v2 4B 512N, v2 10B 768N. It ran 4h26m. `x4415c5s5b0n0` (10B slice)
+hit `grf_fatal_singlesubslice_error` at 06:51 and PBS killed the whole job at
+07:02 (`requested job die, code 15009`, `Exit_status=143`).
+
+- 20B-512: `10801` → `10882`, loss 2.46. Hung after `10854`; watchdog restart
+  from `step-10800`. No new ckpt.
+- 20B-256: `20901` → `21143`, loss 2.44. `step-21100` saved.
+- 4B: `1` → `2698`, loss 12.00 → 3.31. `step-2600` saved.
+- 10B 768N: step-1 loss 17788 / 24202 / 38478, then
+  `allreduce_scaleout_sycl.cpp:80 atl_comm->wait` in a barrier.
+  `FAILOVER STOP: deterministic_failure`.
+- v2 ranks serialized on one `/home` HF datasets lock: ~6 min (4B), ~53 min
+  (10B) per attempt.
+
+Chain tests on 11-09/10: the `f7deda7` archive hangs or segfaults
+(`9054998`, `9055075`, `9055190`); `frameworks/2026.1.0` overlays pass
+(`9055264`, `9055306`, `9055361`, `9055454`).
+
+Resubmitted one PBS job per seat with
+`submit/aurora/seat-autoretry-20261111.pbs` +
+`submit-seats-20261111.sh`: 10B at 512N, `HF_DATASETS_CACHE` on `/tmp`, 12h
+`small`. Jobs `9076330`, `9076346`, `9076358`, `9076371`, all `Q`. Next gate:
+10B step-1 loss ~12 at 512N. Report:
+[2026-11-11-umbrella-2088n.md](production/2026-11-11-umbrella-2088n.md).
+
 ## 2026-11-05: 16N Sunspot fanout — pre-tokenized CPT/SFT + GRPO wired
 
 `685ce083b` fans Sunspot to 16N: `scripts/cpt_fineweb_edu_4n.sh`,

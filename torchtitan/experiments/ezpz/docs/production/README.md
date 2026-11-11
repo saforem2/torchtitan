@@ -55,7 +55,16 @@
 [Other jobs](#other-jobs) · [Known issues](#known-issues) ·
 [Overview](#overview)
 
-## Current restart gate — 2026-10-29
+## Current — 2026-11-11 per-seat jobs
+
+2088N umbrella `9053470` ran 4h26m, then PBS killed it when one 10B node hit a
+GPU fatal error. Saved: 20B-256 `step-21100`, 4B `step-2600`; 20B-512 still at
+`step-10800`; 10B at 768N never trained (step-1 loss 17788+). Resubmitted as
+one PBS job per seat: `9076330` (20B-512), `9076346` (20B-256), `9076358` (4B),
+`9076371` (10B, now 512N). See the
+[umbrella post-mortem and resubmission](2026-11-11-umbrella-2088n.md).
+
+## Restart gate — 2026-10-29
 
 Monday umbrella `8951415` failed before training. The corrected two-seat 20B
 restart is blocked by terminal canary failures: **8984401** exposed the reduced
