@@ -116,6 +116,9 @@ fi
 
 # --- environment ---
 export TORCH_CPP_LOG_LEVEL=ERROR
+# Node-local compile caches; a shared cache on Lustre races at scale.
+export TORCHINDUCTOR_CACHE_DIR="/tmp/${USER}-smoke-inductor"
+export TRITON_CACHE_DIR="/tmp/${USER}-smoke-triton"
 export PALS_RPC_TIMEOUT="${PALS_RPC_TIMEOUT:-600}"
 export http_proxy="${http_proxy:-http://proxy.alcf.anl.gov:3128}"
 export https_proxy="${https_proxy:-http://proxy.alcf.anl.gov:3128}"
@@ -163,6 +166,10 @@ if [[ "${ACCEL}" == xpu && -d "${VENV}/lib" ]]; then
 fi
 
 # Bind the venv without bin/activate: copied venvs keep stale paths in it.
+# Do what activate does that matters: drop PYTHONHOME. The Polaris/Sirius
+# module loader's conda sets it, and the venv interpreter then cannot find
+# its stdlib ("No module named 'encodings'", Sirius job 33438).
+unset PYTHONHOME
 export VIRTUAL_ENV="${VENV}"
 export PATH="${VENV}/bin:/opt/pbs/bin:${PATH}"
 hash -r
