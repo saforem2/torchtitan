@@ -245,7 +245,10 @@ for spec in "${CONFIGS[@]}"; do
     if (( rc != 0 )); then
         known=""
         for kf in "${KNOWN_FAILURES[@]}"; do
-            if [[ "${extra}" == *"${kf%%|*}"* ]] && strip_ansi "${clog}" | grep -qE "${kf#*|}"; then
+            # grep without -q: with pipefail, -q exits early, sed gets SIGPIPE
+            # and the pipeline reports failure even on a match.
+            if [[ "${extra}" == *"${kf%%|*}"* ]] \
+                && strip_ansi "${clog}" | grep -E "${kf#*|}" > /dev/null; then
                 known="${kf#*|}"
             fi
         done
