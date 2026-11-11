@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Run an AGPT benchmark and preserve process-lifetime XPU/compile metrics.
 
 This entrypoint does not reset allocator counters or alter training. Each rank
@@ -17,11 +23,11 @@ import inspect
 import json
 import math
 import os
-from pathlib import Path
 import runpy
 import sys
 import time
 import traceback
+from pathlib import Path
 
 
 class SophiaStepWitness:
@@ -68,10 +74,16 @@ class SophiaStepWitness:
                                 local = self.local_tensor(param.detach())
                                 if local.numel():
                                     record["samples"].append(
-                                        (param, local.reshape(-1)[0].clone(), local.ndim)
+                                        (
+                                            param,
+                                            local.reshape(-1)[0].clone(),
+                                            local.ndim,
+                                        )
                                     )
                     except Exception as error:
-                        self.errors.append(f"initial_samples: {type(error).__name__}: {error}")
+                        self.errors.append(
+                            f"initial_samples: {type(error).__name__}: {error}"
+                        )
                 record = self.records[key]
                 record["step_call_attempts"] += 1
                 try:
@@ -95,10 +107,15 @@ class SophiaStepWitness:
                 def witnessed_all_reduce(tensor, *args, **kwargs):
                     if tensor.numel() >= 1024:
                         key = f"{tensor.dtype}:{tensor.numel()}"
-                        entry = self.communication.setdefault(key, {
-                            "dtype": str(tensor.dtype), "numel": tensor.numel(),
-                            "bytes": tensor.numel() * tensor.element_size(), "calls": 0,
-                        })
+                        entry = self.communication.setdefault(
+                            key,
+                            {
+                                "dtype": str(tensor.dtype),
+                                "numel": tensor.numel(),
+                                "bytes": tensor.numel() * tensor.element_size(),
+                                "calls": 0,
+                            },
+                        )
                         entry["calls"] += 1
                     return original_all_reduce(tensor, *args, **kwargs)
 
@@ -110,16 +127,25 @@ class SophiaStepWitness:
                     engine = result[0]
                     self.model = engine.module
                     self.runtime = {
-                        "model_and_grad_accum_dtype": tuple(map(str, engine.get_data_types())),
+                        "model_and_grad_accum_dtype": tuple(
+                            map(str, engine.get_data_types())
+                        ),
                         "communication_dtype": str(engine.communication_data_type),
                         "zero_stage": engine.zero_optimization_stage(),
                         "pipeline_parallelism": engine.pipeline_parallelism,
                         "optimizer_wrapper": type(engine.optimizer).__qualname__,
                         "basic_optimizer": type(engine.basic_optimizer).__qualname__,
-                        "configured_grad_accum_dtype": str(engine._config.grad_accum_dtype),
-                        "configured_communication_dtype": str(engine._config.communication_data_type),
+                        "configured_grad_accum_dtype": str(
+                            engine._config.grad_accum_dtype
+                        ),
+                        "configured_communication_dtype": str(
+                            engine._config.communication_data_type
+                        ),
                     }
-                    print("DS_RUNTIME " + json.dumps(self.runtime, sort_keys=True), flush=True)
+                    print(
+                        "DS_RUNTIME " + json.dumps(self.runtime, sort_keys=True),
+                        flush=True,
+                    )
                     expected = os.environ.get("BENCH_EXPECTED_DS_OPTIMIZER_WRAPPER")
                     if expected and self.runtime["optimizer_wrapper"] != expected:
                         raise RuntimeError(
@@ -129,7 +155,9 @@ class SophiaStepWitness:
 
                 deepspeed.initialize = witnessed_initialize
             else:
-                native = importlib.import_module("torchtitan.experiments.ezpz.native_ddp")
+                native = importlib.import_module(
+                    "torchtitan.experiments.ezpz.native_ddp"
+                )
                 original_initialize = native.NativeDDP.__init__
 
                 @functools.wraps(original_initialize)
@@ -149,12 +177,17 @@ class SophiaStepWitness:
     def diagnostics(self):
         import torch
 
-        result = {"errors": list(self.errors), "optimizers": [],
-                  "deepspeed_runtime": self.runtime,
-                  "observed_large_all_reduce_payloads": list(self.communication.values())}
+        result = {
+            "errors": list(self.errors),
+            "optimizers": [],
+            "deepspeed_runtime": self.runtime,
+            "observed_large_all_reduce_payloads": list(self.communication.values()),
+        }
         result["native_ddp"] = [
-            {"logging": model._get_ddp_logging_data(),
-             "activation_dtypes": dict(getattr(model, "_agpt_dtype_probe", {}))}
+            {
+                "logging": model._get_ddp_logging_data(),
+                "activation_dtypes": dict(getattr(model, "_agpt_dtype_probe", {})),
+            }
             for model in self.ddp_models
         ]
         for record in self.records.values():
@@ -193,43 +226,61 @@ class SophiaStepWitness:
                 ]
 
                 def all_finite(tensors):
-                    return bool(torch.stack([torch.isfinite(t).all() for t in tensors]).all().item()) if tensors else None
+                    return (
+                        bool(
+                            torch.stack([torch.isfinite(t).all() for t in tensors])
+                            .all()
+                            .item()
+                        )
+                        if tensors
+                        else None
+                    )
 
                 def nonzero_count(tensors):
-                    return int(torch.stack([torch.count_nonzero(t) for t in tensors]).sum().item()) if tensors else 0
+                    return (
+                        int(
+                            torch.stack([torch.count_nonzero(t) for t in tensors])
+                            .sum()
+                            .item()
+                        )
+                        if tensors
+                        else 0
+                    )
 
                 def max_delta(values):
                     return float(torch.stack(values).max().item()) if values else None
 
-                result["optimizers"].append({
-                    "class": f"{type(optimizer).__module__}.{type(optimizer).__qualname__}",
-                    "successful_step_calls": record["successful_step_calls"],
-                    "step_call_attempts": record["step_call_attempts"],
-                    "step_exceptions": record["step_exceptions"],
-                    "parameter_count": len(parameters),
-                    "state_parameter_count": len(optimizer.state),
-                    "state_step_count": len(state_steps),
-                    "state_step_min": min(state_steps) if state_steps else None,
-                    "state_step_max": max(state_steps) if state_steps else None,
-                    "all_finite_parameters": all_finite(parameters),
-                    "all_finite_momentum": all_finite(momenta),
-                    "all_finite_hessian": all_finite(hessians),
-                    "nonzero_hessian_elements": nonzero_count(hessians),
-                    "sampled_parameters": len(deltas),
-                    "changed_sampled_parameters": nonzero_count(deltas),
-                    "max_sample_delta": max_delta(deltas),
-                    "sampled_1d_parameters": len(norm_deltas),
-                    "changed_sampled_1d_parameters": nonzero_count(norm_deltas),
-                    "max_sample_1d_delta": max_delta(norm_deltas),
-                    "parameter_dtypes": sorted({str(t.dtype) for t in parameters}),
-                    "momentum_dtypes": sorted({str(t.dtype) for t in momenta}),
-                    "hessian_dtypes": sorted({str(t.dtype) for t in hessians}),
-                    "zero1": (
-                        optimizer._ezpz_zero1.diagnostics()
-                        if hasattr(optimizer, "_ezpz_zero1")
-                        else None
-                    ),
-                })
+                result["optimizers"].append(
+                    {
+                        "class": f"{type(optimizer).__module__}.{type(optimizer).__qualname__}",
+                        "successful_step_calls": record["successful_step_calls"],
+                        "step_call_attempts": record["step_call_attempts"],
+                        "step_exceptions": record["step_exceptions"],
+                        "parameter_count": len(parameters),
+                        "state_parameter_count": len(optimizer.state),
+                        "state_step_count": len(state_steps),
+                        "state_step_min": min(state_steps) if state_steps else None,
+                        "state_step_max": max(state_steps) if state_steps else None,
+                        "all_finite_parameters": all_finite(parameters),
+                        "all_finite_momentum": all_finite(momenta),
+                        "all_finite_hessian": all_finite(hessians),
+                        "nonzero_hessian_elements": nonzero_count(hessians),
+                        "sampled_parameters": len(deltas),
+                        "changed_sampled_parameters": nonzero_count(deltas),
+                        "max_sample_delta": max_delta(deltas),
+                        "sampled_1d_parameters": len(norm_deltas),
+                        "changed_sampled_1d_parameters": nonzero_count(norm_deltas),
+                        "max_sample_1d_delta": max_delta(norm_deltas),
+                        "parameter_dtypes": sorted({str(t.dtype) for t in parameters}),
+                        "momentum_dtypes": sorted({str(t.dtype) for t in momenta}),
+                        "hessian_dtypes": sorted({str(t.dtype) for t in hessians}),
+                        "zero1": (
+                            optimizer._ezpz_zero1.diagnostics()
+                            if hasattr(optimizer, "_ezpz_zero1")
+                            else None
+                        ),
+                    }
+                )
             except Exception as error:
                 result["errors"].append(f"final_state: {type(error).__name__}: {error}")
         if self.model is not None:
@@ -245,20 +296,34 @@ class SophiaStepWitness:
                 ]
                 result["model_parameters"] = {
                     "sampled_parameters": len(model_deltas),
-                    "changed_sampled_parameters": sum(int(delta.ne(0).item()) for delta in model_deltas),
-                    "max_sample_delta": float(torch.stack(model_deltas).max().item()) if model_deltas else None,
+                    "changed_sampled_parameters": sum(
+                        int(delta.ne(0).item()) for delta in model_deltas
+                    ),
+                    "max_sample_delta": float(torch.stack(model_deltas).max().item())
+                    if model_deltas
+                    else None,
                     "norm_samples": [
                         {"name": name, "absolute_delta": float(delta.item())}
                         for name, delta in norm_samples
                     ],
-                    "parameter_dtypes": sorted({str(param.dtype) for _, param, _ in self.model_samples}),
+                    "parameter_dtypes": sorted(
+                        {str(param.dtype) for _, param, _ in self.model_samples}
+                    ),
                 }
             except Exception as error:
-                result["errors"].append(f"final_model_samples: {type(error).__name__}: {error}")
+                result["errors"].append(
+                    f"final_model_samples: {type(error).__name__}: {error}"
+                )
         result["optimizer_count"] = len(self.records)
-        result["successful_step_calls"] = sum(record["successful_step_calls"] for record in self.records.values())
-        result["step_exceptions"] = sum(record["step_exceptions"] for record in self.records.values())
-        result["note"] = "Only the first call samples parameters; later calls add Python counters. Final reductions run after training."
+        result["successful_step_calls"] = sum(
+            record["successful_step_calls"] for record in self.records.values()
+        )
+        result["step_exceptions"] = sum(
+            record["step_exceptions"] for record in self.records.values()
+        )
+        result[
+            "note"
+        ] = "Only the first call samples parameters; later calls add Python counters. Final reductions run after training."
         return result
 
 
@@ -289,6 +354,7 @@ def install_mds_batch_witness(rank, world_size):
 
             def __next__(self):
                 import torch
+
                 batch = next(self.iterator)
                 if torch.is_grad_enabled():
                     witness(batch["text"])
@@ -391,7 +457,9 @@ def main() -> None:
     target = parser.add_mutually_exclusive_group(required=True)
     target.add_argument("--benchmark-module", dest="module")
     target.add_argument("--benchmark-script", "--script", dest="script", type=Path)
-    parser.add_argument("--benchmark-output", "--output", dest="output", type=Path, required=True)
+    parser.add_argument(
+        "--benchmark-output", "--output", dest="output", type=Path, required=True
+    )
     parser.add_argument("--benchmark-dry-run", action="store_true")
     parser.add_argument("--benchmark-sophia-witness", action="store_true")
     parser.add_argument("--benchmark-step-timings", action="store_true")
@@ -453,7 +521,9 @@ def main() -> None:
 
     rank = MPI.COMM_WORLD.Get_rank()
     world_size = MPI.COMM_WORLD.Get_size()
-    if os.environ.get("BENCH_EXPECTED_WORLD_SIZE") and world_size != int(os.environ["BENCH_EXPECTED_WORLD_SIZE"]):
+    if os.environ.get("BENCH_EXPECTED_WORLD_SIZE") and world_size != int(
+        os.environ["BENCH_EXPECTED_WORLD_SIZE"]
+    ):
         raise ValueError(f"Unexpected MPI world size: {world_size}")
     if args.script:
         install_mds_batch_witness(rank, world_size)
@@ -547,7 +617,11 @@ def main() -> None:
             except BaseException:
                 pass
             try:
-                print(f"BENCHMARK_DIAGNOSTICS_FAILED rank={rank} error={fallback['diagnostics_error']}", file=sys.stderr, flush=True)
+                print(
+                    f"BENCHMARK_DIAGNOSTICS_FAILED rank={rank} error={fallback['diagnostics_error']}",
+                    file=sys.stderr,
+                    flush=True,
+                )
             except BaseException:
                 pass
 

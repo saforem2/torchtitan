@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Block-causal flash attention for XPU that skips the masked upper triangle.
 
 Why: the torch-xpu sycl-tla flash attention BACKWARD kernel

@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Fingerprint the expected AGPT token stream for TT and MDS configs.
 
 The audit builds each framework's exact training dataset and hashes the
@@ -13,11 +19,11 @@ import hashlib
 import importlib
 import importlib.metadata
 import json
-from pathlib import Path
 import platform
 import subprocess
 import sys
 import tempfile
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -32,6 +38,8 @@ DEFAULT_TT_ROOT = Path(
     "/lus/tegu/projects/datascience/foremans/projects/saforem2/"
     "torchtitan-agpt-matched-20261024"
 )
+
+
 def initialize_cpu_dist(tmp: Path) -> None:
     if not dist.is_initialized():
         dist.init_process_group(
@@ -115,13 +123,17 @@ def construct_tt_dataset(
     dataset = build_gpt_datasets(cfg)[0]
     dataset_module = importlib.import_module("blendcorpus.data.gpt_dataset")
     sampler_module = importlib.import_module("blendcorpus.data.data_samplers")
-    return dataset, mpu, {
-        "dataset_module": str(Path(dataset_module.__file__).resolve()),
-        "sampler_module": str(Path(sampler_module.__file__).resolve()),
-        "blendcorpus_version": importlib.metadata.version("blendcorpus"),
-        "configured_dp_world_size": dp_world_size,
-        "dataset_build_process_group_world_size": dist.get_world_size(),
-    }
+    return (
+        dataset,
+        mpu,
+        {
+            "dataset_module": str(Path(dataset_module.__file__).resolve()),
+            "sampler_module": str(Path(sampler_module.__file__).resolve()),
+            "blendcorpus_version": importlib.metadata.version("blendcorpus"),
+            "configured_dp_world_size": dp_world_size,
+            "dataset_build_process_group_world_size": dist.get_world_size(),
+        },
+    )
 
 
 def construct_mds_dataset(
@@ -137,9 +149,9 @@ def construct_mds_dataset(
     seed: int,
 ):
     sys.path.insert(0, str(mds_root))
-    from megatron.global_vars import set_args
     from megatron.core import mpu
     from megatron.data.gpt_dataset import build_train_valid_test_datasets
+    from megatron.global_vars import set_args
 
     args = SimpleNamespace(
         blend_sample_in_corpus=False,
@@ -185,13 +197,17 @@ def construct_mds_dataset(
         data_cache_path=str(cache),
     )
     module = importlib.import_module("megatron.data.gpt_dataset")
-    return dataset, mpu, {
-        "dataset_module": str(Path(module.__file__).resolve()),
-        "sampler_module": "MegatronPretrainingSampler sequential single-mode mapping",
-        "blendcorpus_version": None,
-        "configured_dp_world_size": dp_world_size,
-        "dataset_build_process_group_world_size": dist.get_world_size(),
-    }
+    return (
+        dataset,
+        mpu,
+        {
+            "dataset_module": str(Path(module.__file__).resolve()),
+            "sampler_module": "MegatronPretrainingSampler sequential single-mode mapping",
+            "blendcorpus_version": None,
+            "configured_dp_world_size": dp_world_size,
+            "dataset_build_process_group_world_size": dist.get_world_size(),
+        },
+    )
 
 
 def iter_sample_rows(
@@ -206,9 +222,7 @@ def iter_sample_rows(
     """Yield rows using single-sampler global order, one DP slice per rank."""
     for microbatch in range(num_microbatches):
         for dp_rank in range(dp_world_size):
-            first_index = (
-                microbatch * dp_world_size + dp_rank
-            ) * micro_batch_size
+            first_index = (microbatch * dp_world_size + dp_rank) * micro_batch_size
             for local_sample_index in range(micro_batch_size):
                 dataset_index = first_index + local_sample_index
                 sample = dataset[dataset_index]
@@ -267,15 +281,20 @@ def main() -> None:
     num_microbatches = (
         args.gas * args.steps if args.microbatches is None else args.microbatches
     )
-    if min(
-        args.dp_world_size,
-        args.global_batch_size,
-        args.gas,
-        args.steps,
-        args.micro_batch_size,
-        args.seq_length,
-    ) <= 0:
-        parser.error("world size, batch sizes, GAS, steps, and sequence length must be positive")
+    if (
+        min(
+            args.dp_world_size,
+            args.global_batch_size,
+            args.gas,
+            args.steps,
+            args.micro_batch_size,
+            args.seq_length,
+        )
+        <= 0
+    ):
+        parser.error(
+            "world size, batch sizes, GAS, steps, and sequence length must be positive"
+        )
     if args.global_batch_size != args.dp_world_size * args.micro_batch_size * args.gas:
         parser.error(
             "global batch size must equal dp_world_size * micro_batch_size * gas"
@@ -324,9 +343,7 @@ def main() -> None:
                 seed=args.seed,
             )
 
-        required_samples = (
-            num_microbatches * args.dp_world_size * args.micro_batch_size
-        )
+        required_samples = num_microbatches * args.dp_world_size * args.micro_batch_size
         if len(dataset) < required_samples:
             raise RuntimeError(
                 f"dataset has {len(dataset)} rows; the requested audit needs "

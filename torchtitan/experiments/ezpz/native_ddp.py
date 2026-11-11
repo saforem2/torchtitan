@@ -156,17 +156,13 @@ def validate_native_ddp(
             "native DDP requires FP32 master parameters and gradient accumulation"
         )
     if parallelism.native_ddp_communication_dtype not in ("float32", "bfloat16"):
-        raise ValueError(
-            "native_ddp_communication_dtype must be float32 or bfloat16"
-        )
+        raise ValueError("native_ddp_communication_dtype must be float32 or bfloat16")
     if training.mixed_precision_param != "bfloat16":
         raise ValueError("native DDP currently requires BF16 autocast")
     if not isinstance(loss_fn, CrossEntropyLoss):
         raise ValueError("native DDP currently requires standard CrossEntropyLoss")
     if gradient_accumulation_steps < 1:
-        raise ValueError(
-            "native DDP requires at least one gradient accumulation step"
-        )
+        raise ValueError("native DDP requires at least one gradient accumulation step")
     if fault_tolerance_enabled:
         raise ValueError("native DDP does not support fault tolerance")
     if create_seed_checkpoint:

@@ -1,6 +1,12 @@
-from dataclasses import dataclass, field
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 import importlib
 import os
+from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import Any
 
@@ -10,9 +16,7 @@ import torch
 from torchtitan.components.data.loader import BaseDataLoader
 from torchtitan.components.loss import IGNORE_INDEX
 from torchtitan.experiments.ezpz.logging import logger
-from torchtitan.experiments.ezpz.scripts.agpt_batch_witness import (
-    BatchInputWitness,
-)
+from torchtitan.experiments.ezpz.scripts.agpt_batch_witness import BatchInputWitness
 
 
 def _import_blendcorpus_modules():
@@ -49,12 +53,10 @@ def _import_blendcorpus_modules():
             )
         raise ImportError(detail) from exc
 
-    bc_get_config = getattr(bc_config_mod, "get_config")
-    bc_set_config = getattr(bc_config_mod, "set_config")
-    build_pretraining_data_loader = getattr(
-        bc_sampler_mod, "build_pretraining_data_loader"
-    )
-    build_gpt_datasets = getattr(bc_dataset_mod, "build_gpt_datasets")
+    bc_get_config = bc_config_mod.get_config
+    bc_set_config = bc_config_mod.set_config
+    build_pretraining_data_loader = bc_sampler_mod.build_pretraining_data_loader
+    build_gpt_datasets = bc_dataset_mod.build_gpt_datasets
 
     return (
         bc_mpu,
@@ -304,9 +306,7 @@ class BlendCorpusDataLoader(BaseDataLoader):
             if config.eod_token_id is not None
             else getattr(tokenizer, "eos_id", None)
         )
-        self._eod_token_id = (
-            int(_resolved_eod) if _resolved_eod is not None else None
-        )
+        self._eod_token_id = int(_resolved_eod) if _resolved_eod is not None else None
         self._emit_positions = bool(config.emit_positions)
 
         bc_cfg = SimpleNamespace(
@@ -480,10 +480,7 @@ class BlendCorpusDataLoader(BaseDataLoader):
 
         for batch in self._loader:
             raw_tokens = batch["text"]
-            if (
-                self._batch_input_witness is not None
-                and torch.is_grad_enabled()
-            ):
+            if self._batch_input_witness is not None and torch.is_grad_enabled():
                 self._batch_input_witness(
                     raw_tokens,
                     consumed_samples=self._consumed_samples,
@@ -586,9 +583,7 @@ class BlendCorpusDataLoader(BaseDataLoader):
         idx = idx.unsqueeze(0).expand_as(input_ids)
         # first index of each document, broadcast back over its span
         doc_start = torch.zeros_like(idx)
-        doc_start.scatter_reduce_(
-            1, doc_id, idx, reduce="amin", include_self=False
-        )
+        doc_start.scatter_reduce_(1, doc_id, idx, reduce="amin", include_self=False)
         starts = doc_start.gather(1, doc_id)
         return (idx - starts).contiguous()
 

@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Check block-causal attention gradients eager vs under torch.compile on one XPU tile.
 
 Shape B=1, S=8192, Hq=16, Hkv=4, D=128, bf16, the AGPT-2B attention call.
@@ -24,7 +30,7 @@ import json
 
 import torch
 import torch.nn.functional as F
-from torch.nn.attention import SDPBackend, sdpa_kernel
+from torch.nn.attention import sdpa_kernel, SDPBackend
 from torchtitan.experiments.ezpz.agpt.xpu_block_causal_attention import (
     block_causal_flash_attention,
 )
@@ -101,7 +107,7 @@ def replay(paths):
     global SCALE, CTX
     dev = torch.device("xpu")
     for path in paths:
-        data = torch.load(path, map_location="cpu")
+        data = torch.load(path, map_location="cpu", weights_only=False)
         meta = data["meta"]
         print(f"INPUTS {path} {json.dumps(meta)}", flush=True)
         base = []

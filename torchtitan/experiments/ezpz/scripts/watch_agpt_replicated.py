@@ -1,11 +1,17 @@
 #!/usr/bin/env python3
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Monitor one explicit Sunspot job set, or display its local cached state."""
 
 import argparse
 import json
-from pathlib import Path
 import subprocess
 import time
+from pathlib import Path
 
 from rich.console import Console
 from rich.table import Table
@@ -14,7 +20,11 @@ from rich.table import Table
 def probe(jobs):
     results = {}
     for remote in sorted({spec.get("remote", "sunspot") for spec in jobs.values()}):
-        subset = {key: spec for key, spec in jobs.items() if spec.get("remote", "sunspot") == remote}
+        subset = {
+            key: spec
+            for key, spec in jobs.items()
+            if spec.get("remote", "sunspot") == remote
+        }
         results.update(probe_remote(subset, remote))
     return results
 
@@ -25,7 +35,11 @@ import json, pathlib, re, subprocess
 jobs = json.loads(JOBS_JSON)
 results = {}
 for jobid, spec in jobs.items():
-    p = subprocess.run(['/opt/pbs/bin/qstat', '-xf', jobid], stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=20)
+    p = subprocess.run(
+        ['/opt/pbs/bin/qstat', '-xf', jobid],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        universal_newlines=True, timeout=20,
+    )
     attrs = dict(re.findall(r'^    ([A-Za-z_]+) = (.*)$', p.stdout, re.M))
     path = pathlib.Path(spec['log'])
     tail = ''
@@ -33,13 +47,30 @@ for jobid, spec in jobs.items():
         with path.open('rb') as f:
             f.seek(max(0, path.stat().st_size - 12000))
             tail = f.read().decode('utf-8', errors='replace')
-    progress = [line for line in tail.splitlines() if re.search(r'step:|iteration +[0-9]|VERDICT:|Error|Traceback|BENCHMARK_DIAGNOSTICS|ACCUMULATION_PROBE|BEGIN |END ', line)]
-    results[jobid] = dict(label=spec['label'], scheduler=attrs.get('job_state','unknown'), exit_status=attrs.get('Exit_status'), progress=progress[-3:], tail=tail[-2500:], scheduler_error=p.stderr.strip(), log=str(path))
+    pattern = (
+        r'step:|iteration +[0-9]|VERDICT:|Error|Traceback'
+        r'|BENCHMARK_DIAGNOSTICS|ACCUMULATION_PROBE|BEGIN |END '
+    )
+    progress = [line for line in tail.splitlines() if re.search(pattern, line)]
+    results[jobid] = dict(
+        label=spec['label'],
+        scheduler=attrs.get('job_state', 'unknown'),
+        exit_status=attrs.get('Exit_status'),
+        progress=progress[-3:],
+        tail=tail[-2500:],
+        scheduler_error=p.stderr.strip(),
+        log=str(path),
+    )
 print(json.dumps(results))
-""".replace("JOBS_JSON", repr(json.dumps(jobs)))
+""".replace(
+        "JOBS_JSON", repr(json.dumps(jobs))
+    )
     result = subprocess.run(
         ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=20", remote, "python3 -"],
-        input=script, text=True, capture_output=True, timeout=110,
+        input=script,
+        text=True,
+        capture_output=True,
+        timeout=110,
     )
     if result.returncode:
         raise RuntimeError(result.stderr.strip())
@@ -57,7 +88,9 @@ def main():
     while True:
         try:
             if args.display:
-                state = json.loads(args.state.read_text()) if args.state.exists() else {}
+                state = (
+                    json.loads(args.state.read_text()) if args.state.exists() else {}
+                )
             else:
                 jobs = json.loads(args.jobs.read_text())
                 state = {"checked_at": time.time(), "jobs": probe(jobs)}
@@ -67,22 +100,36 @@ def main():
                 temporary.replace(args.state)
             compact = json.dumps(state.get("jobs", {}), sort_keys=True)
             if compact != previous:
-                table = Table(title="AGPT replicated comparison " + time.strftime("%H:%M:%S"))
+                table = Table(
+                    title="AGPT replicated comparison " + time.strftime("%H:%M:%S")
+                )
                 for heading in ("Job", "Arm", "PBS", "Exit", "Latest evidence"):
                     table.add_column(heading)
                 for jobid, job in state.get("jobs", {}).items():
-                    table.add_row(jobid, job["label"], job["scheduler"], str(job["exit_status"]), "\n".join(job["progress"]))
+                    table.add_row(
+                        jobid,
+                        job["label"],
+                        job["scheduler"],
+                        str(job["exit_status"]),
+                        "\n".join(job["progress"]),
+                    )
                 Console().print(table)
                 previous = compact
             if args.once:
                 return
             if state.get("campaign_terminal"):
                 return
-            if not args.display and state.get("jobs") and all(
-                job["scheduler"] == "F" and job["exit_status"] is not None
-                for job in state["jobs"].values()
+            if (
+                not args.display
+                and state.get("jobs")
+                and all(
+                    job["scheduler"] == "F" and job["exit_status"] is not None
+                    for job in state["jobs"].values()
+                )
             ):
-                print("ALL_JOBS_TERMINAL: inspect complete logs and artifacts", flush=True)
+                print(
+                    "ALL_JOBS_TERMINAL: inspect complete logs and artifacts", flush=True
+                )
                 return
         except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as error:
             print(f"MONITOR_ERROR {error}", flush=True)

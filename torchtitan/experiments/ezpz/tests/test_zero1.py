@@ -57,7 +57,10 @@ def test_flatten_parameters_rebinds_views_and_pads() -> None:
     assert buffer.shard_bounds == (32, 64)
     for name, param in model.named_parameters():
         torch.testing.assert_close(param, expected[name], rtol=0, atol=0)
-        assert param.untyped_storage().data_ptr() == buffer.flat.untyped_storage().data_ptr()
+        assert (
+            param.untyped_storage().data_ptr()
+            == buffer.flat.untyped_storage().data_ptr()
+        )
     # Rank 1 owns the tail of weight 0 (3 elements), bias 0, and weight 2.
     segments = [(lo, hi, dst) for _, lo, hi, dst in buffer.local_segments()]
     assert segments == [(32, 35, 0), (0, 7, 3), (0, 21, 10)]
@@ -103,10 +106,15 @@ def _worker(rank: int, rendezvous: str, workdir: str, mode: str) -> None:
         assert isinstance(optimizer, SophiaG)
 
         ref_master = copy.deepcopy(reference)
-        ref_optimizer = SophiaG(ref_master.parameters(), lr=1e-2, betas=(0.9, 0.95), rho=0.01)
+        ref_optimizer = SophiaG(
+            ref_master.parameters(), lr=1e-2, betas=(0.9, 0.95), rho=0.01
+        )
         for step in range(STEPS):
             x, y = _batch(step)
-            local_x, local_y = x[rank * 4 : (rank + 1) * 4], y[rank * 4 : (rank + 1) * 4]
+            local_x, local_y = (
+                x[rank * 4 : (rank + 1) * 4],
+                y[rank * 4 : (rank + 1) * 4],
+            )
             for micro in range(2):
                 ddp.set_requires_all_reduce(micro == 1)
                 sl = slice(micro * 2, (micro + 1) * 2)
@@ -122,7 +130,9 @@ def _worker(rank: int, rendezvous: str, workdir: str, mode: str) -> None:
             # Reference: one process, full batch, FP32 master with the same
             # compute-weight rounding as the requested mode.
             with torch.no_grad():
-                for compute, master in zip(reference.parameters(), ref_master.parameters()):
+                for compute, master in zip(
+                    reference.parameters(), ref_master.parameters()
+                ):
                     value = master if dtype == "float32" else master.bfloat16().float()
                     compute.copy_(value)
             reference.zero_grad()
@@ -173,7 +183,10 @@ def _worker(rank: int, rendezvous: str, workdir: str, mode: str) -> None:
 
         # DCP round trip of the sharded optimizer state.
         checkpoint = os.path.join(workdir, f"ckpt-{mode}")
-        saved = {k: v.clone() if torch.is_tensor(v) else v for k, v in container.state_dict().items()}
+        saved = {
+            k: v.clone() if torch.is_tensor(v) else v
+            for k, v in container.state_dict().items()
+        }
         assert any(f"rank{rank:05d}" in key for key in saved)
         dcp.save(container.state_dict(), checkpoint_id=checkpoint)
         exp_avg.zero_()

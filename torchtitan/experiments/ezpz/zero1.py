@@ -106,7 +106,9 @@ def flatten_parameters_(
     dtypes = {p.dtype for _, p in named}
     devices = {p.device for _, p in named}
     if dtypes != {torch.float32}:
-        raise ValueError(f"ZeRO-1 requires FP32 parameters, got {sorted(map(str, dtypes))}")
+        raise ValueError(
+            f"ZeRO-1 requires FP32 parameters, got {sorted(map(str, dtypes))}"
+        )
     if len(devices) != 1:
         raise ValueError(f"ZeRO-1 requires one parameter device, got {devices}")
     for name, param in named:

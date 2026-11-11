@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Measure FSDP2 gradient-reduction precision on a real AGPT training batch.
 
 Wraps ``torchtitan.experiments.ezpz.train``. The first
@@ -32,10 +38,10 @@ import functools
 import json
 import math
 import os
-from pathlib import Path
 import runpy
 import sys
 import time
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -46,8 +52,16 @@ from torch.distributed.fsdp._fully_shard._fsdp_api import ReduceScatter
 CATEGORIES = ("embed", "attention", "mlp", "norm", "lm_head", "other")
 # Sum fields, then max fields, per category.
 SUM_FIELDS = (
-    "diff_sq", "ref_sq", "var_sq", "dot", "numel", "ref_nonzero",
-    "underflow_to_zero", "zero_to_nonzero", "differs", "sign_flip",
+    "diff_sq",
+    "ref_sq",
+    "var_sq",
+    "dot",
+    "numel",
+    "ref_nonzero",
+    "underflow_to_zero",
+    "zero_to_nonzero",
+    "differs",
+    "sign_flip",
 )
 MAX_FIELDS = ("max_abs_diff", "max_abs_ref")
 PHASES = (
@@ -107,7 +121,9 @@ class WireCastReduceScatter(ReduceScatter):
 
     def __call__(self, output_tensor, input_tensor, group, op, async_op=False):
         wire_input = input_tensor.to(self.wire_dtype)
-        wire_output = torch.empty(output_tensor.shape, dtype=self.wire_dtype, device=output_tensor.device)
+        wire_output = torch.empty(
+            output_tensor.shape, dtype=self.wire_dtype, device=output_tensor.device
+        )
         dist.reduce_scatter_tensor(wire_output, wire_input, op=op, group=group)
         output_tensor.copy_(wire_output)
         return None
@@ -125,13 +141,27 @@ class NormStatsReduceScatter(ReduceScatter):
         return self.inner.allocate(size, dtype=dtype, device=device)
 
     def __call__(self, output_tensor, input_tensor, group, op, async_op=False):
-        work = self.inner(output_tensor=output_tensor, input_tensor=input_tensor, group=group, op=op, async_op=async_op)
+        work = self.inner(
+            output_tensor=output_tensor,
+            input_tensor=input_tensor,
+            group=group,
+            op=op,
+            async_op=async_op,
+        )
         if work is not None:
             work.wait()
         entry = self.sink.setdefault(self.key, [0, None, None])
         # Reduction kernels upcast internally; no full-size temporaries.
-        local_sq = torch.linalg.vector_norm(input_tensor, dtype=torch.float32).double().square()
-        reduced_sq = torch.linalg.vector_norm(output_tensor, dtype=torch.float32).double().square()
+        local_sq = (
+            torch.linalg.vector_norm(input_tensor, dtype=torch.float32)
+            .double()
+            .square()
+        )
+        reduced_sq = (
+            torch.linalg.vector_norm(output_tensor, dtype=torch.float32)
+            .double()
+            .square()
+        )
         entry[0] += 1
         entry[1] = local_sq if entry[1] is None else entry[1] + local_sq
         entry[2] = reduced_sq if entry[2] is None else entry[2] + reduced_sq
@@ -160,9 +190,14 @@ class Probe:
         self.comm = MPI.COMM_WORLD
         self.rank = self.comm.Get_rank()
         self.world = self.comm.Get_size()
-        self.result: dict = {"world_size": self.world, "torch": torch.__version__,
-                             "pbs_jobid": os.environ.get("PBS_JOBID"),
-                             "variants": {}, "pairs": {}, "kappa": {}}
+        self.result: dict = {
+            "world_size": self.world,
+            "torch": torch.__version__,
+            "pbs_jobid": os.environ.get("PBS_JOBID"),
+            "variants": {},
+            "pairs": {},
+            "kappa": {},
+        }
         self.grads: dict[str, dict[str, torch.Tensor]] = {}
 
     def configure(self, engine, model, original_comm, original_run, name):
@@ -179,7 +214,8 @@ class Probe:
                 comm = NormStatsReduceScatter(comm, group_key(group), self.stats_sink)
             group._reduce_scatter_comm = comm
         engine._run_forward_backward = functools.partial(
-            original_run.func, *original_run.args,
+            original_run.func,
+            *original_run.args,
             **{**original_run.keywords, "defer_fsdp_gradient_reduction": spec["defer"]},
         )
 
@@ -188,7 +224,9 @@ class Probe:
         for name, param in model.named_parameters():
             if param.grad is None:
                 continue
-            local = param.grad.to_local() if hasattr(param.grad, "to_local") else param.grad
+            local = (
+                param.grad.to_local() if hasattr(param.grad, "to_local") else param.grad
+            )
             grads[name] = local.detach().float().cpu().clone()
         return grads
 
@@ -198,19 +236,30 @@ class Probe:
         per_name = {}
         left, right = self.grads[variant], self.grads[reference]
         if set(left) != set(right):
-            raise RuntimeError(f"{variant} and {reference} have different gradient sets")
+            raise RuntimeError(
+                f"{variant} and {reference} have different gradient sets"
+            )
         for name in sorted(right):
             v, r = left[name].reshape(-1).double(), right[name].reshape(-1).double()
             d = v - r
             row = CATEGORIES.index(category(name))
             values = (
-                float(d.square().sum()), float(r.square().sum()), float(v.square().sum()),
-                float((v * r).sum()), float(r.numel()), float((r != 0).sum()),
-                float(((r != 0) & (v == 0)).sum()), float(((r == 0) & (v != 0)).sum()),
-                float((v != r).sum()), float((torch.sign(v) != torch.sign(r)).sum()),
+                float(d.square().sum()),
+                float(r.square().sum()),
+                float(v.square().sum()),
+                float((v * r).sum()),
+                float(r.numel()),
+                float((r != 0).sum()),
+                float(((r != 0) & (v == 0)).sum()),
+                float(((r == 0) & (v != 0)).sum()),
+                float((v != r).sum()),
+                float((torch.sign(v) != torch.sign(r)).sum()),
             )
             sums[row] += values
-            local_max = (float(d.abs().max()) if d.numel() else 0.0, float(r.abs().max()) if r.numel() else 0.0)
+            local_max = (
+                float(d.abs().max()) if d.numel() else 0.0,
+                float(r.abs().max()) if r.numel() else 0.0,
+            )
             maxes[row] = np.maximum(maxes[row], local_max)
             per_name[name] = np.array(values[:2] + local_max)
         sums = self.allreduce(sums, "sum")
@@ -229,8 +278,12 @@ class Probe:
             ref_norm, var_norm = math.sqrt(f["ref_sq"]), math.sqrt(f["var_sq"])
             f["rel_l2"] = math.sqrt(f["diff_sq"]) / ref_norm if ref_norm else None
             f["norm_ratio_minus_1"] = var_norm / ref_norm - 1 if ref_norm else None
-            f["cosine"] = f["dot"] / (ref_norm * var_norm) if ref_norm and var_norm else None
-            f["underflow_fraction"] = f["underflow_to_zero"] / f["ref_nonzero"] if f["ref_nonzero"] else None
+            f["cosine"] = (
+                f["dot"] / (ref_norm * var_norm) if ref_norm and var_norm else None
+            )
+            f["underflow_fraction"] = (
+                f["underflow_to_zero"] / f["ref_nonzero"] if f["ref_nonzero"] else None
+            )
             f["differs_fraction"] = f["differs"] / f["numel"]
             f["sign_flip_fraction"] = f["sign_flip"] / f["numel"]
             f["ref_norm"] = ref_norm
@@ -242,7 +295,10 @@ class Probe:
                 for n, t in shard.items():
                     totals[n] = totals.get(n, 0) + t
             worst = sorted(
-                ((n, math.sqrt(t[0]) / math.sqrt(t[1]) if t[1] else 0.0) for n, t in totals.items()),
+                (
+                    (n, math.sqrt(t[0]) / math.sqrt(t[1]) if t[1] else 0.0)
+                    for n, t in totals.items()
+                ),
                 key=lambda item: -item[1],
             )[:8]
             report["worst_parameters_rel_l2"] = worst
@@ -268,26 +324,46 @@ class Probe:
         if len(engine.model_parts) != 1:
             raise RuntimeError("probe supports one model part")
         original_run = engine._run_forward_backward
-        if not (isinstance(original_run, functools.partial) and original_run.func == engine._forward_backward_body):
+        if not (
+            isinstance(original_run, functools.partial)
+            and original_run.func == engine._forward_backward_body
+        ):
             raise RuntimeError(f"unexpected forward/backward runner: {original_run!r}")
         # Group dtypes are set at lazy init, normally by the first forward.
         model._get_fsdp_state()._lazy_init()
         groups = list(fsdp_groups(model))
         original_comm = {id(g): g._reduce_scatter_comm for g in groups}
-        original_reduce = {id(g): (g._reduce_dtype, [p.reduce_dtype for p in g.fsdp_params]) for g in groups}
+        original_reduce = {
+            id(g): (g._reduce_dtype, [p.reduce_dtype for p in g.fsdp_params])
+            for g in groups
+        }
         param_dtypes = {str(p.param_dtype) for g in groups for p in g.fsdp_params}
         orig_dtypes = {str(p.orig_dtype) for g in groups for p in g.fsdp_params}
         self.result["fsdp"] = {
-            "groups": len(groups), "param_dtypes": sorted(param_dtypes), "orig_dtypes": sorted(orig_dtypes),
-            "configured_reduce_dtypes": sorted({str(v[0]) for v in original_reduce.values()}),
-            "gradient_divide_factor": sorted({str(g.gradient_divide_factor) for g in groups}),
-            "force_sum_reduction_for_comms": sorted({bool(g.force_sum_reduction_for_comms) for g in groups}),
-            "reduce_scatter_comm": sorted({type(c).__name__ for c in original_comm.values()}),
+            "groups": len(groups),
+            "param_dtypes": sorted(param_dtypes),
+            "orig_dtypes": sorted(orig_dtypes),
+            "configured_reduce_dtypes": sorted(
+                {str(v[0]) for v in original_reduce.values()}
+            ),
+            "gradient_divide_factor": sorted(
+                {str(g.gradient_divide_factor) for g in groups}
+            ),
+            "force_sum_reduction_for_comms": sorted(
+                {bool(g.force_sum_reduction_for_comms) for g in groups}
+            ),
+            "reduce_scatter_comm": sorted(
+                {type(c).__name__ for c in original_comm.values()}
+            ),
             "accumulation_steps": len(kwargs["microbatch_groups"]),
-            "global_loss_token_counts": float(torch.as_tensor(kwargs["global_loss_token_counts"]).sum()),
+            "global_loss_token_counts": float(
+                torch.as_tensor(kwargs["global_loss_token_counts"]).sum()
+            ),
         }
         if param_dtypes != {"torch.bfloat16"}:
-            raise RuntimeError(f"probe expects BF16 FSDP param_dtype, got {param_dtypes}")
+            raise RuntimeError(
+                f"probe expects BF16 FSDP param_dtype, got {param_dtypes}"
+            )
         ntokens_seen = engine.ntokens_seen
         torch.set_num_threads(8)
         try:
@@ -302,33 +378,55 @@ class Probe:
                     elapsed = time.perf_counter() - started
                     loss = float(result.loss.detach().double().item())
                     self.grads[name] = self.snapshot(model)
-                    peak = float(self.allreduce(np.array([torch.xpu.max_memory_allocated()], dtype=np.float64), "max")[0])
+                    peak = float(
+                        self.allreduce(
+                            np.array(
+                                [torch.xpu.max_memory_allocated()], dtype=np.float64
+                            ),
+                            "max",
+                        )[0]
+                    )
                     losses = self.comm.gather(loss, root=0)
-                    entry = {"seconds_rank0": elapsed, "peak_allocated_gib_max_rank": peak / 2**30}
+                    entry = {
+                        "seconds_rank0": elapsed,
+                        "peak_allocated_gib_max_rank": peak / 2**30,
+                    }
                     if self.rank == 0:
                         entry["loss_rank0"] = loss
                         entry["loss_ranks_min_max"] = [min(losses), max(losses)]
                     if self.stats_sink:
-                        for key, (calls, local_sq, reduced_sq) in sorted(self.stats_sink.items()):
+                        for key, (calls, local_sq, reduced_sq) in sorted(
+                            self.stats_sink.items()
+                        ):
                             pair = np.array([float(local_sq), float(reduced_sq)])
                             pair = self.allreduce(pair, "sum")
                             self.result["kappa"].setdefault(name, {})[key] = {
                                 "reduce_scatter_calls_per_rank": calls,
-                                "sum_rank_local_sq": pair[0], "reduced_sq": pair[1],
+                                "sum_rank_local_sq": pair[0],
+                                "reduced_sq": pair[1],
                                 "kappa": pair[0] / pair[1] if pair[1] else None,
                             }
                     self.result["variants"][name] = entry
                     if self.rank == 0:
-                        print(f"REDUCE_PROBE_VARIANT {name} {json.dumps(entry)}", flush=True)
+                        print(
+                            f"REDUCE_PROBE_VARIANT {name} {json.dumps(entry)}",
+                            flush=True,
+                        )
                 for variant, reference in PAIRS:
                     key = f"{variant}__vs__{reference}"
-                    if key not in self.result["pairs"] and variant in self.grads and reference in self.grads:
+                    if (
+                        key not in self.result["pairs"]
+                        and variant in self.grads
+                        and reference in self.grads
+                    ):
                         self.result["pairs"][key] = self.compare(variant, reference)
                         if self.rank == 0:
                             total = self.result["pairs"][key]["total"]
-                            print(f"REDUCE_PROBE_PAIR {key} rel_l2={total['rel_l2']} "
-                                  f"max_abs_diff={total['max_abs_diff']} sign_flip={total['sign_flip_fraction']}",
-                                  flush=True)
+                            print(
+                                f"REDUCE_PROBE_PAIR {key} rel_l2={total['rel_l2']} "
+                                f"max_abs_diff={total['max_abs_diff']} sign_flip={total['sign_flip_fraction']}",
+                                flush=True,
+                            )
                 self.write(f"phase{index + 1}")
         finally:
             for group in groups:
@@ -361,7 +459,9 @@ def main() -> None:
     output = Path(os.environ["AGPT_REDUCE_PROBE_OUTPUT"])
     install(output)
     sys.argv = ["torchtitan.experiments.ezpz.train", *sys.argv[1:]]
-    runpy.run_module("torchtitan.experiments.ezpz.train", run_name="__main__", alter_sys=True)
+    runpy.run_module(
+        "torchtitan.experiments.ezpz.train", run_name="__main__", alter_sys=True
+    )
 
 
 if __name__ == "__main__":

@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Hash consumed AGPT token batches without retaining token IDs."""
 
 from __future__ import annotations
@@ -90,7 +96,9 @@ class BatchInputWitness:
         if values.shape[1] < 2:
             raise ValueError("Token rows must contain at least two tokens")
 
-        current_index = self._num_calls if microbatch_index is None else int(microbatch_index)
+        current_index = (
+            self._num_calls if microbatch_index is None else int(microbatch_index)
+        )
         if current_index < 0:
             raise ValueError("microbatch_index must be nonnegative")
         raw_shape = [int(v) for v in values.shape]

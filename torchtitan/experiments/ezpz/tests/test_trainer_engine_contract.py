@@ -199,9 +199,7 @@ def test_ezpz_engine_composes_native_ddp_with_post_modelspec_context(monkeypatch
 @pytest.mark.skipif(
     not torch.distributed.is_gloo_available(), reason="Gloo backend is unavailable"
 )
-def test_ezpz_native_ddp_checkpointer_uses_unwrapped_model_keys(
-    monkeypatch, tmp_path
-):
+def test_ezpz_native_ddp_checkpointer_uses_unwrapped_model_keys(monkeypatch, tmp_path):
     from torchtitan.components.checkpointer import MODEL, ModelWrapper
     from torchtitan.experiments.ezpz.native_ddp import NativeDDP
 

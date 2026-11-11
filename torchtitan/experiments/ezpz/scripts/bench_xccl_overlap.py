@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Measure whether XCCL collectives overlap with compute on XPU.
 
 Each rank runs a bf16 matmul loop on the current stream while an
@@ -250,7 +256,7 @@ class Bench:
         if trace_dir is not None and str(int(async_op)) in self.args.trace_async.split(
             ","
         ):
-            from torch.profiler import ProfilerActivity, profile
+            from torch.profiler import profile, ProfilerActivity
 
             self._sync()
             activities = [ProfilerActivity.CPU, ProfilerActivity.XPU]

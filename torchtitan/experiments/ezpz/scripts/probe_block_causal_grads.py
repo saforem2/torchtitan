@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Compare block-causal and default XPU attention gradients on real AGPT batches.
 
 Wraps ``torchtitan.experiments.ezpz.train`` under native DDP. At each update

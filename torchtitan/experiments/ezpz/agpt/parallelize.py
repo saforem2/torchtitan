@@ -72,9 +72,7 @@ def _maybe_compile_transformer_blocks(model: nn.Module) -> None:
         for module in transformer_block.modules():
             if getattr(module, "inplace_wgrad_accum", False):
                 module.inplace_wgrad_accum = False
-        transformer_block.compile(
-            backend="inductor", fullgraph=True, mode=compile_mode
-        )
+        transformer_block.compile(backend="inductor", fullgraph=True, mode=compile_mode)
     logger.info(
         "Compiled each TransformerBlock with torch.compile (fullgraph, mode=%s)",
         compile_mode,

@@ -39,9 +39,9 @@ from torchtitan.experiments.ezpz.config import EzpzParallelismConfig
 from torchtitan.experiments.ezpz.logging import logger
 from torchtitan.experiments.ezpz.lr_finder import LRFinderConfig
 from torchtitan.experiments.ezpz.native_ddp import (
-    NativeDDP,
     install_agpt_dtype_probe,
     native_ddp_autocast_context,
+    NativeDDP,
     validate_native_ddp,
     wrap_native_ddp,
     wrap_native_ddp_loss,
@@ -304,8 +304,7 @@ class EzpzTrainingEngine(TorchFTTrainingEngine):
     def _initialize_checkpointer(
         self,
         *,
-        extra_states: dict[str, torch.distributed.checkpoint.stateful.Stateful]
-        | None,
+        extra_states: dict[str, torch.distributed.checkpoint.stateful.Stateful] | None,
         sd_adapter: Any | None,
     ) -> None:
         super()._initialize_checkpointer(
@@ -357,9 +356,7 @@ class EzpzTrainingEngine(TorchFTTrainingEngine):
                 allgather_dtype=self.config.parallelism.native_ddp_zero1_allgather_dtype,
                 module=part.module if isinstance(part, NativeDDP) else part,
             )
-            logger.info(
-                "native DDP ZeRO-1: %s", self._zero1_state.diagnostics()
-            )
+            logger.info("native DDP ZeRO-1: %s", self._zero1_state.diagnostics())
 
     def _native_ddp_train_context(self) -> AbstractContextManager[None]:
         """SPMD context composed with native-DDP bf16 autocast."""

@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Microbenchmark XPU attention fwd+bwd at the AuroraGPT-2B shape.
 
 Default shape: B=1, S=8192, Hq=16, Hkv=4, D=128, bf16, causal, dropout 0,
@@ -52,7 +58,7 @@ ARGS = parse()
 if ARGS.ipex:
     import intel_extension_for_pytorch  # noqa: F401
 
-from torch.nn.attention import SDPBackend, sdpa_kernel
+from torch.nn.attention import sdpa_kernel, SDPBackend
 
 DEV = torch.device("xpu")
 DT = torch.bfloat16
@@ -117,7 +123,7 @@ def sdpa_case(backend, layout="bshd", gqa="native", causal=True, mask=False):
             kw["is_causal"] = causal
         if gqa == "native":
             kw["enable_gqa"] = True
-        ctx = sdpa_kernel([backend]) if backend is not None else _null()
+        ctx = sdpa_kernel([backend]) if backend is not None else _NullContext()
         with ctx:
             o = F.scaled_dot_product_attention(qq, kk, vv, **kw)
         return o.transpose(1, 2)
@@ -125,7 +131,7 @@ def sdpa_case(backend, layout="bshd", gqa="native", causal=True, mask=False):
     return run
 
 
-class _null:
+class _NullContext:
     def __enter__(self):
         return self
 
@@ -234,7 +240,7 @@ def reference(causal: bool):
 
 
 def top_kernels(fn):
-    from torch.profiler import ProfilerActivity, profile
+    from torch.profiler import profile, ProfilerActivity
 
     q, k, v = leaves()
     with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.XPU]) as prof:

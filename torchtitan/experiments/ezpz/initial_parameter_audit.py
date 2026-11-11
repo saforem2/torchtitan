@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Benchmark-only audit for loaded AuroraGPT parameters."""
 
 from __future__ import annotations
@@ -5,12 +11,14 @@ from __future__ import annotations
 import functools
 import hashlib
 import json
-from pathlib import Path
 import re
+from pathlib import Path
 from typing import Any
 
 
-EXPECTED_AUDIT_SHA256 = "b1584ff72d8b2fd4f53594cd1bba7b12efb0f6a102bda8407cd315a00fe6bad6"
+EXPECTED_AUDIT_SHA256 = (
+    "b1584ff72d8b2fd4f53594cd1bba7b12efb0f6a102bda8407cd315a00fe6bad6"
+)
 EXPECTED_STATE_PARAMETER_COUNT = 75
 EXPECTED_HF_PARAMETER_COUNT = 111
 EXPECTED_PARAMETER_NUMEL = 1_986_054_144
@@ -41,8 +49,13 @@ def _load_expected_audit(path: Path) -> tuple[dict[str, dict[str, Any]], str]:
     expected = audit.get("dcp_vs_hf")
     if not isinstance(expected, dict) or len(expected) != EXPECTED_HF_PARAMETER_COUNT:
         raise ValueError("Expected exactly 111 audited HF parameter rows")
-    if sum(int(row.get("numel", -1)) for row in expected.values()) != EXPECTED_PARAMETER_NUMEL:
-        raise ValueError("Audited parameter total does not match the AuroraGPT 2B model")
+    if (
+        sum(int(row.get("numel", -1)) for row in expected.values())
+        != EXPECTED_PARAMETER_NUMEL
+    ):
+        raise ValueError(
+            "Audited parameter total does not match the AuroraGPT 2B model"
+        )
     for key, row in expected.items():
         if row.get("actual_dtype") != "torch.float32" or not row.get("equal_in_fp32"):
             raise ValueError(f"Audit row is not exact FP32 DCP data: {key}")
@@ -92,11 +105,15 @@ def _audit_live_parameters(engine: Any, audit_path: Path, torch: Any) -> dict[st
             if isinstance(parameter, DTensor):
                 raise TypeError(f"Sharded DTensor parameter is unsupported: {name}")
             if not isinstance(parameter, torch.Tensor):
-                raise TypeError(f"Unexpected parameter type for {name}: {type(parameter)}")
+                raise TypeError(
+                    f"Unexpected parameter type for {name}: {type(parameter)}"
+                )
             if parameter.numel() == 0:
                 raise ValueError(f"Empty local parameter is unsupported: {name}")
             if parameter.dtype != torch.float32:
-                raise TypeError(f"Expected FP32 master parameter for {name}, got {parameter.dtype}")
+                raise TypeError(
+                    f"Expected FP32 master parameter for {name}, got {parameter.dtype}"
+                )
             parameter_count += 1
             parameter_numel += parameter.numel()
     if parameter_count != EXPECTED_STATE_PARAMETER_COUNT:
@@ -137,9 +154,13 @@ def _audit_live_parameters(engine: Any, audit_path: Path, torch: Any) -> dict[st
             row = expected[key]
             shape = list(tensor.shape)
             if shape != row.get("shape"):
-                raise ValueError(f"Shape mismatch for {key}: {shape} != {row.get('shape')}")
+                raise ValueError(
+                    f"Shape mismatch for {key}: {shape} != {row.get('shape')}"
+                )
             if tensor.dtype != torch.float32:
-                raise TypeError(f"Expected FP32 adapted parameter for {key}, got {tensor.dtype}")
+                raise TypeError(
+                    f"Expected FP32 adapted parameter for {key}, got {tensor.dtype}"
+                )
             if tensor.numel() != int(row["numel"]):
                 raise ValueError(f"Element-count mismatch for {key}")
             actual_hash = _tensor_sha256(tensor, torch)
@@ -267,7 +288,9 @@ def _audit_live_parameters_allow_dtensor(
         for key in sorted(model_state):
             tensor = model_state[key]
             if not isinstance(tensor, (DTensor, torch.Tensor)):
-                raise TypeError(f"Unexpected model state type for {key}: {type(tensor)}")
+                raise TypeError(
+                    f"Unexpected model state type for {key}: {type(tensor)}"
+                )
             item: dict[str, Any] = {
                 "key": key,
                 "type": f"{type(tensor).__module__}.{type(tensor).__qualname__}",
@@ -293,7 +316,9 @@ def _audit_live_parameters_allow_dtensor(
                 if len(mesh_shape) > 2 or set(mesh_ranks) - dp_rank_set:
                     raise ValueError(f"Non-DP device mesh for {key}")
                 if len(tensor.placements) != len(mesh_shape):
-                    raise ValueError(f"Placement count differs from mesh rank for {key}")
+                    raise ValueError(
+                        f"Placement count differs from mesh rank for {key}"
+                    )
                 if not all(
                     isinstance(placement, (Replicate, Shard))
                     for placement in tensor.placements
@@ -411,7 +436,9 @@ def _audit_live_parameters_allow_dtensor(
             key = item["key"]
             tensor = model_state[key]
             try:
-                full_tensor = tensor.full_tensor() if isinstance(tensor, DTensor) else tensor
+                full_tensor = (
+                    tensor.full_tensor() if isinstance(tensor, DTensor) else tensor
+                )
                 host_state[key] = full_tensor.detach().to(device="cpu", copy=True)
                 del full_tensor
             except BaseException as error:
@@ -475,7 +502,9 @@ def _audit_live_parameters_allow_dtensor(
                 row = expected[key]
                 shape = list(tensor.shape)
                 if shape != row.get("shape"):
-                    raise ValueError(f"Shape mismatch for {key}: {shape} != {row.get('shape')}")
+                    raise ValueError(
+                        f"Shape mismatch for {key}: {shape} != {row.get('shape')}"
+                    )
                 if tensor.dtype != torch.float32 or tensor.numel() != int(row["numel"]):
                     raise ValueError(f"Dtype or element-count mismatch for {key}")
                 actual_hash = _tensor_sha256(tensor, torch)
@@ -524,6 +553,7 @@ def install_initial_parameter_audit(
 ) -> None:
     """Audit each rank after checkpoint load and gate training with CPU MPI."""
     import importlib
+
     import torch
 
     trainer_module = importlib.import_module("torchtitan.experiments.ezpz.trainer")
@@ -608,7 +638,9 @@ def install_initial_parameter_audit(
             output_path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
         except BaseException as error:
             output_error = error
-        all_outputs_written = bool(mpi_comm.allreduce(output_error is None, op=mpi_land))
+        all_outputs_written = bool(
+            mpi_comm.allreduce(output_error is None, op=mpi_land)
+        )
         if not all_outputs_written:
             raise RuntimeError(
                 "Initial-parameter audit artifact write failed on a rank"
