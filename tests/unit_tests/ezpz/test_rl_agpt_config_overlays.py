@@ -202,7 +202,8 @@ def test_buffer_canonical_fqns_are_covered_by_layouts() -> None:
     layouts = _state_dict_layouts(model)
     wrapped_buffer_fqns = {
         name.replace(".attention.", ".\u005fcheckpoint_wrapped_module.attention.")
-        for name, _ in model.named_buffers()
+        # The RoPE cache may be one tensor shared by every layer; count each FQN.
+        for name, _ in model.named_buffers(remove_duplicate=False)
     }
 
     assert len(wrapped_buffer_fqns) == 12
