@@ -23,9 +23,14 @@ def host_mesh_from_store(store: Any, *, name: str, **kwargs: Any) -> Any | None:
     Must be called collectively on every rank. Returns the ``HostMesh`` on
     global rank 0 and ``None`` on every other rank, as the 0.6 helper did.
     """
-    try:
+    import importlib.util
+
+    # Fall back only when the 0.7 module is absent. If it exists but one of
+    # its own imports fails (e.g. torchx, the torchmonarch[torchx] extra),
+    # let that error surface instead of masking it with the 0.6 path.
+    if importlib.util.find_spec("monarch.job.spmd") is not None:
         from monarch.job.spmd import StoreJob
-    except ImportError:  # torchmonarch < 0.7
+    else:  # torchmonarch < 0.7
         from monarch._src.spmd.host_mesh import (
             host_mesh_from_store as _legacy_host_mesh_from_store,
         )
