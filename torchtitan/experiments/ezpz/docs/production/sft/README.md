@@ -84,7 +84,7 @@ another recipe.
 
 ## Why SFT is a separate production stage (and not just an `experiment/`)
 
-SFT'd checkpoints get re-used. The
+SFT'd checkpoints get reused. The
 `agpt/2b-mds/tulu_math_uc_mix` (checkpoint-729-hf) artifact is the input
 to every subsequent GRPO experiment on this model — every alignment
 experiment, every chat-mode eval, every red-team test. That makes it
