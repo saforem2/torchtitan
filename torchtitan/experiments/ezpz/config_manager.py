@@ -24,6 +24,10 @@ config schema needs:
   globally here so ``--checkpointer.interval 7`` keeps working; the frozen
   ``--checkpoint.enable`` family and the ``activation-checkpoint:<policy>``
   subcommand tokens are translated before tyro runs.
+- Metric exporters became ``metrics.loggers`` (#5775). The legacy boolean flags
+  ``--metrics.[no-]enable-wandb`` / ``--metrics.[no-]enable-tensorboard`` are
+  rewritten to values of the ``None``-default aliases on ``EzpzMetricsConfig``
+  (tyro renders ``bool | None`` as a value option, not a flag pair).
 - ``list[OverrideImport]`` has no tyro primitive; ``format_cli_imports`` was
   deleted upstream, so the inverse of ``parse_cli_imports`` is local.
 """
@@ -49,6 +53,21 @@ _RECIPE_PACKAGES = (
     "torchtitan_recipes.rl",
     "torchtitan_recipes",
 )
+
+
+def _legacy_metrics_flags() -> dict[str, str]:
+    """Legacy boolean exporter flags -> value form of the EzpzMetricsConfig alias."""
+    flags = {}
+    for field in ("enable_wandb", "enable_tensorboard"):
+        dashed = field.replace("_", "-")
+        for spelling in (dashed, field):
+            flags[f"--metrics.{spelling}"] = f"--metrics.{dashed}=True"
+            flags[f"--metrics.no-{spelling}"] = f"--metrics.{dashed}=False"
+            flags[f"--no-metrics.{spelling}"] = f"--metrics.{dashed}=False"
+    return flags
+
+
+_LEGACY_METRICS_FLAGS = _legacy_metrics_flags()
 _LEGACY_ACTIVATION_CHECKPOINT = {
     # tyro subcommand token -> activation_remat policy
     "none": "none",
@@ -161,6 +180,9 @@ class ConfigManager:
                 continue
             if arg in ("--compile.no-enable", "--no-compile.enable"):
                 config.compile = None
+                continue
+            if arg in _LEGACY_METRICS_FLAGS:
+                migrated.append(_LEGACY_METRICS_FLAGS[arg])
                 continue
             if arg.startswith("--checkpoint."):
                 arg = "--checkpointer." + arg.removeprefix("--checkpoint.")

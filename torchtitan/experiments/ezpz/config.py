@@ -34,8 +34,20 @@ from typing import Literal
 
 from torchtitan.config import TrainingConfig
 from torchtitan.config.parallelism import ParallelismConfig
+from torchtitan.observability.metrics import (
+    BaseLogger,
+    MetricsProcessor,
+    TensorBoardLogger,
+    WandBLogger,
+)
 
-__all__ = ["EzpzParallelismConfig", "EzpzTrainingConfig"]
+__all__ = [
+    "EzpzMetricsConfig",
+    "EzpzParallelismConfig",
+    "EzpzTrainingConfig",
+    "apply_legacy_metrics_fields",
+    "set_metrics_logger",
+]
 
 
 @dataclass(kw_only=True)
@@ -70,6 +82,71 @@ class EzpzTrainingConfig(TrainingConfig):
 
     enable_cpu_offload: bool | None = None
     """Legacy alias for ``parallelism.fsdp_enable_cpu_offloading``."""
+
+
+@dataclass(kw_only=True, slots=True)
+class EzpzMetricsConfig(MetricsProcessor.Config):
+    """``MetricsProcessor.Config`` plus the legacy exporter switches.
+
+    Upstream replaced ``enable_wandb`` / ``enable_tensorboard`` with
+    ``loggers: list[BaseLogger.Config]`` (#5775). ezpz launchers and PBS seats
+    still pass ``--metrics.enable-wandb`` / ``--metrics.no-enable-wandb`` /
+    ``--metrics.enable-tensorboard`` and JSON launch configs still set
+    ``metrics.enable_wandb``; these fields keep that surface.
+
+    They are one-way inputs, ``None`` unless set, like ``EzpzTrainingConfig``:
+    ``FaultTolerantTrainer.Config.__post_init__`` applies each set field to
+    ``loggers`` with :func:`apply_legacy_metrics_fields` and resets it to
+    ``None``. ``True`` adds the exporter unless one of that type is already
+    listed; ``False`` removes every exporter of that type (what
+    ``--metrics.no-enable-wandb`` did to a registry that enabled W&B). Code
+    reads ``loggers`` only. ``build()`` still constructs ``MetricsProcessor``:
+    the owner is inherited from ``MetricsProcessor.Config``.
+    """
+
+    enable_wandb: bool | None = None
+    """Legacy switch for a ``WandBLogger.Config`` entry in ``loggers``."""
+
+    enable_tensorboard: bool | None = None
+    """Legacy switch for a ``TensorBoardLogger.Config`` entry in ``loggers``."""
+
+
+# Legacy field -> exporter config type. Pre-sync core built W&B before
+# TensorBoard; this order keeps that when both switches are set.
+_LEGACY_METRICS_LOGGERS: dict[str, type[BaseLogger.Config]] = {
+    "enable_wandb": WandBLogger.Config,
+    "enable_tensorboard": TensorBoardLogger.Config,
+}
+
+
+def set_metrics_logger(
+    metrics: MetricsProcessor.Config,
+    logger_config_cls: type[BaseLogger.Config],
+    enabled: bool,
+) -> None:
+    """Enable or disable one exporter type in ``metrics.loggers``.
+
+    Enabling appends ``logger_config_cls()`` unless an exporter of that type
+    (or a subclass) is already listed, so a registry entry with settings is
+    kept as is. Disabling removes every entry of that type.
+    """
+    present = any(isinstance(c, logger_config_cls) for c in metrics.loggers)
+    if enabled and not present:
+        metrics.loggers = [*metrics.loggers, logger_config_cls()]
+    elif not enabled and present:
+        metrics.loggers = [
+            c for c in metrics.loggers if not isinstance(c, logger_config_cls)
+        ]
+
+
+def apply_legacy_metrics_fields(metrics: MetricsProcessor.Config) -> None:
+    """Copy set legacy exporter switches into ``loggers``, then reset them."""
+    for name, logger_config_cls in _LEGACY_METRICS_LOGGERS.items():
+        value = getattr(metrics, name, None)
+        if value is None:
+            continue
+        set_metrics_logger(metrics, logger_config_cls, bool(value))
+        setattr(metrics, name, None)
 
 
 @dataclass(kw_only=True)

@@ -26,7 +26,7 @@ from torchtitan.experiments.ezpz.blendcorpus.blendcorpus_builder import (
 )
 from torchtitan.experiments.ezpz.blendcorpus.build_tokenizer import EZPZTokenizer
 from torchtitan.experiments.ezpz.compile import CompileConfig
-from torchtitan.experiments.ezpz.config import EzpzTrainingConfig
+from torchtitan.experiments.ezpz.config import EzpzMetricsConfig, EzpzTrainingConfig
 from torchtitan.experiments.ezpz.logging import logger
 from torchtitan.experiments.ezpz.optimizer.containers import default_adamw
 from torchtitan.experiments.ezpz.trainer import (
@@ -35,7 +35,7 @@ from torchtitan.experiments.ezpz.trainer import (
 )
 from torchtitan.experiments.torchft.config.job_config import FaultTolerance
 from torchtitan.models.common.moe import MoE
-from torchtitan.observability.metrics import MetricsProcessor
+from torchtitan.observability.metrics import WandBLogger
 
 from . import model_registry
 
@@ -176,7 +176,7 @@ def _base_config(flavor: str) -> FaultTolerantTrainer.Config:
             steps=10000,
         ),
         dataloader=BlendCorpusDataLoader.Config(dataset="c4_test"),
-        metrics=MetricsProcessor.Config(log_freq=10),
+        metrics=EzpzMetricsConfig(log_freq=10),
         checkpointer=CheckpointManager.Config(
             interval=500,
             last_save_model_only=False,
@@ -275,7 +275,7 @@ def moe(
         dataset_path = f"torchtitan/experiments/ezpz/data-lists/{ezpz.distributed.get_machine().lower()}/books.txt"
     cfg.dataloader.dataset_path = dataset_path
     cfg.metrics.log_freq = 1
-    cfg.metrics.enable_wandb = True
+    cfg.metrics.loggers = [WandBLogger.Config()]
     if compile:
         cfg.compile = CompileConfig()
     assert cfg.checkpointer is not None

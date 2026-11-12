@@ -37,7 +37,12 @@ from torchtitan.experiments.ezpz.ckpt_key_compat import (
 )
 from torchtitan.experiments.ezpz.ckpt_owner_claim import check_and_claim
 from torchtitan.experiments.ezpz.compile import CompileConfig, local_compile_regions
-from torchtitan.experiments.ezpz.config import EzpzParallelismConfig, EzpzTrainingConfig
+from torchtitan.experiments.ezpz.config import (
+    apply_legacy_metrics_fields,
+    EzpzMetricsConfig,
+    EzpzParallelismConfig,
+    EzpzTrainingConfig,
+)
 from torchtitan.experiments.ezpz.logging import logger
 from torchtitan.experiments.ezpz.lr_finder import LRFinderConfig
 from torchtitan.experiments.ezpz.native_ddp import (
@@ -688,6 +693,8 @@ class FaultTolerantTrainer(TorchFTTrainer):
         )
         training: EzpzTrainingConfig = field(default_factory=EzpzTrainingConfig)
         """Upstream ``TrainingConfig`` plus the legacy ezpz CLI aliases."""
+        metrics: EzpzMetricsConfig = field(default_factory=EzpzMetricsConfig)
+        """Upstream ``MetricsProcessor.Config`` plus the legacy exporter switches."""
         checkpoint: CheckpointManager.Config | None = None
         compile: CompileConfig | None = None
         """Selects ``local_compile`` regions; see ``ezpz/compile.py``."""
@@ -755,6 +762,7 @@ class FaultTolerantTrainer(TorchFTTrainer):
 
         def __post_init__(self):
             self._apply_legacy_training_fields()
+            apply_legacy_metrics_fields(self.metrics)
             self._sync_model_context_length()
             # ``@dataclass(slots=True)`` returns a replacement class object;
             # call the parent explicitly so Python 3.12 does not use the stale
