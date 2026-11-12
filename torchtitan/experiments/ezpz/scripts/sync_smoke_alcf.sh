@@ -143,6 +143,16 @@ if [[ "${ACCEL}" == cuda ]]; then
     export MPICH_GPU_SUPPORT_ENABLED=0
     [[ -d "${HOME}/.local/mpi-compat" ]] \
         && export LD_LIBRARY_PATH="${HOME}/.local/mpi-compat:${LD_LIBRARY_PATH:-}"
+    # pip's mpi4py 4.x (MPI-ABI build) links the generic libmpi.so.12 soname,
+    # which Cray MPICH does not ship ("cannot load MPI library", Polaris job
+    # 7838830). Polaris's ~/.local/mpi-compat only shims the GNU build the
+    # production venv uses, so point libmpi.so.12 at Cray's libmpi.so here.
+    if [[ -n "${CRAY_MPICH_DIR:-}" && -e "${CRAY_MPICH_DIR}/lib/libmpi.so" ]]; then
+        _mpi_abi="${SUBMIT_DIR}/.cache/mpi-abi"
+        mkdir -p "${_mpi_abi}"
+        ln -sfn "${CRAY_MPICH_DIR}/lib/libmpi.so" "${_mpi_abi}/libmpi.so.12"
+        export LD_LIBRARY_PATH="${_mpi_abi}:${LD_LIBRARY_PATH:-}"
+    fi
 fi
 
 if [[ "${ACCEL}" == xpu && -d "${VENV}/lib" ]]; then
