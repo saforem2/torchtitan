@@ -79,6 +79,27 @@ environment fixes first: a `libmpi.so.12` link for pip's `mpi4py`,
 venv. Plain `ezpz` does not import there (`cutlass`, below), so Polaris has no
 baseline column; CUDA and XPU losses are not expected to match.
 
+Beyond the smoke (Sunspot, 2026-11-12):
+
+- **Unit tests**, `ezpz/tests` and `tests/unit_tests/cpu/models/common`, run
+  one file at a time on `ezpz` and on the candidate. Three files passed on
+  `ezpz` and failed on the candidate; all are fixed. #74's
+  `_batch_input_witness` was set only in `__init__` (6 blendcorpus tests,
+  `4cab5c50`). #76 copied upstream's optional-import test without upstream's
+  `require_attn_gym` calls in `cp_kda.py`/`cp_gdn.py` (4 tests, `29e5af07`).
+  16 files fail identically on both trees and predate these PRs (HF
+  conversion and `ckpt_key_compat` imports, `test_cp_attention` circular
+  import, script-style files that `sys.exit` on import).
+- **Local batch 2** (`agpt_debugmodel`, 1024 tokens over 512 context): `ezpz`
+  dies at step 1 (`shape '[1024, 1, 8]' is invalid for input of size 4096`);
+  the candidate trains (`10.878` -> `9.861`). #74's per-row RoPE positions.
+- **`agpt_2b`, 24 ranks**: `ezpz` fails at `fully_shard` (`11008` rows over
+  24); the candidate shards (#74's padded fallback) and then runs out of
+  memory in SDPA at the default context. At 16 ranks and 4096 tokens both
+  run: median `3524` (`ezpz`) vs `3449`/`3484` tok/s (candidate) over steps
+  11-30, same step-1 loss `12.91284`, same `17.56 GiB`. #74's speedups are
+  opt-in and were off.
+
 Sirius does not start: after four environment fixes (newer ezpz utils pin,
 GTL flag after module load, mpi-compat shim, `unset PYTHONHOME`) 3 of 8 ranks
 still die with `No module named 'encodings'`.
