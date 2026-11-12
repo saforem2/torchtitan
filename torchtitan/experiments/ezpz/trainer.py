@@ -24,6 +24,7 @@ from torchtitan.components.data.types import TrainingMicrobatch
 from torchtitan.components.loss import IGNORE_INDEX
 from torchtitan.config import apply_overrides
 from torchtitan.distributed import ParallelismContext, utils as dist_utils
+from torchtitan.distributed.cuda_graph import cuda_graphs_supported
 from torchtitan.experiments.ezpz import signal_stop
 from torchtitan.experiments.ezpz.ckpt_key_compat import (
     maybe_install_flat_attention_compat,
@@ -51,6 +52,7 @@ from torchtitan.experiments.torchft.trainer import (
     FaultTolerantTrainingEngine as TorchFTTrainingEngine,
 )
 from torchtitan.models.common.aux_loss import collect_aux_loss_metrics
+from torchtitan.models.common.moe import MoE
 from torchtitan.training_engine import TrainingEngine
 
 
@@ -270,6 +272,7 @@ class EzpzTrainingEngine(TorchFTTrainingEngine):
             install_agpt_dtype_probe(self.model_parts[0])
 
     def _initialize_forward_backward(self) -> None:
+        maybe_disable_cuda_graphs(self.config)
         super()._initialize_forward_backward()
         if not self.parallelism_context.pp_enabled:
             self._run_forward_backward = maybe_wrap_with_xpu_graph(
@@ -520,6 +523,59 @@ class EzpzTrainingEngine(TorchFTTrainingEngine):
     def close(self) -> None:
         super().close()
         xpu_graph_teardown()
+
+
+def cuda_graph_blockers(config: Any) -> list[str]:
+    """Reasons the configured model cannot run under CUDA graph capture.
+
+    Upstream captures forward/backward by default
+    (``training.disable_cuda_graphs=False``). Two ezpz paths sync with the
+    host and fail during capture (Polaris job ``7839433``):
+
+    - native DDP: ``DistributedDataParallel._pre_forward`` raises "operation
+      not permitted when stream is capturing";
+    - any expert backend other than ``grouped_mm``: ``for_loop`` (the SM<90
+      fallback) copies per-expert token counts to the host.
+    """
+    reasons: list[str] = []
+    if getattr(config.parallelism, "enable_data_parallel_native_ddp", False):
+        reasons.append("native DDP")
+    model = getattr(config, "model", None)
+    if model is not None and hasattr(model, "traverse"):
+        backends = {
+            getattr(moe.routed_experts, "compute_backend", "grouped_mm")
+            for _, moe, _, _ in model.traverse(MoE.Config)
+        }
+        backends.discard("grouped_mm")
+        if backends:
+            reasons.append(f"MoE expert backend {sorted(backends)}")
+    return reasons
+
+
+def maybe_disable_cuda_graphs(config: Any) -> None:
+    """Run eagerly instead of capturing when the model cannot be captured.
+
+    Raises if the config explicitly asks for a graph feature that needs
+    capture, since silently dropping it would change what the user asked for.
+    """
+    training = config.training
+    if training.disable_cuda_graphs or not cuda_graphs_supported():
+        return
+    reasons = cuda_graph_blockers(config)
+    if not reasons:
+        return
+    if config.optim.enable_cuda_graph or training.cuda_graph_per_accumulation_group:
+        raise ValueError(
+            f"CUDA graphs cannot capture {', '.join(reasons)}; unset "
+            "optim.enable_cuda_graph / training.cuda_graph_per_accumulation_group "
+            "or change the model config."
+        )
+    logger.warning(
+        "Disabling CUDA graphs: %s cannot run under capture. Pass "
+        "--training.disable-cuda-graphs to silence this.",
+        ", ".join(reasons),
+    )
+    training.disable_cuda_graphs = True
 
 
 class FaultTolerantTrainer(TorchFTTrainer):
