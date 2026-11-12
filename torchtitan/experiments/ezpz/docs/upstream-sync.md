@@ -1,5 +1,91 @@
 # Upstream Sync Log
 
+## 2026-11-12: upstream `8e63247c`, 282 commits
+
+Merge of `pytorch/torchtitan` `main` at `8e63247c` into `ezpz` `959b851a` (all fork
+PRs from the pre-sync gate below landed first). Merge base `5a7a622f16`.
+
+### Conflicts
+
+8 files. `models/common/attn_gym.py` and `test_optional_imports.py` take upstream
+(#76's copies were a stopgap for the same fix). `models/base/state_dict_adapter.py`,
+`test_state_dict_adapter.py`, `rl/generator/vllm/worker.py` and
+`torchft/tests/test_torchft_trainer.py` keep both sides. `rl/train.py` and
+`rl/controller/controller.py` take upstream, which moved provisioning and TorchStore
+setup into `rl/actors/monarch/`; the ezpz `repair_hostname_env()` call and TorchStore
+transport override moved to `provisioning.py` and `system.py`.
+
+### Ported upstream changes
+
+| Upstream (PR) | ezpz port |
+|---|---|
+| `cuda_graph.py` -> `accelerator_graph.py`, capture on any `torch.accelerator.Graph` device (#5353) | guard uses the new names; upstream capture stays off on XPU, where ezpz's opt-in `EZPZ_XPU_GRAPHS=1` wrapper owns capture |
+| dtypes -> root `PrecisionConfig`, CPU offload -> `parallelism` (#5776) | `parallelize_*`, native DDP validation and registries read `precision.*` |
+| `training.max_context_length` -> `model.max_context_length` (#5779) | `set_max_context_length()` resizes model and RoPE; MoE factories that swap the model template keep the length |
+| `local_compile_regions` -> `LocalCompileConfig` (#5463) | `parallelize_*` take `local_compile` |
+| metric exporters -> `MetricsProcessor.Config.loggers` (#5775) | registries set `loggers=[WandBLogger.Config()]` |
+| `BaseLoss` -> `Loss` (#4582) | z-loss on `Loss[Tensor]` |
+| per-batch FLOPs estimator (#4819) | MoE FLOPs override removed; trainer passes `num_flops` |
+| MLA `wkv_b` moved into `MLAAttention` (#4760) | ezpz MoE keeps a flat `attention.wkv_b`, so keys and checkpoints are unchanged |
+| routing map replaces counts (#5516); DeepEP combine drops router scores (#5543) | `EzpzRoutedExperts` takes the map; ezpz backends apply scores |
+| RL rebuilt: `Generator` + engine config, `ActorSystem`, `rollout.message_env` (#5277, #5316, ...) | both AuroraGPT RL registries, `train_upstream.py`, multihost launcher, GRPO launchers |
+
+ezpz cannot take `--model.*` on the CLI (`config_manager.py` keeps the model config
+opaque), and ~50 launchers, PBS seats and JSON configs pass the old names. So
+`EzpzTrainingConfig` and `EzpzMetricsConfig` keep `--training.dtype`,
+`--training.mixed-precision-{param,reduce}`, `--training.max-context-length`,
+`training.enable_cpu_offload` and `--metrics.[no-]enable-{wandb,tensorboard}` as
+one-way aliases: `None` by default, copied to the upstream field in
+`FaultTolerantTrainer.Config.__post_init__`, then reset. Python code uses the upstream
+fields. This is a deliberate divergence from upstream.
+
+### Results
+
+2 nodes, seed `42`, deterministic, `6` steps, against the pre-sync tree.
+
+| Check | Sirius pre `33453` | Sirius post `33466` | Sunspot pre `12483333` | Sunspot post `12483457` |
+|---|---|---|---|---|
+| agpt TP=1 | `10.85438` -> `9.96705` | identical | `10.88101` -> `9.93350` | identical |
+| MoE TP=1 | `12.96243` -> `11.07915` | identical | `12.94051` -> `10.97520` | identical |
+| resume, ZeRO-1 BF16 | diff `0.00412` | diff `0.00412` | diff `0.00406` | diff `0.00406` |
+| local batch 2 | `10.85056` -> `9.74857` | `10.85056` -> `9.74857`, identical | `10.87751` -> `9.86143` | `10.87751` -> `9.86143`, identical |
+| agpt TP=2 | known failure | `redistribute()` rejects `async_op` (`spmd_types` `0.2.0`) | known failure | known failure |
+
+Meta-device parameter counts, state-dict keys and shapes are identical pre/post for
+agpt `debugmodel`, `2b`, `2b-rl` and moe `debugmodel`. Of 163 non-RL registry
+factories, 99 build the same config and 20 differ only in an error message's wording;
+44 fail on both trees for missing data or checkpoints on Sirius (25), a
+`TT_CONFIG_JSON` requirement (13) or older code gaps (6). Every ezpz unit-test file
+has the same pass/fail as pre-sync (Sirius `33466`; new upstream test files `test_decoder_loss_kwargs`, `test_mla_remat` and `test_varlen_cp` fail at collection, unchecked).
+
+RL: all 13 AuroraGPT RL factories build, and trainer and generator model configs match
+pre-sync (LoRA rank 8: `1,986,938,880` params, `884,736` trainable). RL unit tests:
+`31` passed, `2` skipped; they failed at collection before the sync. The RL path was
+already broken at `959b851a` (removed `rollout.environment`, moved `Controller`); the
+last passing RL gate is Sunspot `12479177` (2026-09-30). No end-to-end RL run: no venv
+has torch 2.16-dev with `torchmonarch>=0.7`, a TorchStore with `RankRole` and the XPU
+transports, and vLLM-XPU.
+
+### Behaviour changes
+
+- RL precision is `PrecisionConfig(dtype="float32", param_dtype="float32")`: the
+  generator now runs in `param_dtype`, and keeping fp32 generation moves the trainer
+  forward from bf16 to fp32. `top_p` is `1.0`; upstream rejects `< 1`. The next RL run
+  is a new baseline.
+- W&B logger creation failures are fatal (upstream); before, the run continued.
+- MoE MFU uses upstream's FLOPs accounting.
+
+### Known failures the next sync inherits
+
+- **TP>1** needs `spmd_types==0.3.1` (venvs have `0.2.0`): `redistribute()` rejects
+  `async_op`. With `0.3.1`, TP=2 reaches the old known failure (token count not a
+  multiple of `max_context_length`).
+- TP=2 sequence sharding, XPU FSDP hang after step 7, MoE EP and flex attention: still
+  open from the entries below.
+- Already broken before this sync and left alone: `lr_finder` trainer attributes,
+  `EzpzValidator`'s PP branch, `moe/agpt_hf_state_dict_adapter.py`'s
+  `torchtitan.models.utils` import, `rl/xpu_trial/`.
+
 ## 2026-11-11: pre-sync gate, `ezpz` `b9dd4eb7`, 274 commits behind upstream
 
 No merge yet. `origin/ezpz` at `b9dd4eb7` is 274 commits behind
