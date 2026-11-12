@@ -377,7 +377,7 @@ class TorchMuonOptimizersContainer(OptimizersContainer):
         config: Config,
         *,
         model_parts: list[nn.Module],
-        enable_cuda_graph: bool = False,
+        enable_accelerator_graph: bool = False,
     ) -> None:
         import torch.optim
 
