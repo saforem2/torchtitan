@@ -618,6 +618,57 @@ def agpt_2b_mds_anneal_flat() -> FaultTolerantTrainer.Config:
     return cfg
 
 
+def agpt_2b_replicated_benchmark() -> FaultTolerantTrainer.Config:
+    """Replicated-DP benchmark config matching the pinned MDS SophiaG path."""
+    cfg = agpt_2b_mds_anneal_flat()
+    cfg.optim.optimizer = default_sophiag(
+        lr=2e-6,
+        betas=(0.9, 0.95),
+        rho=0.01,
+        update_hessian_before_step=False,
+    )
+    cfg.optim.lr_scheduler.warmup_steps = 0
+    cfg.checkpointer.folder = "checkpoints/agpt-2b-replicated-benchmark"
+    return cfg
+
+
+def agpt_2b_replicated_benchmark_adamw() -> FaultTolerantTrainer.Config:
+    """agpt_2b_replicated_benchmark with AdamW (lr 2e-6, betas 0.9/0.95, wd 0.1),
+    matching the MDS ``MDS_OPTIMIZER=adamw`` arm of the replicated benchmark."""
+    cfg = agpt_2b_replicated_benchmark()
+    cfg.optim.optimizer = default_adamw(lr=2e-6, betas=(0.9, 0.95), weight_decay=0.1)
+    return cfg
+
+
+def agpt_mds_shape_benchmark_adamw() -> FaultTolerantTrainer.Config:
+    """The z2rrt02w MDS shape (``mds-4096x10``) from random init with that
+    run's AdamW (lr 2e-4, betas 0.9/0.95, wd 0.1), sequence 4096, no AC.
+    Throughput benchmark only; the CLI supplies data and parallelism."""
+    cfg = agpt("mds-4096x10", activation_checkpoint_mode="none", seq_len=4096)
+    cfg.optim.optimizer = default_adamw(lr=2e-4, betas=(0.9, 0.95), weight_decay=0.1)
+    cfg.optim.lr_scheduler.warmup_steps = 0
+    cfg.checkpointer.folder = "checkpoints/agpt-mds-shape-benchmark"
+    cfg.metrics.enable_wandb = True
+    return cfg
+
+
+def agpt_2b_loss_ab() -> FaultTolerantTrainer.Config:
+    """AGPT-2B (``2b-mds``) from random init for short loss-curve A/Bs of
+    numerics changes: AdamW lr 3e-4 (betas 0.9/0.95, wd 0.1), 40 warmup
+    updates then constant, sequence 8192, no AC, no validator. ``--debug.seed``
+    sets the init; the blendcorpus sample order is fixed, so arms sharing a
+    seed see the same init and data."""
+    cfg = agpt("2b-mds", activation_checkpoint_mode="none", seq_len=8192)
+    cfg.optim.optimizer = default_adamw(lr=3e-4, betas=(0.9, 0.95), weight_decay=0.1)
+    cfg.optim.lr_scheduler.warmup_steps = 40
+    cfg.optim.lr_scheduler.decay_ratio = 0.0
+    cfg.optim.lr_scheduler.min_lr_factor = 1.0
+    cfg.validator.enable = False
+    cfg.checkpointer.folder = "checkpoints/agpt-2b-loss-ab"
+    cfg.metrics.enable_wandb = True
+    return cfg
+
+
 def agpt_2b_mds_anneal_wsd() -> FaultTolerantTrainer.Config:
     """ARM B (treatment): fork MDS gs138650, WSD decay-to-0 anneal.
 
@@ -709,8 +760,13 @@ def agpt_2b_mds154391_tulu_math_uc_streaming() -> FaultTolerantTrainer.Config:
 
 
 def _cot_sft_config(
-    dataset_fn, folder: str, *, lr: float = 2e-5, steps: int = 900,
-    seq_len: int = 1024, flavor: str = "2b-mds",
+    dataset_fn,
+    folder: str,
+    *,
+    lr: float = 2e-5,
+    steps: int = 900,
+    seq_len: int = 1024,
+    flavor: str = "2b-mds",
     local_batch_size: int = 2,
 ):
     """Shared builder for Grain-native CoT SFT (same trainer as CPT).
@@ -728,15 +784,22 @@ def _cot_sft_config(
     else:
         raise ValueError(f"unknown flavor {flavor!r}")
 
-    cfg = agpt(flavor, local_batch_size=local_batch_size,
-               activation_checkpoint_mode="none",
-               seq_len=seq_len, dtype="float32", compile=True,
-               checkpoint_interval=300, hf_assets_path=hfa)
+    cfg = agpt(
+        flavor,
+        local_batch_size=local_batch_size,
+        activation_checkpoint_mode="none",
+        seq_len=seq_len,
+        dtype="float32",
+        compile=True,
+        checkpoint_interval=300,
+        hf_assets_path=hfa,
+    )
 
     # debugmodel smoke: train from scratch (no DCP to load).
     if flavor == "debugmodel":
         cfg.checkpointer = CheckpointManager.Config(
-            interval=300, last_save_model_only=False)
+            interval=300, last_save_model_only=False
+        )
         cfg.checkpointer.folder = folder
     else:
         if not (base / "model-00001-of-00001.safetensors").is_file():
@@ -747,7 +810,8 @@ def _cot_sft_config(
         prior = cfg.checkpointer
         assert prior is not None
         cfg.checkpointer = GrainStreamingCheckpointManager.Config(
-            **{field.name: getattr(prior, field.name) for field in fields(prior)})
+            **{field.name: getattr(prior, field.name) for field in fields(prior)}
+        )
         cfg.checkpointer.initial_load_path = str(dcp_base)
         cfg.checkpointer.initial_load_in_hf = False
         cfg.checkpointer.initial_load_model_only = True
@@ -757,8 +821,13 @@ def _cot_sft_config(
     cfg.checkpoint = cfg.checkpointer
 
     cfg.dataloader = GrainDataLoader.Config(
-        dataset=dataset_fn(), seed=42, shuffle=True, repeat=True,
-        streaming_shuffle_buffer_size=10_000, num_prefetch_microbatches=2)
+        dataset=dataset_fn(),
+        seed=42,
+        shuffle=True,
+        repeat=True,
+        streaming_shuffle_buffer_size=10_000,
+        num_prefetch_microbatches=2,
+    )
     cfg.optim.optimizer = default_adamw(lr=lr)
     cfg.optim.lr_scheduler.warmup_steps = 0
     cfg.optim.lr_scheduler.decay_ratio = 0.0
@@ -774,38 +843,52 @@ def _cot_sft_config(
 
 def agpt_2b_mds_gsm8k_r1cot_streaming() -> FaultTolerantTrainer.Config:
     """GSM8K alone via Grain streaming -- Stage-2 warm-up, no TRL."""
-    return _cot_sft_config(gsm8k_r1cot_streaming_dataset,
-                           "checkpoints/agpt2b-mds-gsm8k-r1cot-streaming")
+    return _cot_sft_config(
+        gsm8k_r1cot_streaming_dataset, "checkpoints/agpt2b-mds-gsm8k-r1cot-streaming"
+    )
 
 
 def agpt_2b_mds_distill_cot_streaming() -> FaultTolerantTrainer.Config:
     """50/50 OpenThoughts + OpenR1 CoT via Grain -- replaces --pretokenize_to."""
-    return _cot_sft_config(distill_cot_mix_streaming_dataset,
-                           "checkpoints/agpt2b-mds-distill-cot-streaming")
+    return _cot_sft_config(
+        distill_cot_mix_streaming_dataset,
+        "checkpoints/agpt2b-mds-distill-cot-streaming",
+    )
 
 
 def agpt_2b_mds_gsm8k_plus_distill_streaming() -> FaultTolerantTrainer.Config:
     """GSM8K + distill breadth via Grain (all 3 CoT sources)."""
-    return _cot_sft_config(gsm8k_plus_distill_cot_streaming_dataset,
-                           "checkpoints/agpt2b-mds-gsm8k-plus-distill-streaming")
+    return _cot_sft_config(
+        gsm8k_plus_distill_cot_streaming_dataset,
+        "checkpoints/agpt2b-mds-gsm8k-plus-distill-streaming",
+    )
 
 
 # ── Sunspot-divisible smokes (debugmodel, hd=768 % 12 == 0) ──────────
 # These prove the Grain CoT pipeline on Sunspot's PPN=12 mesh. The dataset
 # code is flavor-agnostic; Polaris keeps the 2b-mds production shape.
 
+
 def agpt_debugmodel_gsm8k_r1cot_streaming() -> FaultTolerantTrainer.Config:
     """GSM8K CoT smoke on debugmodel -- Sunspot PPN=12 safe."""
-    return _cot_sft_config(gsm8k_r1cot_streaming_dataset,
-                           "checkpoints/agpt-debug-gsm8k-r1cot-streaming",
-                           flavor="debugmodel", local_batch_size=8, seq_len=1024)
+    return _cot_sft_config(
+        gsm8k_r1cot_streaming_dataset,
+        "checkpoints/agpt-debug-gsm8k-r1cot-streaming",
+        flavor="debugmodel",
+        local_batch_size=8,
+        seq_len=1024,
+    )
 
 
 def agpt_debugmodel_distill_cot_streaming() -> FaultTolerantTrainer.Config:
     """OpenThoughts+OpenR1 smoke on debugmodel -- Sunspot PPN=12 safe."""
-    return _cot_sft_config(distill_cot_mix_streaming_dataset,
-                           "checkpoints/agpt-debug-distill-cot-streaming",
-                           flavor="debugmodel", local_batch_size=8, seq_len=1024)
+    return _cot_sft_config(
+        distill_cot_mix_streaming_dataset,
+        "checkpoints/agpt-debug-distill-cot-streaming",
+        flavor="debugmodel",
+        local_batch_size=8,
+        seq_len=1024,
+    )
 
 
 # --- data-mix A/B (stage-2 mid-training): flat won the anneal, so DATA is the
@@ -1637,6 +1720,7 @@ def _agpt_v2_4k(
         load_dataset_kwargs={"data_dir": _olmo_mix_subset_dir("wiki")},
     )
 
+
 def agpt_v2_4b_4k() -> FaultTolerantTrainer.Config:
     """4.64B (5B_olmo2tok geometry) at 4K seqlen, OLMo-3 tokenizer, streaming.
 
@@ -1663,8 +1747,6 @@ def agpt_v2_30b_4k() -> FaultTolerantTrainer.Config:
     """
 
     return _agpt_v2_4k("30b_olmo2tok_dp12")
-
-
 
 
 # Optimizer-comparison arms for the OLMo-2 ladder.
@@ -2421,7 +2503,9 @@ def ezpz_agpt_80b_deep_from_json() -> FaultTolerantTrainer.Config:
 # for this vocab. OLMo-2-1124-7B tokenizer.json is byte-identical to OLMo-3.
 
 
-def _polaris_dolma_grain(cfg: FaultTolerantTrainer.Config) -> FaultTolerantTrainer.Config:
+def _polaris_dolma_grain(
+    cfg: FaultTolerantTrainer.Config,
+) -> FaultTolerantTrainer.Config:
     """Wire olmo-mix-1124 via Grain + HF streaming (precached local parquet).
 
     Uses the Polaris HF cache (/home/foremans/.cache/huggingface/hub) where

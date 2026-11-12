@@ -107,7 +107,8 @@ class SophiaGOptimizer(SophiaG, BaseOptimizer):
 class SophiaGOptimizersContainer(OptimizersContainer):
     @dataclass(kw_only=True, slots=True)
     class Config(OptimizersContainer.Config):
-        pass
+        update_hessian_before_step: bool = True
+        """Update the Hessian EMA before each optimizer step."""
 
     def update_hessian(self) -> None:
         """Delegate hessian update to each inner SophiaG optimizer."""
@@ -498,7 +499,12 @@ def default_adopt(
     )
 
 
-def default_sophiag(lr: float = 3e-4, **kwargs: Any) -> OptimizersContainer.Config:
+def default_sophiag(
+    lr: float = 3e-4,
+    *,
+    update_hessian_before_step: bool = True,
+    **kwargs: Any,
+) -> SophiaGOptimizersContainer.Config:
     """One-group SophiaG config."""
     return SophiaGOptimizersContainer.Config(
         optimizers=[
@@ -513,6 +519,7 @@ def default_sophiag(lr: float = 3e-4, **kwargs: Any) -> OptimizersContainer.Conf
                 },
             )
         ],
+        update_hessian_before_step=update_hessian_before_step,
     )
 
 
