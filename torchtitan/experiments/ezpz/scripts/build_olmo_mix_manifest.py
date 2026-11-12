@@ -14,6 +14,12 @@ thousands of ranks. This writes the largest file list that is a multiple of
 ``--dp``: every non-DCLM shard is kept, and DCLM shards are sampled evenly
 across their sorted order to fill the remainder.
 
+The list is written in a seeded random order, not sorted. ``split_dataset_by_node``
+gives rank ``r`` files ``r, r + dp, r + 2 * dp, ...``, so at any moment the
+whole job reads one contiguous block of the manifest. A sorted manifest groups
+files by subset, which turns the mix into a curriculum (algebraic-stack and
+arxiv first, wiki last). ``--order sorted`` reproduces the old manifests.
+
 Usage:
     build_olmo_mix_manifest.py --dp 6144 --out manifest-4b.txt
 """
@@ -21,6 +27,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import random
 from pathlib import Path
 
 DEFAULT_ROOT = "/flare/AuroraGPT/datasets/olmo-mix-1124/data"
@@ -52,6 +59,13 @@ def main() -> None:
     parser.add_argument("--dp", type=int, required=True, help="DP world size")
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--root", type=Path, default=Path(DEFAULT_ROOT))
+    parser.add_argument(
+        "--order",
+        choices=("shuffle", "sorted"),
+        default="shuffle",
+        help="file order; sorted makes split_dataset_by_node a curriculum",
+    )
+    parser.add_argument("--seed", type=int, default=0, help="shuffle seed")
     args = parser.parse_args()
     if args.dp <= 0:
         raise SystemExit("--dp must be positive")
@@ -69,13 +83,15 @@ def main() -> None:
     picked = [dclm[(i * len(dclm)) // num_dclm] for i in range(num_dclm)]
     files = sorted(other + picked)
     assert len(files) == len(set(files)) == target
+    if args.order == "shuffle":
+        random.Random(args.seed).shuffle(files)
 
     args.out.write_text("\n".join(files) + "\n")
     counts = ", ".join(f"{s}={len(by_subset[s])}" for s in SUBSETS)
     print(f"available: {counts}")
     print(
         f"wrote {target} files ({target // args.dp} per rank at dp={args.dp}; "
-        f"dclm {num_dclm}/{len(dclm)}) -> {args.out}"
+        f"dclm {num_dclm}/{len(dclm)}, order={args.order}) -> {args.out}"
     )
 
 

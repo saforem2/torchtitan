@@ -112,8 +112,13 @@ V2_VENV="${V2_VENV:-/flare/AuroraGPT/foremans/venvs/torchtitan-v2-frameworks-202
 V2_UTILS="${V2_UTILS:-/flare/AuroraGPT/foremans/scratch/diagnostics/runtime-artifacts/ezpz-utils-20261109.sh}"
 V2_UTILS_SHA="${V2_UTILS_SHA:-12c2e056d45c8a4ce15f5097f83eda86caa08353ac645cde0133c9087a3cc8cd}"
 V2_MANIFESTS=/flare/AuroraGPT/foremans/scratch/umbrella-v2-manifests
+# The 4B keeps the sorted manifest it started on: its data cursor indexes into
+# that file order, so a reordered file would repeat and skip data on resume.
+# The sorted order is a curriculum under split_dataset_by_node (no starcoder
+# until each rank's last file). The 10B starts fresh on a seeded shuffle of
+# the same 24576 files (build_olmo_mix_manifest.py --order shuffle --seed 0).
 MANIFEST_V2_4B="${MANIFEST_V2_4B:-$V2_MANIFESTS/olmo-mix-dp6144.txt}"
-MANIFEST_V2_10B="${MANIFEST_V2_10B:-$V2_MANIFESTS/olmo-mix-dp6144.txt}"
+MANIFEST_V2_10B="${MANIFEST_V2_10B:-$V2_MANIFESTS/olmo-mix-dp6144-shuf0.txt}"
 NNODES_V2_10B="${NNODES_V2_10B:-512}"
 GBS_V2_10B="${GBS_V2_10B:-6144}"
 CKPT_V2_4B="${CKPT_V2_4B:-outputs/checkpoints/agpt-v2-4b-4k-olmo-mix-n512-20261109}"

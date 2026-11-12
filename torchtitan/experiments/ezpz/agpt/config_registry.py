@@ -1747,6 +1747,9 @@ def _olmo_mix_raw_files() -> list[str]:
     the file count is divisible by the DP world size; otherwise every rank
     reads the whole stream and keeps 1/N of it. The manifest builder
     (``scripts/build_olmo_mix_manifest.py``) sizes the list for that.
+    Rank ``r`` reads files ``r, r + N, ...``, so the whole job reads one
+    contiguous block of the manifest at a time. Use a shuffled manifest; a
+    sorted one feeds the subsets in path order, as a curriculum.
     """
     manifest = os.environ.get("AGPT_V2_DATA_MANIFEST", "")
     if not manifest:
