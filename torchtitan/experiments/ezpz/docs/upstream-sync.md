@@ -72,7 +72,12 @@ transports, and vLLM-XPU.
   generator now runs in `param_dtype`, and keeping fp32 generation moves the trainer
   forward from bf16 to fp32. `top_p` is `1.0`; upstream rejects `< 1`. The next RL run
   is a new baseline.
-- W&B logger creation failures are fatal (upstream); before, the run continued.
+- W&B: upstream makes logger start-up failures fatal and stops passing `step=`
+  (#5903). `EzpzWandBLogger` (`ezpz/wandb_logger.py`) keeps the pre-sync behaviour: a
+  failed `wandb.init` logs one warning and training continues, and `_step` is the
+  training step, which `utils/wandb_fetch.py` and the production plots key on. Sirius
+  `33467`: pre-sync and post-sync runs log the same 6 rows, losses and keys (plus
+  `trainer/step`); with W&B forced to fail the run finishes with the same losses.
 - MoE MFU uses upstream's FLOPs accounting.
 
 ### Known failures the next sync inherits
