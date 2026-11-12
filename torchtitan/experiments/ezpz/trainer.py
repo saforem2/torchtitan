@@ -18,12 +18,18 @@ import spmd_types as spmd
 import torch
 from torch.distributed.elastic.multiprocessing.errors import record
 
-from torchtitan.components.checkpointer import CheckpointManager, DATALOADER
+from torchtitan.components.checkpointer import (
+    CheckpointManager,
+    DATALOADER,
+    MODEL,
+    ModelWrapper,
+)
 from torchtitan.components.data.loader import BaseDataLoader, DataloaderExhaustedError
 from torchtitan.components.data.types import TrainingMicrobatch
 from torchtitan.components.loss import IGNORE_INDEX
 from torchtitan.config import apply_overrides
 from torchtitan.distributed import ParallelismContext, utils as dist_utils
+from torchtitan.distributed.cuda_graph import cuda_graphs_supported
 from torchtitan.experiments.ezpz import signal_stop
 from torchtitan.experiments.ezpz.ckpt_key_compat import (
     maybe_install_flat_attention_compat,
@@ -36,6 +42,7 @@ from torchtitan.experiments.ezpz.lr_finder import LRFinderConfig
 from torchtitan.experiments.ezpz.native_ddp import (
     install_agpt_dtype_probe,
     native_ddp_autocast_context,
+    NativeDDP,
     validate_native_ddp,
     wrap_native_ddp,
     wrap_native_ddp_loss,
@@ -44,6 +51,7 @@ from torchtitan.experiments.ezpz.xpu_graph import (
     maybe_wrap_with_xpu_graph,
     xpu_graph_teardown,
 )
+from torchtitan.experiments.ezpz.zero1 import flatten_parameters_, install_zero1
 from torchtitan.experiments.torchft.config.job_config import FaultTolerance
 from torchtitan.experiments.torchft.manager import maybe_semi_sync_training
 from torchtitan.experiments.torchft.trainer import (
@@ -51,6 +59,7 @@ from torchtitan.experiments.torchft.trainer import (
     FaultTolerantTrainingEngine as TorchFTTrainingEngine,
 )
 from torchtitan.models.common.aux_loss import collect_aux_loss_metrics
+from torchtitan.models.common.moe import MoE
 from torchtitan.training_engine import TrainingEngine
 
 
@@ -232,6 +241,21 @@ class EzpzTrainingEngine(TorchFTTrainingEngine):
             create_seed_checkpoint=create_seed_checkpoint,
         )
         config = self.config
+        if getattr(config.parallelism, "native_ddp_zero1", False) and not getattr(
+            config.parallelism, "enable_data_parallel_native_ddp", False
+        ):
+            raise ValueError("native_ddp_zero1 requires native DDP")
+        param_dtype = getattr(
+            config.parallelism, "native_ddp_zero1_param_dtype", "float32"
+        )
+        if param_dtype == "bfloat16" and not (
+            getattr(config.parallelism, "native_ddp_zero1", False)
+            and config.parallelism.native_ddp_zero1_allgather_dtype == "bfloat16"
+        ):
+            raise ValueError(
+                "native_ddp_zero1_param_dtype=bfloat16 requires native_ddp_zero1 "
+                "with native_ddp_zero1_allgather_dtype=bfloat16"
+            )
         if getattr(config.parallelism, "enable_data_parallel_native_ddp", False):
             validate_native_ddp(
                 model_name=self._model_name(),
@@ -256,12 +280,22 @@ class EzpzTrainingEngine(TorchFTTrainingEngine):
                 ),
             )
             assert len(self.model_parts) == 1
+            dp_mesh = self.parallelism_context.get_mesh("dp_replicate")
+            self._zero1_buffer = None
+            if getattr(config.parallelism, "native_ddp_zero1", False):
+                self._zero1_buffer = flatten_parameters_(
+                    self.model_parts[0],
+                    world_size=dp_mesh.size(),
+                    rank=dp_mesh.get_local_rank(),
+                    dtype=getattr(torch, param_dtype),
+                )
             self.model_parts[0] = wrap_native_ddp(
                 self.model_parts[0],
-                self.parallelism_context.get_mesh("dp_replicate"),
+                dp_mesh,
                 config.parallelism.native_ddp_bucket_cap_mb,
                 config.parallelism.native_ddp_compute_policy,
                 config.parallelism.native_ddp_bucketize_first_iteration,
+                communication_dtype=config.parallelism.native_ddp_communication_dtype,
             )
 
         if os.getenv("TORCHTITAN_AGPT_DTYPE_PROBE") == "1":
@@ -269,7 +303,36 @@ class EzpzTrainingEngine(TorchFTTrainingEngine):
                 raise ValueError("AGPT dtype probe requires a non-pipeline model")
             install_agpt_dtype_probe(self.model_parts[0])
 
+    def _initialize_checkpointer(
+        self,
+        *,
+        extra_states: dict[str, torch.distributed.checkpoint.stateful.Stateful] | None,
+        sd_adapter: Any | None,
+    ) -> None:
+        super()._initialize_checkpointer(
+            extra_states=extra_states,
+            sd_adapter=sd_adapter,
+        )
+        if not getattr(
+            self.config.parallelism, "enable_data_parallel_native_ddp", False
+        ):
+            return
+        checkpointer = getattr(self, "checkpointer", None)
+        if checkpointer is None:
+            return
+        states = getattr(checkpointer, "states", None)
+        if states is None or MODEL not in states:
+            raise RuntimeError(
+                "native DDP checkpointer must expose its model state entry"
+            )
+        unwrapped_parts = [
+            part.module if isinstance(part, NativeDDP) else part
+            for part in self.model_parts
+        ]
+        states[MODEL] = ModelWrapper(unwrapped_parts)
+
     def _initialize_forward_backward(self) -> None:
+        maybe_disable_cuda_graphs(self.config)
         super()._initialize_forward_backward()
         if not self.parallelism_context.pp_enabled:
             self._run_forward_backward = maybe_wrap_with_xpu_graph(
@@ -284,6 +347,19 @@ class EzpzTrainingEngine(TorchFTTrainingEngine):
     def _initialize_optim(self) -> None:
         super()._initialize_optim()
         self.optim._run_update = self._optim_update
+        buffer = getattr(self, "_zero1_buffer", None)
+        if buffer is not None:
+            part = self.model_parts[0]
+            self._zero1_state = install_zero1(
+                self.optim.optimizers,
+                buffer,
+                process_group=self.parallelism_context.get_mesh(
+                    "dp_replicate"
+                ).get_group(),
+                allgather_dtype=self.config.parallelism.native_ddp_zero1_allgather_dtype,
+                module=part.module if isinstance(part, NativeDDP) else part,
+            )
+            logger.info("native DDP ZeRO-1: %s", self._zero1_state.diagnostics())
 
     def _native_ddp_train_context(self) -> AbstractContextManager[None]:
         """SPMD context composed with native-DDP bf16 autocast."""
@@ -520,6 +596,59 @@ class EzpzTrainingEngine(TorchFTTrainingEngine):
     def close(self) -> None:
         super().close()
         xpu_graph_teardown()
+
+
+def cuda_graph_blockers(config: Any) -> list[str]:
+    """Reasons the configured model cannot run under CUDA graph capture.
+
+    Upstream captures forward/backward by default
+    (``training.disable_cuda_graphs=False``). Two ezpz paths sync with the
+    host and fail during capture (Polaris job ``7839433``):
+
+    - native DDP: ``DistributedDataParallel._pre_forward`` raises "operation
+      not permitted when stream is capturing";
+    - any expert backend other than ``grouped_mm``: ``for_loop`` (the SM<90
+      fallback) copies per-expert token counts to the host.
+    """
+    reasons: list[str] = []
+    if getattr(config.parallelism, "enable_data_parallel_native_ddp", False):
+        reasons.append("native DDP")
+    model = getattr(config, "model", None)
+    if model is not None and hasattr(model, "traverse"):
+        backends = {
+            getattr(moe.routed_experts, "compute_backend", "grouped_mm")
+            for _, moe, _, _ in model.traverse(MoE.Config)
+        }
+        backends.discard("grouped_mm")
+        if backends:
+            reasons.append(f"MoE expert backend {sorted(backends)}")
+    return reasons
+
+
+def maybe_disable_cuda_graphs(config: Any) -> None:
+    """Run eagerly instead of capturing when the model cannot be captured.
+
+    Raises if the config explicitly asks for a graph feature that needs
+    capture, since silently dropping it would change what the user asked for.
+    """
+    training = config.training
+    if training.disable_cuda_graphs or not cuda_graphs_supported():
+        return
+    reasons = cuda_graph_blockers(config)
+    if not reasons:
+        return
+    if config.optim.enable_cuda_graph or training.cuda_graph_per_accumulation_group:
+        raise ValueError(
+            f"CUDA graphs cannot capture {', '.join(reasons)}; unset "
+            "optim.enable_cuda_graph / training.cuda_graph_per_accumulation_group "
+            "or change the model config."
+        )
+    logger.warning(
+        "Disabling CUDA graphs: %s cannot run under capture. Pass "
+        "--training.disable-cuda-graphs to silence this.",
+        ", ".join(reasons),
+    )
+    training.disable_cuda_graphs = True
 
 
 class FaultTolerantTrainer(TorchFTTrainer):

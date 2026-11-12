@@ -10,7 +10,7 @@ were the script, not the system. Every one is checkable before `qsub`.
 
 ## Rule 0: copy the house script, do not write one
 
-`torchtitan/experiments/ezpz/scripts/sync_smoke_{aurora,sunspot}.sh` already
+`torchtitan/experiments/ezpz/scripts/sync_smoke_alcf.sh` (wrappers `sync_smoke_{sunspot,aurora,polaris,sirius}.sh`) already
 encodes everything below. Start from it. A scratch-written script has
 reproduced the same five omissions repeatedly.
 

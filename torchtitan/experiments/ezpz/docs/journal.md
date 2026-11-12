@@ -46,6 +46,155 @@ on HEAD, no fanout job executed yet — gated on verified pre-tokenized dataset
 `dataset_info.json` + `[decontam]` counts. Monarch XPU gate remains
 [monarch.md](production/rl/monarch.md) (`12479177` `40/40` `auto→Gloo` `Exit 0`).
 
+## 2026-11-05 (Sunspot) -- Combination loss A/B at two nodes, 2000 updates
+
+`agpt_2b_loss_ab` at `24` tiles, three seeds, `2000` updates, default vs BF16
+ZeRO-1 storage with block-causal attention (`12482684`-`12482686`).
+Combination minus default, mean over seeds: `+0.058` in `2`-`10`, `-0.013`
+to `-0.017` through update `1200`, `-0.004` in `1601`-`2000`; every window
+inside the default seed spread (`0.025` at the end). Final `10`-update
+windows `2.803`/`2.812`/`2.830` vs `2.801`/`2.821`/`2.826`. `15.1`-`16.4%`
+faster (`1.99`-`2.05` vs `2.38`-`2.42 s/update`). Still opt-in; defaults are
+Sam's call.
+[Report](experiments/agpt/sunspot/2026-11-02-throughput-recovery.md#two-nodes-2000-updates).
+
+## 2026-11-05 (Sunspot) -- Block-causal plus BF16 storage loss A/B
+
+`agpt_2b_loss_ab`, three seeds, `400` updates, default vs BF16 ZeRO-1
+storage with block-causal attention (`12482631`-`12482633`). Combination
+minus default, mean over seeds: `+0.051` in updates `2`-`10` (the BF16
+storage offset), `-0.017` to `-0.039` through update `300`, `-0.007` in
+`301`-`400`; every seed/window inside the `0.048`-`0.087` seed spread. Final
+windows mixed in sign. `11.7`-`18.6%` faster at one node. Both stay opt-in
+pending a multi-node and a longer run.
+[Report](experiments/agpt/sunspot/2026-11-02-throughput-recovery.md#block-causal-and-bf16-storage-together).
+
+## 2026-11-05 (Sunspot) -- TT vs MDS AdamW/ZeRO-1 at AGPT-2B
+
+Same allocation, `24` tiles (`12482619`): MDS AdamW/ZeRO-1 `2.2046`/`2.2056
+s/update`; TT FP32 storage `2.3023` (`4.4%` slower), BF16 storage `2.1387`
+(`3.0%` faster), BF16 storage with block-causal `1.9200` (`12.9%` faster,
+`95.46` TFLOP/s/tile).
+[Report](experiments/agpt/sunspot/2026-11-02-throughput-recovery.md#against-mds-adamwzero-1-at-agpt-2b).
+
+## 2026-11-05 (Sunspot) -- BF16 ZeRO-1 storage loss A/B
+
+`agpt_2b_loss_ab`, three seeds, `400` updates, FP32 vs BF16 ZeRO-1 model
+storage (`12482597`-`12482599`). BF16 minus FP32, mean over seeds: `+0.051`
+in updates `2`-`10`, `-0.041` in `11`-`50`, `-0.002` in `301`-`400`; at most
+`0.072` in any seed/window against `0.053`-`0.104` seed spread. Over the last
+`10` updates BF16 is higher in all three seeds (`+0.004`-`+0.008`). `2.5`-`6.2%`
+faster at accumulation `2`. Stays opt-in; next is a longer and a multi-node
+run. [Report](experiments/agpt/sunspot/2026-11-02-throughput-recovery.md#bf16-model-storage).
+
+## 2026-11-04 (Sunspot) -- MDS trace at z2rrt02w; BF16 ZeRO-1 storage
+
+MDS rank-0 trace at the `z2rrt02w` shape (`12482583`, `MDS_PROFILE=1`):
+`8.008 s/update`, `7.83 s` busy, against `8.95 s` for TT block-causal. TT is
+`+0.54 s` in attention backward and `+0.50 s` in casts and elementwise work;
+its cast kernels run once per layer per microbatch because the ZeRO-1 model
+holds BF16 values in FP32 storage. New opt-in
+`BENCH_DDP_ZERO1_PARAMS=bfloat16` stores the model in BF16: `8.082`/`8.087
+s/update` against `8.956`-`9.463 s` (`12482585`), `0.9%` behind MDS, peak
+memory `20.3` vs `41.8 GiB`. Gradients accumulate in BF16.
+[Report](experiments/agpt/sunspot/2026-11-02-throughput-recovery.md#bf16-model-storage).
+
+## 2026-11-04 (Sunspot) -- Block-causal stays opt-in
+
+Block-causal attention stays off by default; set
+`EZPZ_XPU_ATTN_CAUSAL_BLOCKS=4` to use it. Not yet run at multi-node scale or
+past `400` updates.
+[Report](experiments/agpt/sunspot/2026-11-02-throughput-recovery.md#loss-curve-ab).
+
+## 2026-11-04 (Sunspot) -- Block-causal loss A/B
+
+`agpt_2b_loss_ab` (AGPT-2B from random init, AdamW `3e-4`, `12` tiles,
+per-block compile), three seeds, `400` updates per arm. Block-causal
+attention (`4` chunks) minus default, mean over seeds: `+0.003`-`+0.004` in
+updates `11`-`200`, `-0.0007` in `301`-`400`; at most `0.013` in any
+seed/window, against `0.018`-`0.034` seed-to-seed spread. Final losses
+`4.122`/`4.093`/`4.090` vs `4.127`/`4.094`/`4.087`. `7.8`-`9.5%` less time per
+update in every pair. Jobs `12482374`-`12482376`.
+[Report](experiments/agpt/sunspot/2026-11-02-throughput-recovery.md#loss-curve-ab).
+
+---
+
+## 2026-11-04 (Sunspot) -- Block-causal gradients
+
+Same-batch gradient probe (`probe_block_causal_grads.py`): block-causal
+gradients differ from default by relative L2 `0.93`-`2.6` at update `1`,
+against a default repeat of `0.02`. Ruled out in turn: `torch.compile` (same
+error eager and compiled on one tile), amplified backward rounding (q/k/v
+gradient noise at `4e-3` gives `0.02`), training-call dtype/strides (saved
+calls replay correctly), and the autograd wrapper (`blk1` at the noise
+level). Forward-output noise at `1e-3` moves the gradients `7`-`100x` more
+than backward noise at `4e-3`, so these gradients are chaotic under any
+rounding-level forward change; the op matches the default kernel on four
+saved training calls. Over five sampled updates (`12482343`) block-causal
+sits inside the forward-noise range (`0.11`-`3.1` vs `0.09`-`5.3`); default
+repeat, `blk1` and backward noise stay at `5e-3`-`4e-2`. Next is a multi-seed
+loss-curve A/B. Jobs `12482320`-`12482343`.
+[Report](experiments/agpt/sunspot/2026-11-02-throughput-recovery.md#same-batch-gradients).
+
+---
+
+## 2026-11-04 (Sunspot) -- Block-causal attention at AGPT-2B
+
+`EZPZ_XPU_ATTN_CAUSAL_BLOCKS=4` on the best TT AGPT-2B arm (DDP/ZeRO-1,
+per-block compile, `24` tiles, `2 x 1`): `2.0788 s/update`, `88.17` model
+TFLOP/s/tile, against `2.2976 s` for the later same-job control. Flash backward
+drops from `0.613` to `0.384 s` per update. Update-1 losses agree to `0.001`;
+late losses sit `0.03`-`0.14` above both controls, so it stays opt-in until a
+gradient comparison. The MDS phase did not run (`BENCH_EXPECTED_MDS_HEAD`
+unset). Job `12482301`.
+[Report](experiments/agpt/sunspot/2026-11-02-throughput-recovery.md#block-causal-attention-at-agpt-2b).
+
+---
+
+## 2026-11-03 (Sunspot) -- TT at the z2rrt02w shape
+
+New flavor `mds-4096x10` (`agpt_mds_shape_benchmark_adamw`) runs the 2025 MDS
+shape in TT. Same node, same batch (GAS `16`, sequence `4096`): MDS `110.36`
+model TFLOP/s/tile, TT DDP/ZeRO-1 `87.17`-`87.66`, TT FSDP `58.22`. The trace
+is compute-bound and the torch `2.14` flash backward runs at `38` TFLOP/s
+because it does not skip causally masked tiles. Block-causal attention
+(`EZPZ_XPU_ATTN_CAUSAL_BLOCKS=4`) gives `96.62`, `7`-`10%` over same-job
+controls; TT is still `14%` behind MDS. Jobs `12482280`, `12482281`.
+[Report](experiments/agpt/sunspot/2026-11-02-throughput-recovery.md#tt-at-the-2025-high-throughput-shape).
+
+---
+
+## 2026-11-03 (Sunspot) -- Cold first launch and MDS shape
+
+The `6.1%` "machine gap" is not the machine. On a node that has not run this
+workload in the last ~10 minutes, the first TT launch runs at `87`-`92` model
+TFLOP/s/tile for its whole lifetime; every later launch in the same job gives
+`92.6`-`95.1`, at or above July's `93.75`. Ruled out: `CCL_OP_SYNC`,
+`OMP_NUM_THREADS`, node image, hardware, page cache, CPU contention, XeLink
+prewarm and expandable segments. MDS does not show it. Separately, MDS at the
+2025 `z2rrt02w` shape (hidden `4096`, sequence `4096`, Llama2 vocab) gives
+`109.18` on today's Sunspot stack against `102.9` in July 2025; the current
+AGPT-2B shape has never exceeded `93.0`. Jobs `12482147`-`12482248`.
+[Report](experiments/agpt/sunspot/2026-11-02-throughput-recovery.md#anchor-launch-environment).
+
+---
+
+## 2026-11-02 (Sunspot) -- XPU throughput recovery
+
+Took over Codex thread `01a168eb` after its historical-throughput goal stalled.
+Per-block `torch.compile` (`EZPZ_AGPT_COMPILE_BLOCKS`) raises TT native
+DDP/ZeRO-1 from `75.84` to `79.42`-`80.20` model TFLOP/s/tile; TT is `2.3`-`2.6%`
+faster than the MDS SophiaG control in the same allocation. MDS reproduces its
+March `8dscnx65` rate (`89.76` vs `89.99`) at GBS `384`/accumulation `16`/AdamW.
+The TT anchor `6tc71of4` re-run on its own code and runtime gives `88.00` vs
+`93.75` in July. Local batch `> 1` was broken by the flat token layout (RoPE
+`cache[:T]`) and is fixed in the blendcorpus loader; native DDP at local batch
+`2` runs out of memory on FP32 logits. Jobs `12482111`, `12482112`, `12482114`,
+`12482126`, `12482127`. Next: the `6.1%` machine gap and native DDP local batch
+`2`. [Report](experiments/agpt/sunspot/2026-11-02-throughput-recovery.md).
+
+---
+
 ## 2026-11-04: B2v2 stage-2 SFT eval on Sunspot — more epochs hurts
 
 Extends B2 lineage `global_step138650 -> checkpoint-900-hf (IFEval 0.253)` with
@@ -72,6 +221,7 @@ Verdict and full table in [POST-TRAINING-2B B2v2](production/POST-TRAINING-2B.md
 and [production SFT index](production/sft/README.md). Next is pre-tokenized
 OpenThoughts-114k distill mix, not more narrow epochs — see 16N fanout below.
 
+## 2026-11-02: historical XPU throughput reconciliation
 
 - Recompute older Sunspot TT histories with the new report's exact model
   FLOPs convention: `6tc71of4` gives `93.75`, `xcs4xrqe` gives `90.85`
