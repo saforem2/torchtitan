@@ -1,0 +1,736 @@
+#!/bin/bash --login
+#PBS -A AuroraGPT
+#PBS -N seat-autoretry-20261111
+#PBS -l walltime=12:00:00
+#PBS -l filesystems=home:flare
+#PBS -q prod
+#PBS -j oe
+# ONE SEAT PER PBS JOB. Forked from umbrella-2088n-20261109.pbs after 9053470:
+# a GPU fatal error on one 10B node made PBS kill the whole 2088N job and all
+# four seats with it. Submit each seat on its own via submit-seats-20261111.sh
+# (MULTI_ONLY=<seat>, -l select=active+spares), so a dead node costs one seat.
+#   seat 0: 20B 512N  select=520   seat 1: 20B 256N  select=260
+#   seat 3: 4B  512N  select=522   seat 4: 10B 512N  select=522
+# Changes vs the umbrella: 10B moved 768N -> 512N (GBS 9216 -> 6144, dp6144
+# manifest, new ckpt dir; at 9216 ranks step-1 loss was 17788-38478 and the
+# oneCCL scale-out allreduce failed); HF_DATASETS_CACHE on node-local /tmp
+# (all ranks serialized on one /home lock, ~53 min per 10B attempt).
+#
+# Seats 0/1 (20B) are the legacy blendcorpus seats on the immutable prod venv
+# archive. Seats 3/4 (agpt-v2 4B/10B, 4K seq, OLMo-3 tokenizer) stream the raw
+# olmo-mix-1124 through Grain from their own pinned checkouts and run on the
+# frameworks/2026.1.0 venv overlay. Each v2 launch rebuilds its environment in
+# a subshell from the PATH/LD_LIBRARY_PATH captured below, so the 20B runtime
+# never leaks into it and vice versa.
+
+# Required per selected seat: WORKDIR_20B512/WORKDIR_20B256/WORKDIR_2B
+# (separately pinned, position-patched checkout), INITIAL_LOAD_* (absolute DCP
+# step with .metadata). Optional EXPECTED_HEAD_* pins each checkout exactly;
+# EXPECTED_HEAD pins this submission repo; EXPECTED_PARENT checks its ancestry.
+# CLI_DIALECT=legacy (production batch/seq flags) or tokens (newer source only).
+# DRY_RUN=1 validates source, checkpoint seed, allocation and disjoint slices,
+# then exits before checkpoint mkdir, archive broadcast, or hardware probes.
+
+set -o pipefail
+ulimit -c 0
+
+# Pristine login environment, captured before any 20B runtime setup. The v2
+# seats restore it inside their launch subshells.
+CLEAN_PATH="$PATH"
+CLEAN_LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
+
+# ── Source identity guard ──────────────────────────────────────────────
+EXPECTED_PARENT="${EXPECTED_PARENT:-a0a4ed9b3c}"
+# Optional immutable checkout pin supplied by the submission wrapper. No self-hash.
+EXPECTED_HEAD="${EXPECTED_HEAD:-}"
+
+REPO="${REPO:-/lus/flare/projects/AuroraGPT/foremans/projects/saforem2/torchtitan-ezpz}"
+cd "$REPO" || { echo "FATAL: REPO not found: $REPO"; exit 1; }
+
+HEAD_SHA="$(git rev-parse HEAD)"
+if ! git merge-base --is-ancestor "$EXPECTED_PARENT" HEAD 2>/dev/null; then
+  echo "FATAL: HEAD $HEAD_SHA does not contain EXPECTED_PARENT $EXPECTED_PARENT"
+  echo "  (submission checkout ancestry differs; do not rebuild the pinned runtime)"
+  exit 1
+fi
+if [[ -n "$EXPECTED_HEAD" && "$HEAD_SHA" != "$EXPECTED_HEAD" ]]; then
+  echo "FATAL: HEAD $HEAD_SHA does not match EXPECTED_HEAD $EXPECTED_HEAD"
+  exit 16
+fi
+echo "Source guard OK: HEAD=$HEAD_SHA contains $EXPECTED_PARENT"
+
+# ── Resume position (samples, not tokens) — Option B: first-unseen + 5% margin, ceil to GBS ──
+# Base: 1200*12288=14745600 (512N), 1550*6144=9523200 (256N)
+# +5% exact: 15482880 (=1260*12288), 9999360 (=1627.5*6144)
+# Verified GBS-aligned ceil: 15482880 (exact), 10002432 (=1628*6144)
+# tokens = samples * 8192 (seq_len)
+RESUME_SAMPLES_20B512=15482880
+RESUME_SAMPLES_20B256=10002432
+
+# ── Checkpoint dirs (fork, don't overwrite) ────────────────────────────
+CKPT_20B512_SRC="outputs/checkpoints/agpt-20b-sophiag-olmo-mix-1124-n512-gbs12288-constlr-from9000"
+CKPT_20B512_NEW="outputs/checkpoints/agpt-20b-sophiag-olmo-mix-1124-n512-gbs12288-constlr-from9000-fixedpos"
+CKPT_20B256_SRC="outputs/checkpoints/agpt-20b-sophiag-olmo-mix-1124-n256-gbs6144"
+CKPT_20B256_NEW="outputs/checkpoints/agpt-20b-sophiag-olmo-mix-1124-n256-gbs6144-fixedpos"
+CKPT_2B_RECLAIM="outputs/checkpoints/agpt-2b-v2-512-reclaim-20261020"
+
+# ---- Common env ----
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT CCL_PROCESS_LAUNCHER=pmix CCL_OP_SYNC=1
+export ONEAPI_DEVICE_SELECTOR="opencl:gpu;level_zero:gpu" TORCH_CPP_LOG_LEVEL=ERROR
+export http_proxy="${http_proxy:-http://proxy.alcf.anl.gov:3128}"
+export https_proxy="${https_proxy:-http://proxy.alcf.anl.gov:3128}"
+
+RUNS="/flare/AuroraGPT/foremans/runs"
+SEQ_LEN=8192
+LBS=2; GAS=1
+TP=1; PP=1; CP=1
+OPTIMIZER="sophiag"
+LR="2.28e-5"
+DECAY_RATIO="0.0"
+MIN_LR_FACTOR="1.0"
+TRAIN_TOKENS="4673780159710"
+PPN="${NGPU_PER_HOST:-12}"
+IDLE_TIMEOUT="${IDLE_TIMEOUT:-1800}"
+CKPT_INTERVAL="${CKPT_INTERVAL:-100}"
+
+# Spare nodes per seat, sized roughly by active node count (40 total for the
+# default 2088N layout). A SPARES=N override (tests) applies N to every seat.
+SPARES_20B512="${SPARES_20B512:-${SPARES:-8}}"
+SPARES_20B256="${SPARES_20B256:-${SPARES:-4}}"
+SPARES_2B="${SPARES_2B:-${SPARES:-10}}"
+SPARES_V2_4B="${SPARES_V2_4B:-${SPARES:-10}}"
+SPARES_V2_10B="${SPARES_V2_10B:-${SPARES:-10}}"
+
+# ---- agpt-v2 seats (4B / 10B, 4K seq, OLMo-3 tokenizer, raw olmo-mix) ----
+# Separate checkouts per seat: ezpz auto-retry keeps per-launch state in the
+# working directory, so two seats must never share one (see SEEN_WORKDIR).
+V2_ROOT=/lus/flare/projects/AuroraGPT/foremans/projects/saforem2
+WORKDIR_V2_4B="${WORKDIR_V2_4B:-$V2_ROOT/torchtitan-v2-olmomix-6ad208b}"
+WORKDIR_V2_10B="${WORKDIR_V2_10B:-$V2_ROOT/torchtitan-v2-olmomix-6ad208b-10b}"
+EXPECTED_HEAD_V2="${EXPECTED_HEAD_V2:-6ad208b3c2d5736e8820dd0f47c203cfa1b43f7a}"
+V2_VENV="${V2_VENV:-/flare/AuroraGPT/foremans/venvs/torchtitan-v2-frameworks-2026.1.0-zstd}"
+V2_UTILS="${V2_UTILS:-/flare/AuroraGPT/foremans/scratch/diagnostics/runtime-artifacts/ezpz-utils-20261109.sh}"
+V2_UTILS_SHA="${V2_UTILS_SHA:-12c2e056d45c8a4ce15f5097f83eda86caa08353ac645cde0133c9087a3cc8cd}"
+V2_MANIFESTS=/flare/AuroraGPT/foremans/scratch/umbrella-v2-manifests
+# The 4B keeps the sorted manifest it started on: its data cursor indexes into
+# that file order, so a reordered file would repeat and skip data on resume.
+# The sorted order is a curriculum under split_dataset_by_node (no starcoder
+# until each rank's last file). The 10B starts fresh on a seeded shuffle of
+# the same 24576 files (build_olmo_mix_manifest.py --order shuffle --seed 0).
+MANIFEST_V2_4B="${MANIFEST_V2_4B:-$V2_MANIFESTS/olmo-mix-dp6144.txt}"
+MANIFEST_V2_10B="${MANIFEST_V2_10B:-$V2_MANIFESTS/olmo-mix-dp6144-shuf0.txt}"
+NNODES_V2_10B="${NNODES_V2_10B:-512}"
+GBS_V2_10B="${GBS_V2_10B:-6144}"
+CKPT_V2_4B="${CKPT_V2_4B:-outputs/checkpoints/agpt-v2-4b-4k-olmo-mix-n512-20261109}"
+CKPT_V2_10B="${CKPT_V2_10B:-outputs/checkpoints/agpt-v2-10b-4k-olmo-mix-n512-20261111}"
+# UNVERIFIED production LRs: 4B AdamW 1e-4 is the best 100-step fixed-LR
+# endpoint at GBS 6144 / seq 4096 (lr-finder/agpt/5b); 10B 7e-5 is scaled
+# from its finder basin (4.64e-4 vs 6.58e-4 for 5B) and was never fixed-LR
+# validated.
+LR_V2_4B="${LR_V2_4B:-1e-4}"
+LR_V2_10B="${LR_V2_10B:-7e-5}"
+V2_WARMUP_STEPS="${V2_WARMUP_STEPS:-2000}"
+V2_SEQ_LEN=4096
+# UNVERIFIED token budget: same 4.67T target as the 20B seats. With constant
+# LR (decay-ratio 0) it only sets --training.steps, which this 24h allocation
+# cannot reach (4B: 185,710 steps; 10B: 123,806 steps).
+TRAIN_TOKENS_V2="${TRAIN_TOKENS_V2:-4673780159710}"
+
+# ---- Trainer table (REAL config names via CONFIG_SUFFIX pattern) ----
+# Config names follow submit_agpt_multi_autoretry.sh: agpt_${MODEL}${CONFIG_SUFFIX}
+# where MODEL=20b/2b and CONFIG_SUFFIX=_real (cos_sin RoPE). NOT agpt_20b_n512.
+#  Format: model|nnodes|port|workdir|ckpt|dfl_name|lr|init_load|decay|minlr|tokens|spares|resume_samples|gbs
+#  resume_samples is consumed via BLENDCORPUS_RESUME_CONSUMED_SAMPLES env (mpiexec --envall)
+TRAINERS=(
+  "20b|512|29500|${WORKDIR_20B512:-/lus/flare/projects/AuroraGPT/foremans/projects/saforem2/torchtitan-20b512-fixedpos-20261029}|${REPO}/${CKPT_20B512_NEW}|olmo-mix-1124|${LR}|${INITIAL_LOAD_20B512:-/lus/flare/projects/AuroraGPT/foremans/projects/saforem2/torchtitan-ezpz/outputs/checkpoints/agpt-20b-sophiag-olmo-mix-1124-n512-gbs12288-constlr-from9000/step-10800}|${DECAY_RATIO}|${MIN_LR_FACTOR}|${TRAIN_TOKENS}|${SPARES_20B512}|${RESUME_SAMPLES_20B512}|12288"
+  "20b|256|29600|${WORKDIR_20B256:-/lus/flare/projects/AuroraGPT/foremans/projects/saforem2/torchtitan-20b256-fixedpos-20261029}|${REPO}/${CKPT_20B256_NEW}|olmo-mix-1124|${LR}|${INITIAL_LOAD_20B256:-/lus/flare/projects/AuroraGPT/foremans/projects/saforem2/torchtitan-ezpz/outputs/checkpoints/agpt-20b-sophiag-olmo-mix-1124-n256-gbs6144/step-20900}|${DECAY_RATIO}|${MIN_LR_FACTOR}|${TRAIN_TOKENS}|${SPARES_20B256}|${RESUME_SAMPLES_20B256}|6144"
+  "2b|512|29700|${WORKDIR_2B:-}|${REPO}/${CKPT_2B_RECLAIM}|olmo-mix-1124|${LR}|${INITIAL_LOAD_2B:-}|${DECAY_RATIO}|${MIN_LR_FACTOR}|${TRAIN_TOKENS}|${SPARES_2B}|0|12288"
+  "4b|512|29800|${WORKDIR_V2_4B}|${REPO}/${CKPT_V2_4B}|${MANIFEST_V2_4B}|${LR_V2_4B}||0.0|1.0|${TRAIN_TOKENS_V2}|${SPARES_V2_4B}|0|6144"
+  "10b|${NNODES_V2_10B}|29900|${WORKDIR_V2_10B}|${REPO}/${CKPT_V2_10B}|${MANIFEST_V2_10B}|${LR_V2_10B}||0.0|1.0|${TRAIN_TOKENS_V2}|${SPARES_V2_10B}|0|${GBS_V2_10B}"
+)
+# Seats 3/4 reuse the row format: dfl_name holds the raw olmo-mix manifest,
+# init_load is empty (fresh runs), resume_samples is unused (Grain resumes
+# its own stream position from the checkpoint).
+is_v2_seat() { case "$1" in 3|4) return 0 ;; *) return 1 ;; esac; }
+
+# Select by stable table index; reject unknown/duplicate/empty selections.
+MULTI_ONLY="${MULTI_ONLY:-}"
+[[ "$MULTI_ONLY" =~ ^[0-4]$ ]] || { echo "FATAL: MULTI_ONLY must name exactly one seat (got '$MULTI_ONLY')"; exit 2; }
+for idx in "${!TRAINERS[@]}"; do
+  case ",$MULTI_ONLY," in *,"$idx",*) ;; *) unset 'TRAINERS[idx]' ;; esac
+done
+IFS=',' read -ra selected <<< "$MULTI_ONLY"
+(( ${#selected[@]} == ${#TRAINERS[@]} )) || { echo "FATAL: duplicate MULTI_ONLY seats"; exit 2; }
+CLI_DIALECT="${CLI_DIALECT:-legacy}"
+case "$CLI_DIALECT" in legacy|tokens) ;; *) echo "FATAL: invalid CLI_DIALECT=$CLI_DIALECT"; exit 2;; esac
+for _v in SPARES_20B512 SPARES_20B256 SPARES_2B SPARES_V2_4B SPARES_V2_10B; do
+  [[ "${!_v}" =~ ^[0-9]+$ ]] || { echo "FATAL: invalid $_v=${!_v}"; exit 2; }
+done
+
+# Validate PBS allocation
+[[ -n "${PBS_NODEFILE:-}" && -f "$PBS_NODEFILE" ]] || { echo "FATAL: PBS_NODEFILE missing"; exit 1; }
+TOTAL_AVAIL=$(wc -l < "$PBS_NODEFILE")
+NEED=0
+for row in "${TRAINERS[@]}"; do
+  IFS='|' read -r _m nnodes _port _wd _ckpt _dfl _lr _init _decay _minlr _tok _sp _rs _gbs <<< "$row"
+  NEED=$(( NEED + nnodes + _sp ))
+done
+echo "Nodes: need=$NEED available=$TOTAL_AVAIL spares 20b512/20b256/4b/10b=$SPARES_20B512/$SPARES_20B256/$SPARES_V2_4B/$SPARES_V2_10B"
+if (( TOTAL_AVAIL < NEED )); then
+  echo "FATAL: allocation too small: have $TOTAL_AVAIL need $NEED (select=$NEED for this umbrella)"
+  exit 1
+fi
+
+# Capture source mtimes BEFORE any fork operation
+declare -A SRC_MTIME_BEFORE
+SOURCES=()
+[[ -n "${TRAINERS[0]:-}" ]] && SOURCES+=("$CKPT_20B512_SRC")
+[[ -n "${TRAINERS[1]:-}" ]] && SOURCES+=("$CKPT_20B256_SRC")
+for SRC in "${SOURCES[@]}"; do
+  if [[ ! -d "$SRC" ]]; then
+    echo "FATAL: source ckpt dir missing: $SRC"
+    exit 1
+  fi
+  if ! ls "$SRC"/step-*/.metadata >/dev/null 2>&1; then
+    echo "FATAL: source $SRC has no step-*/.metadata — not a valid DCP dir"
+    exit 1
+  fi
+  SRC_MTIME_BEFORE["$SRC"]="$(stat -c %Y "$SRC" 2>/dev/null || stat -f %m "$SRC" 2>/dev/null || echo 0)"
+done
+echo "Source ckpt dirs OK (metadata present)"
+
+# Fresh output forks must not silently start from random weights. Select an
+# explicit DCP step, not its parent directory; never infer "latest" here.
+declare -A SEEN_WORKDIR
+for idx in "${!TRAINERS[@]}"; do
+  row="${TRAINERS[$idx]}"
+  IFS='|' read -r _m _n _port _wd _ckpt _dfl _lr initial _decay _minlr _tok _sp rs gbs <<< "$row"
+  [[ -d "$_wd" ]] || { echo "FATAL: trainer $idx workdir missing: $_wd"; exit 2; }
+  canonical_wd=$(cd "$_wd" && pwd -P) || exit 2
+  if [[ -n "${SEEN_WORKDIR[$canonical_wd]:-}" ]]; then
+    echo "FATAL: trainer $idx shared workdir $canonical_wd (auto-retry state collision)"; exit 2
+  fi
+  SEEN_WORKDIR[$canonical_wd]=1
+  case "$idx" in
+    # Pinned to the commits verified on 2026-11-09 (9055306 / 9055361 + 151f305 resume fix).
+    0) pin="${EXPECTED_HEAD_20B512:-dc6c150975f8b7abd5377c115436db3fa85fcf60}" ;;
+    1) pin="${EXPECTED_HEAD_20B256:-151f305cc2378c74694147437be60babf9a32cc3}" ;;
+    2) pin="${EXPECTED_HEAD_2B:-}" ;;
+    3|4) pin="$EXPECTED_HEAD_V2" ;;
+  esac
+  seat_head=$(git -C "$_wd" rev-parse HEAD) || exit 2
+  git -C "$_wd" diff --quiet && git -C "$_wd" diff --cached --quiet || {
+    echo "FATAL: trainer $idx tracked source edits"; exit 16;
+  }
+  if [[ -n "$pin" && "$pin" != "$seat_head" ]]; then
+    echo "FATAL: trainer $idx HEAD $seat_head does not match pinned $pin"; exit 16
+  fi
+  if is_v2_seat "$idx"; then
+    # Fresh v2 run: no seed, raw-text manifest sized to whole files per rank.
+    [[ -z "$initial" ]] || { echo "FATAL: v2 seat $idx expects no initial load: $initial"; exit 2; }
+    [[ -f "$_wd/assets/hf/OLMo-2-1124-7B/tokenizer.json" ]] || {
+      echo "FATAL: v2 seat $idx tokenizer missing under $_wd/assets/hf/OLMo-2-1124-7B"; exit 2;
+    }
+    [[ -s "$_dfl" ]] || { echo "FATAL: v2 seat $idx manifest missing: $_dfl"; exit 2; }
+    num_files=$(grep -c . "$_dfl")
+    dp=$(( _n * PPN ))
+    if (( num_files % dp != 0 )); then
+      echo "FATAL: v2 seat $idx manifest has $num_files files, not divisible by dp=$dp"
+      echo "  (split_dataset_by_node would make every rank read the whole corpus)"
+      exit 2
+    fi
+    if (( gbs % dp != 0 )); then
+      echo "FATAL: v2 seat $idx GBS $gbs not divisible by dp=$dp"; exit 2
+    fi
+    echo "v2 seat $idx OK: HEAD=$seat_head manifest=$num_files files ($(( num_files / dp ))/rank) dp=$dp gbs=$gbs"
+    continue
+  fi
+  if ! grep -q "BLENDCORPUS_RESUME_CONSUMED_SAMPLES" \
+      "$_wd/torchtitan/experiments/ezpz/blendcorpus/blendcorpus_builder.py"; then
+    echo "FATAL: trainer $idx position fix missing in $_wd"; exit 2
+  fi
+  if [[ "$initial" != /* || ! -f "$initial/.metadata" ]]; then
+    echo "FATAL: $_m initial load must explicitly name a valid DCP step (.metadata): $initial"
+    exit 2
+  fi
+  if (( rs % gbs != 0 )); then
+    echo "FATAL: resume_samples $rs not aligned to GBS $gbs"
+    exit 2
+  fi
+done
+
+# v2 runtime: pinned utils + Lustre-resident frameworks venv overlay.
+if [[ -n "${TRAINERS[3]:-}${TRAINERS[4]:-}" ]]; then
+  [[ -f "$V2_UTILS" ]] || { echo "FATAL: v2 utils missing: $V2_UTILS"; exit 1; }
+  v2_utils_sum=$(sha256sum "$V2_UTILS") || exit 1
+  [[ "${v2_utils_sum%% *}" == "$V2_UTILS_SHA" ]] || { echo "FATAL: v2 utils SHA mismatch: $v2_utils_sum"; exit 16; }
+  [[ -x "$V2_VENV/bin/python" && -x "$V2_VENV/bin/ezpz" ]] || { echo "FATAL: v2 venv entry points missing: $V2_VENV"; exit 1; }
+  echo "v2 runtime OK: utils_sha=$V2_UTILS_SHA venv=$V2_VENV"
+fi
+
+# Slice dir
+JOBID="${PBS_JOBID%%.*}"; [[ -z "$JOBID" ]] && JOBID="nojob"
+MULTI_LOG_DIR="${PBS_O_WORKDIR:-$PWD}/logs/multi-autoretry-${JOBID}"
+mkdir -p "$MULTI_LOG_DIR" || exit 1
+case "$MULTI_LOG_DIR" in /*) : ;; *) MULTI_LOG_DIR="$(cd "$MULTI_LOG_DIR" && pwd)" ;; esac
+echo "Logs under: $MULTI_LOG_DIR"
+
+# Slice a nodefile into disjoint per-seat hostfiles (active + spares, in
+# order). Run once on the PBS nodefile for validation, and again after the
+# host preflight on the healthy nodes only.
+declare -a T_SLICE
+slice_nodes() {  # <nodefile>
+  local nodefile="$1" offset=1 idx slice_count slice_file got dupes
+  for idx in "${!TRAINERS[@]}"; do
+    IFS='|' read -r _m nnodes _port _wd _ckpt _dfl _lr _init _decay _minlr _tok _sp _rs _gbs <<< "${TRAINERS[$idx]}"
+    slice_count=$(( nnodes + _sp ))
+    slice_file="$MULTI_LOG_DIR/trainer-${idx}.hostfile"
+    sed -n "${offset},$((offset + slice_count - 1))p" "$nodefile" > "$slice_file"
+    got=$(wc -l < "$slice_file")
+    if (( got != slice_count )); then
+      echo "FATAL: trainer $idx sliced $got nodes expected $slice_count offset=$offset"
+      exit 1
+    fi
+    T_SLICE[$idx]="$slice_file"
+    offset=$(( offset + slice_count ))
+  done
+  dupes=$(cat "${T_SLICE[@]}" | sort | uniq -d)
+  if [[ -n "$dupes" ]]; then
+    echo "FATAL: slices overlap:"; echo "$dupes"; exit 1
+  fi
+  echo "Slices disjoint OK (from $nodefile)"
+}
+slice_nodes "$PBS_NODEFILE"
+
+# Resolved banner
+echo "============================================================"
+echo "  agpt boost umbrella (native auto-retry)  jobid=$JOBID"
+for idx in "${!TRAINERS[@]}"; do
+  IFS='|' read -r model nnodes port wd ckpt dfl lr init decay minlr tok sp rs gbs <<< "${TRAINERS[$idx]}"
+  echo "  trainer $idx: $model n=$nnodes gbs=$gbs port=$port ckpt=$ckpt resume_samples=$rs workdir=$wd dialect=$CLI_DIALECT"
+done
+echo "============================================================"
+
+if [[ "${DRY_RUN:-0}" == "1" ]]; then
+  echo "Dry run OK: no checkpoint directories created, runtime staged, or trainers launched"
+  exit 0
+fi
+
+for row in "${TRAINERS[@]}"; do
+  IFS='|' read -r _m _n _port _wd D _rest <<< "$row"
+  if [[ ! -d "$D" ]]; then
+    echo "Creating fork dir: $D"
+    mkdir -p "$D" || exit 1
+    lfs setstripe -c 2 -i 10 "$D" 2>&1 || echo "WARNING: lfs setstripe failed for $D"
+  fi
+done
+
+# Seed each fork with a symlink to its explicit initial DCP step. The trainer
+# ignores --checkpoint.initial-load-path whenever checkpoint.folder exists
+# (torchtitan/components/checkpoint.py load()), and the fork dir always exists
+# here, so without this every seat silently starts from random weights at
+# step 1. A fork that already holds its own step-* resumes from its latest.
+for row in "${TRAINERS[@]}"; do
+  IFS='|' read -r _m _n _port _wd D _dfl _lr init _rest <<< "$row"
+  [[ -n "$init" ]] || continue
+  if ! compgen -G "$D/step-*" >/dev/null; then
+    name=$(basename "$init")
+    [[ "$name" =~ ^step-[0-9]+$ ]] || { echo "FATAL: initial load is not a step-N dir: $init"; exit 2; }
+    ln -s "$init" "$D/$name" || { echo "FATAL: could not seed $D/$name"; exit 1; }
+    echo "Seeded $D/$name -> $init"
+  fi
+  ls "$D"/step-*/.metadata >/dev/null 2>&1 || { echo "FATAL: fork $D has no loadable step"; exit 2; }
+done
+
+# Verify source mtime unchanged after fork (fork must not mutate source)
+for SRC in "${SOURCES[@]}"; do
+  AFTER="$(stat -c %Y "$SRC" 2>/dev/null || stat -f %m "$SRC" 2>/dev/null || echo 0)"
+  BEFORE="${SRC_MTIME_BEFORE[$SRC]}"
+  if [[ "$AFTER" != "$BEFORE" ]]; then
+    echo "FATAL: source $SRC mtime changed after fork: before=$BEFORE after=$AFTER"
+    echo "  (fork must not mutate source — check for accidental mv/cp into source)"
+    exit 3
+  fi
+done
+echo "Checkpoint dirs OK (fork clean, source mtime unchanged)"
+
+# ── Runtime: frameworks/2026.1.0 + pinned uv overlays, run in place ──
+# All seats use the node-local /opt/aurora frameworks/2026.1.0 image with a
+# Lustre-resident uv overlay venv; nothing is yeeted. The previous 20B runtime
+# (f7deda7 archive: torch 2.13.0.dev20260428 on py3.14, ezpz 0.29.2) hung or
+# segfaulted in its first collectives on the 26.181.0 stack (jobs 9054998,
+# 9055075, 9055190); the 20B seats passed on this runtime (9055306, 9055361),
+# as did the v2 seats (9055264).
+FW20_VENV="${FW20_VENV:-/flare/AuroraGPT/foremans/venvs/torchtitan-20b-frameworks-2026.1.0}"
+[[ -f "$V2_UTILS" ]] || { echo "FATAL: ezpz utils missing: $V2_UTILS"; exit 1; }
+utils_sum=$(sha256sum "$V2_UTILS") || exit 1
+[[ "${utils_sum%% *}" == "$V2_UTILS_SHA" ]] || { echo "FATAL: ezpz utils SHA mismatch: $utils_sum"; exit 16; }
+for venv in "$FW20_VENV" "$V2_VENV"; do
+  [[ -x "$venv/bin/python" && -x "$venv/bin/ezpz" && -f "$venv/bin/activate" ]] \
+    || { echo "FATAL: venv entry points missing: $venv"; exit 1; }
+done
+
+# Build one seat's runtime inside the CALLER's subshell, exactly as the passing
+# 2N tests did: drop the 20B-era exports from this shell, load the frameworks
+# module, activate the pinned overlay, then ezpz_setup_env. Activation must
+# come first: ezpz_setup_env otherwise looks for
+# venvs/aurora/<workdir basename>-aurora_frameworks-* and CREATES an empty venv
+# when it is absent (job 9055134 died on "No module named 'grain'" that way).
+setup_frameworks_env() {  # <venv>; call from inside a subshell
+  local venv="$1" py_prefix
+  export PATH="$CLEAN_PATH" LD_LIBRARY_PATH="$CLEAN_LD_LIBRARY_PATH"
+  unset VIRTUAL_ENV PYTHONPATH CONDA_PREFIX
+  unset CCL_PROCESS_LAUNCHER CCL_OP_SYNC CCL_ATL_SYNC_COLL CCL_KVS_MODE CCL_SYCL_KERNEL_SYNC
+  unset ONEAPI_DEVICE_SELECTOR TORCH_CPP_LOG_LEVEL BLENDCORPUS_RESUME_CONSUMED_SAMPLES AGPT_V2_DATA_MANIFEST
+  export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+  module load frameworks/2026.1.0 || { echo "FATAL: module load frameworks/2026.1.0"; return 98; }
+  # shellcheck disable=SC1091
+  source "$venv/bin/activate" || { echo "FATAL: activate $venv"; return 98; }
+  # shellcheck disable=SC1090
+  source "$V2_UTILS" && ezpz_setup_env || { echo "FATAL: ezpz_setup_env failed"; return 98; }
+  py_prefix=$(python3 -c 'import sys; print(sys.prefix)') || return 98
+  [[ "$(readlink -f "$py_prefix")" == "$(readlink -f "$venv")" ]] \
+    || { echo "FATAL: python is $py_prefix, expected $venv"; return 98; }
+  hash -r
+}
+echo "Runtime OK: frameworks/2026.1.0 20b_venv=$FW20_VENV v2_venv=$V2_VENV utils_sha=$V2_UTILS_SHA"
+
+# Check source/runtime visibility on every allocated active AND spare host.
+# A login-node check or a four-node canary does not establish 788-node mounts.
+RESTART_PROBE_DIRS="$REPO"
+RESTART_PROBE_WRITES=""
+RESTART_PROBE_SEEDS=""
+for row in "${TRAINERS[@]}"; do
+  IFS='|' read -r _m _n _port _wd _ckpt _dfl _lr _seed _rest <<< "$row"
+  RESTART_PROBE_DIRS+="|$_wd"
+  RESTART_PROBE_WRITES+="|$_ckpt"
+  RESTART_PROBE_SEEDS+="|$_seed"
+done
+# v2 seats read their manifest, the Lustre venv and the pinned utils on
+# every host; probe those too.
+RESTART_PROBE_FILES=""
+for idx in 3 4; do
+  [[ -n "${TRAINERS[$idx]:-}" ]] || continue
+  IFS='|' read -r _m _n _port _wd _ckpt _dfl _rest <<< "${TRAINERS[$idx]}"
+  RESTART_PROBE_FILES+="|$_dfl|$_wd/assets/hf/OLMo-2-1124-7B/tokenizer.json"
+done
+RESTART_PROBE_FILES+="|$V2_UTILS"
+RESTART_PROBE_VENVS="$FW20_VENV|$V2_VENV"
+# Each host is probed independently over ssh, so one dead node is recorded as
+# bad instead of aborting a single 2088-rank mpiexec. Bad nodes come out of the
+# spare budget below; the umbrella aborts only if they exceed it.
+PROBE_DIR="$MULTI_LOG_DIR/host-preflight"
+mkdir -p "$PROBE_DIR" || exit 1
+PROBE_PY="$PROBE_DIR/probe.py"
+PROBE_SH="$PROBE_DIR/probe.sh"
+cat > "$PROBE_PY" <<'PY'
+import os, socket
+from pathlib import Path
+import torch
+for value in os.environ["RESTART_PROBE_DIRS"].split("|"):
+    if value:
+        assert (Path(value)/"torchtitan/experiments/ezpz/blendcorpus/blendcorpus_builder.py").is_file(), value
+for value in os.environ["RESTART_PROBE_WRITES"].split("|"):
+    if value:
+        assert Path(value).is_dir() and os.access(value, os.W_OK), value
+for value in os.environ["RESTART_PROBE_SEEDS"].split("|"):
+    if value:
+        assert (Path(value)/".metadata").stat().st_size > 0, value
+for value in os.environ["RESTART_PROBE_FILES"].split("|"):
+    if value:
+        assert Path(value).is_file(), value
+for venv in os.environ["RESTART_PROBE_VENVS"].split("|"):
+    for name in ["python", "ezpz"]:
+        path = Path(venv)/"bin"/name
+        assert path.exists() and os.access(path, os.X_OK), str(path)
+assert torch.xpu.is_available() and torch.xpu.device_count() >= 12
+print("RESTART_HOST_PREFLIGHT_PASS", socket.gethostname(), flush=True)
+PY
+{
+  echo '#!/bin/bash --login'
+  for _v in RESTART_PROBE_DIRS RESTART_PROBE_WRITES RESTART_PROBE_SEEDS RESTART_PROBE_FILES RESTART_PROBE_VENVS; do
+    printf 'export %s=%q\n' "$_v" "${!_v}"
+  done
+  echo 'export ZE_FLAT_DEVICE_HIERARCHY=FLAT'
+  echo 'module load frameworks/2026.1.0 >/dev/null 2>&1 || { echo "module load failed"; exit 98; }'
+  printf 'source %q/bin/activate || exit 98\n' "$FW20_VENV"
+  printf 'exec python3 %q\n' "$PROBE_PY"
+} > "$PROBE_SH"
+
+probe_one() {  # <host>; prints the host if it passes
+  local host="$1" log="$PROBE_DIR/${1%%.*}.log"
+  # Test hook: PREFLIGHT_FORCE_FAIL=<short hostname>[,...] marks hosts bad.
+  case ",${PREFLIGHT_FORCE_FAIL:-}," in *",${host%%.*},"*) echo "forced fail" > "$log"; return 0 ;; esac
+  timeout "${PREFLIGHT_TIMEOUT:-600}" ssh -o ConnectTimeout=20 -o BatchMode=yes \
+    -o StrictHostKeyChecking=no "$host" "bash --login $PROBE_SH" > "$log" 2>&1
+  grep -q RESTART_HOST_PREFLIGHT_PASS "$log" && echo "$host"
+}
+export -f probe_one
+export PROBE_DIR PROBE_SH PREFLIGHT_TIMEOUT PREFLIGHT_FORCE_FAIL
+echo "Host preflight: probing $TOTAL_AVAIL hosts (parallel=${PREFLIGHT_PARALLEL:-128})..."
+xargs -P "${PREFLIGHT_PARALLEL:-128}" -I{} bash -c 'probe_one "$1"' _ {} \
+  < "$PBS_NODEFILE" > "$PROBE_DIR/healthy.unordered" || true
+# Keep PBS order; record the rest as bad.
+grep -Fxf "$PROBE_DIR/healthy.unordered" "$PBS_NODEFILE" > "$PROBE_DIR/healthy.nodefile" || true
+grep -vFxf "$PROBE_DIR/healthy.unordered" "$PBS_NODEFILE" > "$PROBE_DIR/bad.nodefile" || true
+HEALTHY=$(wc -l < "$PROBE_DIR/healthy.nodefile")
+BAD=$(wc -l < "$PROBE_DIR/bad.nodefile")
+echo "Host preflight: healthy=$HEALTHY bad=$BAD need=$NEED (per-host logs: $PROBE_DIR)"
+(( BAD > 0 )) && { echo "Bad hosts:"; sed 's/^/  /' "$PROBE_DIR/bad.nodefile"; }
+
+# Take any shortfall out of the spare budgets, largest budget first. Active
+# counts never change: they fix each seat's DP size, GBS and manifest split.
+deficit=$(( NEED - HEALTHY ))
+while (( deficit > 0 )); do
+  best=""; best_sp=0
+  for idx in "${!TRAINERS[@]}"; do
+    IFS='|' read -r -a f <<< "${TRAINERS[$idx]}"
+    (( f[11] > best_sp )) && { best=$idx; best_sp=${f[11]}; }
+  done
+  [[ -n "$best" ]] || { echo "FATAL: $BAD bad hosts exceed the spare budget; need $NEED have $HEALTHY healthy"; exit 1; }
+  IFS='|' read -r -a f <<< "${TRAINERS[$best]}"
+  f[11]=$(( f[11] - 1 ))
+  TRAINERS[$best]=$(IFS='|'; echo "${f[*]}")
+  NEED=$(( NEED - 1 )); deficit=$(( deficit - 1 ))
+done
+for idx in "${!TRAINERS[@]}"; do
+  IFS='|' read -r -a f <<< "${TRAINERS[$idx]}"
+  echo "  trainer $idx: active=${f[1]} spares=${f[11]}"
+done
+slice_nodes "$PROBE_DIR/healthy.nodefile"
+
+# ---- agpt-v2 launch function (seats 3/4) ----
+# Runtime choice: the v2 venv (699M) is a uv overlay on the node-local
+# /opt/aurora frameworks/2026.1.0 image, so torch/oneAPI load from local disk
+# and only the overlay packages (grain, datasets, zstandard, ezpz) and the
+# checkout are read from Lustre. It is run in place, not yeeted: ezpz yeet
+# ships tarballs of self-contained venvs, and this overlay is not one.
+# UNVERIFIED at 512N/768N import scale.
+launch_v2_trainer() {
+  local idx="$1" attempt="${2:-1}"
+  IFS='|' read -r model nnodes port workdir ckpt manifest lr_val _init decay_ratio min_lr_factor train_tokens spares _rs gbs <<< "${TRAINERS[$idx]}"
+  local slice="${T_SLICE[$idx]}"
+  local nproc=$(( nnodes * PPN ))
+  local training_steps=$(( train_tokens / (gbs * V2_SEQ_LEN) ))
+  local console="$MULTI_LOG_DIR/trainer-${idx}-v2-${model}-n${nnodes}-attempt-${attempt}.console.log"
+
+  (
+    cd "$workdir" || { echo "cd failed: $workdir"; exit 97; }
+    setup_frameworks_env "$V2_VENV" || exit 98
+    export AGPT_V2_DATA_MANIFEST="$manifest"
+    # Node-local datasets cache: same path on every host, but /tmp is tmpfs
+    # per node, so only the 12 local ranks share one builder lock (not 6144).
+    export HF_DATASETS_CACHE="/tmp/hf-datasets-${JOBID}-seat${idx}"
+    export MASTER_PORT="$port"; unset MASTER_ADDR
+    ezpz launch \
+      --nproc "$nproc" \
+      --nproc_per_node "$PPN" \
+      --hostfile "$slice" \
+      --auto-retry \
+      --spare-nodes "$spares" \
+      --timeout "$IDLE_TIMEOUT" \
+      -- \
+      python3 -m torchtitan.experiments.ezpz.train \
+      --module ezpz.agpt \
+      --config "agpt_v2_${model}_4k_olmo_mix" \
+      --hf-assets-path="$workdir/assets/hf/OLMo-2-1124-7B" \
+      --parallelism.data-parallel-shard-degree="$PPN" \
+      --parallelism.data-parallel-replicate-degree="$nnodes" \
+      --training.num-tokens-per-microbatch-per-dp-rank="$V2_SEQ_LEN" \
+      --training.num-tokens-per-train-step=$(( gbs * V2_SEQ_LEN )) \
+      --training.max-context-length="$V2_SEQ_LEN" \
+      --training.steps="$training_steps" \
+      --optimizer=adamw \
+      --optimizer.lr="$lr_val" \
+      --optim.lr-scheduler.warmup-steps="$V2_WARMUP_STEPS" \
+      --optim.lr-scheduler.decay-ratio="$decay_ratio" \
+      --optim.lr-scheduler.min-lr-factor="$min_lr_factor" \
+      --checkpoint.enable \
+      --checkpoint.folder="$ckpt" \
+      --checkpoint.interval="$CKPT_INTERVAL" \
+      --checkpoint.keep-latest-k=0 \
+      --checkpoint.async-mode=disabled \
+      --validator.no-enable
+  ) > "$console" 2>&1 &
+  TRAINER_PID=$!
+}
+
+# ---- Launch function ----
+launch_trainer() {
+  local idx="$1" attempt="${2:-1}"
+  IFS='|' read -r model nnodes port workdir ckpt dfl_name lr_val init_load decay_ratio min_lr_factor train_tokens spares resume_samples gbs <<< "${TRAINERS[$idx]}"
+  local slice="${T_SLICE[$idx]}"
+  local nproc=$(( nnodes * PPN ))
+  local training_steps
+  training_steps=$(( train_tokens / (gbs * SEQ_LEN) ))
+  local tokens_per_microbatch_per_dp_rank=$(( LBS * SEQ_LEN ))
+  local tokens_per_train_step=$(( gbs * SEQ_LEN ))
+  local console="$MULTI_LOG_DIR/trainer-${idx}-${model}-n${nnodes}-attempt-${attempt}.console.log"
+  local dfl="torchtitan/experiments/ezpz/data-lists/aurora/${dfl_name}.txt"
+  local data_cache="${ckpt}/.cache/${dfl_name}/index-cache"
+  case "$idx" in
+    0) data_cache="${DATA_CACHE_20B512:-$data_cache}" ;;
+    1) data_cache="${DATA_CACHE_20B256:-$data_cache}" ;;
+  esac
+  local hf_assets="${HF_ASSETS:-/flare/AuroraGPT/foremans/projects/saforem2/torchtitan-ezpz/assets/hf/gemma-7b}"
+
+  # Config name: agpt_${MODEL}${CONFIG_SUFFIX} — real names from submit_agpt_*_autoretry.sh
+  # CONFIG_SUFFIX=_real for cos_sin RoPE (production default)
+  local config_suffix="_real"
+  local config_name="agpt_${model}${config_suffix}"
+
+  # Resume guard: if this trainer has a resume position, validate GBS alignment
+  if [[ "$resume_samples" != "0" && -n "$resume_samples" ]]; then
+    if (( resume_samples % gbs != 0 )); then
+      echo "FATAL: trainer $idx resume_samples $resume_samples not aligned to GBS $gbs" >&2
+      exit 2
+    fi
+  fi
+
+  local batch_args=()
+  if [[ "$CLI_DIALECT" == "legacy" ]]; then
+    batch_args=(--training.local-batch-size="$LBS" --training.global-batch-size="$gbs" --training.seq-len="$SEQ_LEN")
+  else
+    batch_args=(--training.num-tokens-per-microbatch-per-dp-rank="$tokens_per_microbatch_per_dp_rank"
+      --training.num-tokens-per-train-step="$tokens_per_train_step" --training.max-context-length="$SEQ_LEN")
+  fi
+
+  local xtra=()
+  [[ -n "$init_load" ]] && xtra+=(--checkpoint.initial-load-path="$init_load" --checkpoint.no-initial-load-model-only)
+  xtra+=(--lr-scheduler.decay-ratio="$decay_ratio" --lr-scheduler.min-lr-factor="$min_lr_factor" --lr-scheduler.warmup-steps=20)
+
+  # Per-trainer resume: BLENDCORPUS_RESUME_CONSUMED_SAMPLES env var propagated
+  # via mpiexec --envall is the PRODUCTION path — the pinned launcher cannot
+  # pass new CLI flags, so --dataloader.resume-consumed-samples would be
+  # rejected as "Unrecognized options" on that build. Env var only.
+
+  (
+    cd "$workdir" || { echo "cd failed: $workdir"; exit 97; }
+    setup_frameworks_env "$FW20_VENV" || exit 98
+    # Export per-trainer resume position AFTER env setup (which clears it);
+    # mpiexec --envall carries it to all ranks.
+    if [[ "$resume_samples" != "0" && -n "$resume_samples" ]]; then
+      export BLENDCORPUS_RESUME_CONSUMED_SAMPLES="$resume_samples"
+    fi
+    export MASTER_PORT="$port"; unset MASTER_ADDR
+    ezpz launch \
+      --nproc "$nproc" \
+      --nproc_per_node "$PPN" \
+      --hostfile "$slice" \
+      --auto-retry \
+      --spare-nodes "$spares" \
+      --timeout "$IDLE_TIMEOUT" \
+      -- \
+      python3 -m torchtitan.experiments.ezpz.train \
+      --module=ezpz.agpt \
+      --config="$config_name" \
+      --hf-assets-path="$hf_assets" \
+      --checkpoint.enable \
+      --checkpoint.folder="$ckpt" \
+      --checkpoint.interval="$CKPT_INTERVAL" \
+      --checkpoint.keep-latest-k=0 \
+      --checkpoint.no-last-save-model-only \
+      --checkpoint.async-mode=disabled \
+      --dataloader.dataset=blendcorpus \
+      --dataloader.dataset-path="$dfl" \
+      --dataloader.data-cache-path="$data_cache" \
+      --validator.enable --validator.freq=100 --validator.steps=10 \
+      --validator.dataloader.dataset-path="$dfl" --validator.dataloader.data-cache-path="$data_cache" \
+      "${xtra[@]}" \
+      --optimizer "$OPTIMIZER" \
+      --optimizer.lr="$lr_val" \
+      "${batch_args[@]}" \
+      --training.steps="$training_steps"
+  ) > "$console" 2>&1 &
+  TRAINER_PID=$!
+}
+
+# ---- Supervise (with relaunch) ----
+JOB_START_EPOCH=$(date +%s)
+WALLTIME_SECS=43200
+if [[ -n "${PBS_JOBID:-}" ]] && command -v qstat >/dev/null 2>&1; then
+  _wt=$(qstat -f "$PBS_JOBID" 2>/dev/null | tr -d '\n' | grep -oE 'Resource_List.walltime = [0-9:]+' | head -1 | awk '{print $3}')
+  if [[ "$_wt" =~ ^([0-9]+):([0-9]+):([0-9]+)$ ]]; then
+    WALLTIME_SECS=$(( ${BASH_REMATCH[1]}*3600 + ${BASH_REMATCH[2]}*60 + ${BASH_REMATCH[3]} ))
+  fi
+fi
+JOB_DEADLINE=$(( JOB_START_EPOCH + WALLTIME_SECS ))
+secs_left() { echo $(( JOB_DEADLINE - $(date +%s) )); }
+
+declare -a PIDS RC SUP_PIDS
+LAUNCHER_RAN_FILE="$MULTI_LOG_DIR/.launcher_ran"
+
+supervise_trainer() {
+  local idx="$1" attempt=1 rc=0 t0 dt left quick=0
+  SEAT_RELAUNCH="${SEAT_RELAUNCH:-1}"
+  SEAT_RELAUNCH_MIN_LEFT="${SEAT_RELAUNCH_MIN_LEFT:-2700}"
+  SEAT_MIN_HEALTHY_SECS="${SEAT_MIN_HEALTHY_SECS:-600}"
+  SEAT_MAX_QUICK_DEATHS="${SEAT_MAX_QUICK_DEATHS:-2}"
+  while :; do
+    t0=$(date +%s)
+    if is_v2_seat "$idx"; then
+      launch_v2_trainer "$idx" "$attempt"
+    else
+      launch_trainer "$idx" "$attempt"
+    fi
+    pid=$TRAINER_PID
+    PIDS[$idx]=$pid
+    touch "$LAUNCHER_RAN_FILE"
+    wait "$pid"; rc=$?
+    dt=$(( $(date +%s) - t0 ))
+    echo "[boost $(date +%H:%M:%S)] trainer $idx attempt $attempt finished rc=$rc after ${dt}s"
+    RC[$idx]=$rc
+    (( rc == 0 )) && { echo "[boost] trainer $idx complete rc=0 — not relaunching"; return 0; }
+    [[ "$SEAT_RELAUNCH" != "1" ]] && return "$rc"
+    if (( dt < SEAT_MIN_HEALTHY_SECS )); then
+      quick=$(( quick + 1 ))
+      if (( quick >= SEAT_MAX_QUICK_DEATHS )); then
+        echo "[boost] trainer $idx $quick quick deaths — seat broken, giving up"
+        return "$rc"
+      fi
+    else
+      quick=0
+    fi
+    left=$(secs_left)
+    if (( left < SEAT_RELAUNCH_MIN_LEFT )); then
+      echo "[boost] trainer $idx ${left}s left (< ${SEAT_RELAUNCH_MIN_LEFT}s) — not relaunching"
+      return "$rc"
+    fi
+    attempt=$(( attempt + 1 ))
+    echo "[boost] trainer $idx relaunching attempt $attempt ${left}s left"
+    sleep 10
+  done
+}
+
+for idx in "${!TRAINERS[@]}"; do
+  supervise_trainer "$idx" &
+  SUP_PIDS[$idx]=$!
+  sleep "${LAUNCH_STAGGER:-20}"
+done
+echo "[boost] all ${#TRAINERS[@]} trainers under supervision; waiting..."
+
+fails=0
+for idx in "${!TRAINERS[@]}"; do
+  wait "${SUP_PIDS[$idx]}"; RC[$idx]=$?
+  (( RC[$idx] == 0 )) || fails=$(( fails + 1 ))
+  echo "[boost] trainer $idx supervisor exited rc=${RC[$idx]}"
+done
+
+# Hard fail if launcher never ran (no silent echo+exit 0)
+if [[ ! -f "$LAUNCHER_RAN_FILE" ]]; then
+  echo "FATAL: launcher never executed — no trainer was started (PBS_NODEFILE or slicing failure?)"
+  exit 99
+fi
+
+echo "============================================================"
+echo "  boost umbrella summary (jobid=$JOBID)"
+echo "============================================================"
+for idx in "${!TRAINERS[@]}"; do
+  status="OK"; (( RC[idx] == 0 )) || status="FAIL(${RC[idx]})"
+  IFS='|' read -r model nnodes _port _wd ckpt _dfl _lr _init _decay _minlr _tok _sp _rs _gbs <<< "${TRAINERS[$idx]}"
+  printf '  trainer %d: %-4s n=%-4s %-10s ckpt=%s resume=%s\n' "$idx" "$model" "$nnodes" "$status" "$ckpt" "$_rs"
+  printf '             log: %s\n' "$MULTI_LOG_DIR/trainer-${idx}-*${model}-n${nnodes}-attempt-*.console.log"
+done
+echo "  failed: $fails / ${#TRAINERS[@]}"
+echo "============================================================"
+exit "$fails"

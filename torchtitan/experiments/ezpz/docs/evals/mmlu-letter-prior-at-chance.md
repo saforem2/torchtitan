@@ -330,7 +330,7 @@ content helped everything *except* MMLU.
 5. Compare against **OLMo-2**, which shares our data family, with the token
    count stated.
 
-## Related
+* [MMLU letter-prior gating (2026-11-09)](mmlu-letter-prior-gating.md) -- constant-D 0.2689 > all 2B (0.2413-0.2655) is a harness prior; do not gate agpt-2B promotion on MCF MMLU. Use ARC-Easy/HellaSwag/GSM8K-CoT and `max(CF,MCF)`.
 
 * [dead-cli-flags-in-repo-root-pbs](../guides/known-bugs/dead-cli-flags-in-repo-root-pbs.md) -- same family of failure: a launcher
   that runs and reports success while measuring the wrong thing.

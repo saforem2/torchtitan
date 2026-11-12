@@ -880,6 +880,17 @@ def agpt_debugmodel_gsm8k_r1cot_streaming() -> FaultTolerantTrainer.Config:
     )
 
 
+def agpt_debugmodel_gsm8k_plus_distill_streaming() -> FaultTolerantTrainer.Config:
+    """GSM8K + distill breadth (all 3 CoT sources) on debugmodel -- Sunspot PPN=12 safe."""
+    return _cot_sft_config(
+        gsm8k_plus_distill_cot_streaming_dataset,
+        "checkpoints/agpt-debug-broad-streaming",
+        flavor="debugmodel",
+        local_batch_size=8,
+        seq_len=1024,
+    )
+
+
 def agpt_debugmodel_distill_cot_streaming() -> FaultTolerantTrainer.Config:
     """OpenThoughts+OpenR1 smoke on debugmodel -- Sunspot PPN=12 safe."""
     return _cot_sft_config(
@@ -955,24 +966,52 @@ def agpt_2b_mds_mix_edu() -> FaultTolerantTrainer.Config:
 def _agpt_2b_mds_mix_blend(
     owm_weight: float, edu_weight: float, folder: str
 ) -> FaultTolerantTrainer.Config:
-    """Shared builder for owm/edu weighted-blend mix arms."""
-    from torchtitan.components.data.text_datasets import (
-        HFDataSource,
-        InterleavedHuggingFaceTextDataLoader,
-    )
+    """Shared builder for owm/edu weighted-blend mix arms.
 
+    InterleavedHuggingFaceTextDataLoader was removed in #4088; the Grain
+    replacement is ``GrainDataLoader(ConcatThenSplitPacking(DatasetMix(...)))``
+    with weights counting post-packing rows (fixed-length token blocks), not
+    documents. Document-level mixing would weight by attempt-index, including
+    filtered-out attempts, so the packed-row mix is the token-weighted one.
+    """
     cfg = _agpt_2b_mds_mix_base()
-    # Replace the whole dataloader Config -- the base is a BlendCorpusDataLoader
-    # .Config whose .sources field does not exist, so setting it would no-op.
-    cfg.dataloader = InterleavedHuggingFaceTextDataLoader.Config(
-        sources=[
-            HFDataSource(
-                dataset="open-web-math/open-web-math", weight=owm_weight, infinite=True
+    # Build per-source datasets, then mix after packing so weights count tokens.
+    # open-web-math streams from HF (small, math-dense); FW-Edu reads 16 local parquet
+    # shards materialized under HuggingFaceRandomAccessSource (verified TEGU path).
+    from torchtitan.components.data import DatasetMixConfig, WeightedDataset
+
+    owm_packed = ConcatThenSplitPackingConfig(
+        dataset=SingleDatasetConfig(
+            source=HuggingFaceStreamingSource.Config(
+                path="open-web-math/open-web-math",
+                split="train",
             ),
-            HFDataSource(dataset="fineweb_edu_local", weight=edu_weight, infinite=True),
-        ],
-        seed=42,
-        stopping_strategy="all_exhausted",
+            processor=TextProcessor.Config(),
+            post_filters=(lambda sample: sample is not None,),
+        )
+    )
+    edu_packed = ConcatThenSplitPackingConfig(
+        dataset=SingleDatasetConfig(
+            source=HuggingFaceRandomAccessSource.Config(
+                path="parquet",
+                split="train",
+                load_dataset_kwargs={"data_files": _fineweb_edu_shards()},
+            ),
+            processor=TextProcessor.Config(),
+            post_filters=(lambda sample: sample is not None,),
+        )
+    )
+    # NOTE: weights count fixed-length 8192-token rows (post-packing), which is
+    # the token-weighted equivalent of the old token-mixture ratio. A 40/60 OWM/FW-Edu
+    # mix therefore weights 40% of TRAINED TOKENS from math, matching the paper's
+    # intended ratio once document lengths average out.
+    cfg.dataloader = GrainDataLoader.Config(
+        dataset=DatasetMixConfig(
+            datasets=(
+                WeightedDataset(dataset=owm_packed, weight=owm_weight),
+                WeightedDataset(dataset=edu_packed, weight=edu_weight),
+            ),
+        )
     )
     cfg.checkpointer.folder = folder
     return cfg
@@ -1000,6 +1039,20 @@ def agpt_2b_mds_mix_owm_edu_9010() -> FaultTolerantTrainer.Config:
     return _agpt_2b_mds_mix_blend(0.90, 0.10, "checkpoints/agpt-2b-mds-mix-owm90-edu10")
 
 
+def agpt_2b_mds_mix_owm_edu_6040() -> FaultTolerantTrainer.Config:
+    """60/40 FineWeb-Edu kind-shift (SmolLM2 stage-1 recipe).
+
+    60% FineWeb-Edu / 40% open-web-math: the ``60/40'' kind-shift arm
+    motivated by arXiv:2502.02737 Sec 4.3 / arXiv:2406.17557 (FineWeb-Edu
+    33.6% MMLU @ 38B, ablation DCLM 35.5 -> FW-Edu 37.5 on MMLU while DCLM
+    still wins HellaSwag). Current pre-training is 94.8% DCLM, so this is
+    a distribution-*kind* change, not a degree tweak. Extending narrow SFT
+    (B2v2 ep3/ep6 0.09/0.105 vs B2 0.205, jobs 12482572/73) already showed
+    the ceiling is data-distribution, not more tokens on the same 7.4k.
+    """
+    return _agpt_2b_mds_mix_blend(0.40, 0.60, "checkpoints/agpt-2b-mds-mix-owm60-edu40")
+
+
 # --- Wave 3: SCIENCE-corpus 25% blends. The 75/25 owm/edu winner showed the
 # 25% slot is the lever; these swap generic edu for SCIENCE-dense corpora (the
 # DOE-mission version). Same recipe (MDS fork, constant LR, 10B tok, 75/25),
@@ -1013,24 +1066,11 @@ def _agpt_2b_mds_mix_blend_src(
 ) -> FaultTolerantTrainer.Config:
     """Generalized owm/<science-src> weighted-blend builder (mirrors
     _agpt_2b_mds_mix_blend; src_dataset is any registered local-parquet name)."""
-    from torchtitan.components.data.text_datasets import (
-        HFDataSource,
-        InterleavedHuggingFaceTextDataLoader,
+    raise NotImplementedError(
+        "agpt_2b_mds_mix_blend_src: port to Grain DatasetMixConfig as for "
+        "_agpt_2b_mds_mix_blend; see "
+        "docs/guides/known-bugs/datamix-hfdatasource-gone.md"
     )
-
-    cfg = _agpt_2b_mds_mix_base()
-    cfg.dataloader = InterleavedHuggingFaceTextDataLoader.Config(
-        sources=[
-            HFDataSource(
-                dataset="open-web-math/open-web-math", weight=owm_weight, infinite=True
-            ),
-            HFDataSource(dataset=src_dataset, weight=src_weight, infinite=True),
-        ],
-        seed=42,
-        stopping_strategy="all_exhausted",
-    )
-    cfg.checkpointer.folder = folder
-    return cfg
 
 
 def agpt_2b_mds_mix_owm_cosmo_7525() -> FaultTolerantTrainer.Config:
@@ -1747,6 +1787,60 @@ def agpt_v2_30b_4k() -> FaultTolerantTrainer.Config:
     """
 
     return _agpt_v2_4k("30b_olmo2tok_dp12")
+
+
+def _olmo_mix_raw_files() -> list[str]:
+    """Raw olmo-mix-1124 JSON shards listed in ``$AGPT_V2_DATA_MANIFEST``.
+
+    One absolute path per line. The manifest, not a glob, fixes the file set
+    and its order, so every rank and every restart sees identical shards.
+    HF ``split_dataset_by_node`` assigns whole files to DP ranks only when
+    the file count is divisible by the DP world size; otherwise every rank
+    reads the whole stream and keeps 1/N of it. The manifest builder
+    (``scripts/build_olmo_mix_manifest.py``) sizes the list for that.
+    Rank ``r`` reads files ``r, r + N, ...``, so the whole job reads one
+    contiguous block of the manifest at a time. Use a shuffled manifest; a
+    sorted one feeds the subsets in path order, as a curriculum.
+    """
+    manifest = os.environ.get("AGPT_V2_DATA_MANIFEST", "")
+    if not manifest:
+        raise ValueError("AGPT_V2_DATA_MANIFEST must name a raw olmo-mix file manifest")
+    files = [line.strip() for line in Path(manifest).read_text().splitlines()]
+    files = [f for f in files if f]
+    if not files:
+        raise ValueError(f"empty data manifest: {manifest}")
+    return files
+
+
+def _agpt_v2_4k_olmo_mix(flavor: str) -> FaultTolerantTrainer.Config:
+    """``_agpt_v2_4k`` geometry streaming the full raw olmo-mix-1124 corpus.
+
+    Text is tokenized on the fly with the OLMo-3 (== OLMo-2-1124) tokenizer
+    by the Grain ``TextProcessor``; no pre-tokenized corpus is involved.
+    """
+    cfg = agpt(
+        flavor,
+        hf_assets_path="./assets/hf/OLMo-2-1124-7B",
+        seq_len=4096,
+        activation_checkpoint_mode="none",
+    )
+    return _use_hf_streaming(
+        cfg,
+        path="json",
+        load_dataset_kwargs={"data_files": _olmo_mix_raw_files()},
+    )
+
+
+def agpt_v2_4b_4k_olmo_mix() -> FaultTolerantTrainer.Config:
+    """4.64B at 4K seqlen on the full raw olmo-mix-1124 (umbrella seat)."""
+
+    return _agpt_v2_4k_olmo_mix("5b_olmo2tok_dp12")
+
+
+def agpt_v2_10b_4k_olmo_mix() -> FaultTolerantTrainer.Config:
+    """9.48B at 4K seqlen on the full raw olmo-mix-1124 (umbrella seat)."""
+
+    return _agpt_v2_4k_olmo_mix("10b_olmo2tok_dp12")
 
 
 # Optimizer-comparison arms for the OLMo-2 ladder.

@@ -8,6 +8,8 @@ Benchmark evaluations of AuroraGPT production checkpoints using
 > (MMLU/GSM8K/ARC-Challenge), and how we compare to SmolLM3-3B / Llama-3.2 /
 > OLMo-2.
 
+> **2026-11-09 — MMLU gating:** constant-D 0.2689 beats every agpt-2B MMLU (0.2413-0.2655) — harness prior, not model bug. Do not gate promotion on MCF MMLU; use ARC-Easy/HellaSwag/GSM8K-CoT and report `max(CF,MCF)` — see [mmlu-letter-prior-gating.md](mmlu-letter-prior-gating.md) (companion to [mmlu-letter-prior-at-chance.md](mmlu-letter-prior-at-chance.md)).
+
 > **Modern-task coverage (audited 2026-09-30):** MMLU and GSM8K results exist,
 > but the overview charts intentionally remain the seven-task commonsense
 > training thermometer. The corpus has explicit MMLU-5 ladders for both 20B
