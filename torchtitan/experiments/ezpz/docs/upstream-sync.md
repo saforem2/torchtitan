@@ -1,5 +1,81 @@
 # Upstream Sync Log
 
+## 2026-11-11: pre-sync gate, `ezpz` `b9dd4eb7`, 274 commits behind upstream
+
+No merge yet. `origin/ezpz` at `b9dd4eb7` is 274 commits behind
+`upstream/main` (merge base `5a7a622f16`, the 2026-10-15 sync below). Before
+the next sync the open `ezpz` PRs are landed in this order, so the merge
+starts from one tree:
+
+1. #77, MoE TP=2 doc salvage (docs only)
+2. #74, AGPT XPU throughput recovery (includes the ZeRO-1 BF16 resume fix,
+   `da9ceb8f`)
+3. #78, cross-system smoke script (this entry)
+4. #76, grain SFT CoT. Its olmo-mix manifest sorts the file list, so the mix
+   trains as a curriculum (DCLM first). Decide before the 10B start.
+
+During the sync take upstream's `models/common/attn_gym.py` and
+`tests/unit_tests/cpu/models/common/test_optional_imports.py`; #76's copies
+were a stopgap for the same optional-import fix.
+
+### Smoke script
+
+`scripts/sync_smoke_alcf.sh` replaces the per-machine scripts. The wrappers
+`sync_smoke_{sunspot,aurora,polaris,sirius}.sh` carry only the `#PBS` headers.
+
+```bash
+qsub -A <account> -q debug -l select=2 -l walltime=01:00:00 \
+  -l filesystems=<fs> torchtitan/experiments/ezpz/scripts/sync_smoke_sunspot.sh
+```
+
+It picks the venv and tokenizer per machine, probes `import torch` under
+`mpiexec` before training, runs each config under `SMOKE_CONFIG_TIMEOUT`
+(default `900` s), and runs an exact resume check: `6` steps with a checkpoint
+at `3`, resume a copy, compare steps `4`-`6` (`SMOKE_RESUME_TOL`, default
+`1e-3`). The last line is `VERDICT: ok`, `ok_with_known_failures` or
+`failed`. Env knobs are listed at the top of the script.
+
+| Machine | Default venv | torch |
+|---|---|---|
+| Sunspot | `/lus/tegu/projects/datascience/foremans/venvs/xpu-torch216-sync-5a7a622f16` | `2.16.0.dev20261015+xpu` |
+| Aurora | `/flare/AuroraGPT/foremans/venvs/xpu-torch216-sync-5a7a622f16` | same |
+| Polaris | `/eagle/AuroraGPT/foremans/venvs/cuda-torch215-cu132` | `2.15.0+cu132` |
+| Sirius | `/home/foremans/torchtitan/.venv` | `2.15.0+cu132` |
+
+### Results, `ezpz` + #77 #74 #76 #78
+
+2 nodes, `agpt_debugmodel` and `moe_debugmodel`, `6` steps, seed `42`,
+deterministic.
+
+| Check | Sunspot `12483333` | Aurora `9077299` | Polaris | Sirius |
+|---|---|---|---|---|
+| agpt TP=1 | `10.881` -> `9.934`, same as `ezpz` | bit-identical to Sunspot | pending | does not start |
+| agpt TP=2 | known failure | known failure | | |
+| MoE TP=1 | `12.941` -> `10.975`, same as `ezpz` | same as Sunspot | | |
+| resume, FSDP | exact, diff `0` | exact, diff `0` | | |
+| resume, ZeRO-1 BF16 all-gather | diff `0.0041` | diff `0.0041` | | |
+| same, pre-fix `zero1.py` | diff `0.318` | diff `0.318` | | |
+
+`0.0041` is the documented ZeRO-1 limitation: the FP32 master is not
+checkpointed and is rebuilt from the BF16 weights. Aurora's baseline MoE run
+hit a transient Lustre `EBADF` in inductor; the candidate MoE run passed.
+
+Sirius does not start: after four environment fixes (newer ezpz utils pin,
+GTL flag after module load, mpi-compat shim, `unset PYTHONHOME`) 3 of 8 ranks
+still die with `No module named 'encodings'`.
+
+### Known failures the next sync inherits
+
+- **TP=2**: attention receives sequence-sharded tokens (`256` of `512`), so
+  dense TP=2 fails on every system. Open `local_map` bug,
+  [moe-tp2-wo-placement.md](guides/known-bugs/moe-tp2-wo-placement.md). The
+  smoke labels it `KNOWN_FAILURES`.
+- **XPU hang after step 7**: all ranks wait in the same FSDP all-gather, about
+  half of default-env runs. The smoke runs `6` steps.
+  [xpu-fsdp-allgather-hang-after-step-7.md](guides/known-bugs/xpu-fsdp-allgather-hang-after-step-7.md).
+- Still open from the 2026-10-15 entry: MoE EP, MoE flex attention, RL
+  overlays.
+
 ## 2026-10-15: upstream `5a7a622f16`, 236 commits, smoke-validated on Sunspot
 
 Branch `sync/upstream-5a7a622f16` merges **236 upstream commits**
@@ -701,7 +777,7 @@ exercised it, so behaviour is unchanged from pre-merge).
 
 This is the **second** time an upstream `__init__` attribute has gone missing
 this way (`num_pipeline_parallel_microbatches` was the first). Added
-[`tests/test_trainer_init_parity.py`](../../tests/test_trainer_init_parity.py)
+[`tests/test_trainer_init_parity.py`](../tests/test_trainer_init_parity.py)
 -- a static AST diff of what each `__init__` sets. Pure stdlib, no torch
 needed, mutation-tested. **Run it on every sync.**
 

@@ -1,6 +1,6 @@
 # Production SFT
 
-> **Last updated: 2026-11-05.** B2v2 stage-2 SFT training + eval complete (jobs 12482423/12482485 training Exit 0, 12482572/73 eval Exit 0 on frameworks 2026.1.0 vLLM 0.26 XPU): **0.09/0.105 CoT vs B2 0.205** — more narrow epochs hurt, same as B3/B4. Training: loss 0.8069, acc 0.8198, W&B `xakno7kg`/`ur6pqqhp`. See [POST-TRAINING-2B](../POST-TRAINING-2B.md#b2v2----stronger-stage-2-sft-on-ckpt-900-2026-11-04) and [journal](../../docs/journal.md). 16N fanout wired, not yet executed. Everything else below is finished/blocked/abandoned as of 2026-08-30.
+> **Last updated: 2026-11-05.** B2v2 stage-2 SFT training + eval complete (jobs 12482423/12482485 training Exit 0, 12482572/73 eval Exit 0 on frameworks 2026.1.0 vLLM 0.26 XPU): **0.09/0.105 CoT vs B2 0.205** — more narrow epochs hurt, same as B3/B4. Training: loss 0.8069, acc 0.8198, W&B `xakno7kg`/`ur6pqqhp`. See [POST-TRAINING-2B](../POST-TRAINING-2B.md#b2v2----stronger-stage-2-sft-on-ckpt-900-2026-11-04) and [journal](../../journal.md). 16N fanout wired, not yet executed. Everything else below is finished/blocked/abandoned as of 2026-08-30.
 
 > [!IMPORTANT]
 > **Start here: [AuroraGPT-2B post-training status](../POST-TRAINING-2B.md)** --
