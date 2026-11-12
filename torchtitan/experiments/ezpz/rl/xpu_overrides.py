@@ -16,10 +16,11 @@ on Intel XPU (Aurora / Sunspot):
    unconditionally. Monkey-patched in `torchtitan.tools.utils` so the
    real `attention.py` and `generator.py` see the patched version.
 
-2. **`PerHostProvisioner`** in `train.py:45` — partitions GPUs across
-   trainer/generator meshes by exporting `CUDA_VISIBLE_DEVICES`. The
-   XPU equivalent for partitioning visibility is `ZE_AFFINITY_MASK`
-   (Level Zero). Replaced wholesale in `ezpz/rl/train_upstream.py`.
+2. **`PerHostProvisioner`** in `rl/actors/monarch/provisioning.py` —
+   partitions GPUs across trainer/generator meshes by exporting
+   `CUDA_VISIBLE_DEVICES`. The XPU equivalent for partitioning visibility
+   is `ZE_AFFINITY_MASK` (Level Zero). Replaced by `EzpzPerHostProvisioner`
+   through `EzpzMonarchActorSystem` in `ezpz/rl/train_upstream.py`.
 
 We do NOT stub `models/attention.py` — vllm-xpu actually ships
 `vllm.v1.attention.backends.flash_attn` (just like vllm-cuda does),
@@ -133,8 +134,12 @@ class EzpzPerHostProvisioner:
         num_gpus = len(gpu_ids)
         local_size = num_gpus
 
-        # Lazy imports — only needed when actually spawning.
-        from monarch._src.actor.host_mesh import default_bootstrap_cmd
+        # Lazy imports — only needed when actually spawning. Monarch >= 0.7
+        # exports this from monarch.actor (upstream provisioning.py uses it).
+        try:
+            from monarch.actor import default_bootstrap_cmd
+        except ImportError:
+            from monarch._src.actor.host_mesh import default_bootstrap_cmd
 
         base_cmd = default_bootstrap_cmd()
 
@@ -1014,7 +1019,9 @@ def patch_create_block_mask_separate_full_blocks_for_xpu() -> None:
     if "separate_full_blocks" in _inspect.signature(_cbm).parameters:
         return  # torch supports it -> nothing to do
 
-    import torchtitan.models.common.attention as _attn
+    # `torchtitan.models.common.attention` is a package; the helper is a global
+    # of its `attention` submodule (the package does not re-export it).
+    import torchtitan.models.common.attention.attention as _attn
 
     # decoder.py binds `create_attention_mask` by name at import, so patching that
     # module attribute is bypassed. create_attention_mask calls the module-global
@@ -1022,7 +1029,7 @@ def patch_create_block_mask_separate_full_blocks_for_xpu() -> None:
     # wrap THAT to strip the unsupported kwarg.
     if not hasattr(_attn, "_compiled_create_block_mask"):
         raise RuntimeError(
-            "xpu_overrides: torchtitan.models.common.attention."
+            "xpu_overrides: torchtitan.models.common.attention.attention."
             "_compiled_create_block_mask not found -- upstream renamed it; update "
             "patch_create_block_mask_separate_full_blocks_for_xpu."
         )

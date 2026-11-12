@@ -7,21 +7,24 @@
 """ezpz mirror of `torchtitan.rl.train` for XPU.
 
 Applies XPU compatibility patches (see `xpu_overrides`) BEFORE
-importing anything from `torchtitan.rl`, then delegates
-to the upstream training loop with a minimal substitution:
+importing anything from `torchtitan.rl`, then runs the upstream
+`Controller` with one substitution:
 
-  - `PerHostProvisioner` → `EzpzPerHostProvisioner`
-    (uses ZE_AFFINITY_MASK instead of CUDA_VISIBLE_DEVICES).
+  - `MonarchActorSystem` -> `EzpzMonarchActorSystem`, whose `provision`
+    spawns the trainer/generator proc meshes with `EzpzPerHostProvisioner`
+    (ZE_AFFINITY_MASK, LOCAL_RANK and PALS_* set before torch imports)
+    instead of upstream's `PerHostProvisioner` (CUDA_VISIBLE_DEVICES).
+
+Upstream moved process placement out of `rl/train.py` into the actor system
+(`rl/actors/monarch/system.py`, `provisioning.py`); `Controller.setup_async()`
+provisions through `Controller.Config.actor_system`.
 
 Use it the same way as upstream:
 
     python -m torchtitan.experiments.ezpz.rl.train_upstream \
-        --module alphabet_sort --config rl_grpo_qwen3_0_6b_varlen \
-        --hf_assets_path torchtitan/rl/example_checkpoint/Qwen3-0.6B
-
-The `--module alphabet_sort` argument points ConfigManager at the relocated
-upstream example's `config_registry.py`; the wrapper reuses that config
-unchanged after applying the XPU compatibility patches.
+        --module torchtitan.experiments.ezpz.rl.alphabet_sort_agpt \
+        --config rl_grpo_lora_agpt_2b_easy \
+        --hf_assets_path <staged ckpt dir with the gemma chat_template>
 """
 
 from __future__ import annotations
@@ -74,22 +77,63 @@ apply_all_xpu_patches()
 # ----------------------------------------------------------------------
 import asyncio
 import logging
+import sys
+from dataclasses import dataclass
 
 from monarch.actor import ProcMesh, this_host
 
+from torchtitan.config.parallelism import ParallelismConfig
 from torchtitan.experiments.ezpz.config_manager import ConfigManager
 from torchtitan.observability import structured_logger as sl
 from torchtitan.observability.logging import init_logger
-from torchtitan.rl.controller import Controller
-
-# Re-export upstream so future maintainers know what we depend on.
-from torchtitan.rl.train import (
-    _compute_generator_world_size,
-    _compute_trainer_world_size,
+from torchtitan.rl.actors.monarch.provisioning import (
+    _check_gpus_per_host,
+    compute_generator_world_size,
+    compute_trainer_world_size,
     HostMeshes,
+    spawn_cpu_procs,
 )
+from torchtitan.rl.actors.monarch.system import MonarchActorSystem
+from torchtitan.rl.actors.monarch.torch_elastic import setup_torch_elastic_env
+from torchtitan.rl.actors.system import ActorSystem
+from torchtitan.rl.controller.controller import Controller
+from torchtitan.rl.generator.parallelism import InferenceParallelismConfig
 
 logger = logging.getLogger(__name__)
+
+__all__ = [
+    "compute_generator_world_size",
+    "compute_trainer_world_size",
+    "EzpzHostMeshController",
+    "EzpzMonarchActorSystem",
+    "HostMeshes",
+    "spawn_proc_mesh",
+    "use_ezpz_actor_system",
+]
+
+
+def _spawn_role_mesh(
+    host_mesh,
+    role_world_size: int,
+    provisioner: EzpzPerHostProvisioner,
+    *,
+    extra_env: dict[str, str] | None = None,
+) -> ProcMesh:
+    """Spawn one role's proc mesh, splitting ``role_world_size`` evenly over hosts."""
+    role_gpus_per_node = role_world_size // len(host_mesh)
+    boot = provisioner.allocate(role_gpus_per_node)
+    # `bootstrap_command=` injects env (ZE_AFFINITY_MASK, LOCAL_RANK, PALS_*)
+    # into the actor's process BEFORE execve, so the eager `import torch` in
+    # monarch's bootstrap sees the right tile visibility. `bootstrap=` runs
+    # AFTER torch imports -- too late for the SYCL primary context.
+    return host_mesh.spawn_procs(
+        per_host={"gpus": role_gpus_per_node},
+        bootstrap=boot,
+        bootstrap_command=EzpzPerHostProvisioner.make_bootstrap_command_for_gpu_ids(
+            boot.gpu_ids,  # type: ignore[attr-defined]
+            extra_env=extra_env,
+        ),
+    )
 
 
 def spawn_proc_mesh(
@@ -100,98 +144,131 @@ def spawn_proc_mesh(
     num_generators: int = 1,
     generator_env: dict[str, str] | None = None,
 ) -> tuple[ProcMesh, list[ProcMesh]]:
-    """XPU version of upstream `spawn_proc_mesh`.
+    """XPU version of upstream `provisioning.spawn_proc_mesh`.
 
-    Identical to upstream except the provisioner is `EzpzPerHostProvisioner`
-    (ZE_AFFINITY_MASK) instead of `PerHostProvisioner` (CUDA_VISIBLE_DEVICES).
+    Same placement rules as upstream (roles given the same host mesh object get
+    non-overlapping tiles on it, trainer first); the provisioner is
+    `EzpzPerHostProvisioner` (ZE_AFFINITY_MASK) instead of `PerHostProvisioner`
+    (CUDA_VISIBLE_DEVICES).
     """
-    total_generator_gpus = num_generators * per_generator_world_size
-    total_gpus = trainer_world_size + total_generator_gpus
+    total_gpus = trainer_world_size + num_generators * per_generator_world_size
     logger.info(
         f"{num_generators} generator(s) * {per_generator_world_size} GPUs + "
         f"{trainer_world_size} trainer GPUs = {total_gpus} total"
     )
 
-    if host_meshes is not None:
-        trainer_host_mesh = host_meshes.trainer
-        generator_host_meshes = host_meshes.generators
-        gpus_per_node = host_meshes.gpus_per_node
-
-        trainer_nodes = trainer_host_mesh.sizes["hosts"]
-        assert len(generator_host_meshes) == num_generators
-        assert trainer_world_size % trainer_nodes == 0, (
-            f"trainer_world_size ({trainer_world_size}) must be "
-            f"evenly divisible by trainer_nodes ({trainer_nodes})"
-        )
-        trainer_gpus_per_node = trainer_world_size // trainer_nodes
-
-        trainer_provisioner = EzpzPerHostProvisioner(total_gpus=gpus_per_node)
-        trainer_boot = trainer_provisioner.allocate(trainer_gpus_per_node)
-        trainer_mesh = trainer_host_mesh.spawn_procs(
-            per_host={"gpus": trainer_gpus_per_node},
-            bootstrap=trainer_boot,
-            bootstrap_command=EzpzPerHostProvisioner.make_bootstrap_command_for_gpu_ids(
-                trainer_boot.gpu_ids  # type: ignore[attr-defined]
-            ),
-        )
-        generator_meshes = []
-        for generator_host_mesh in generator_host_meshes:
-            generator_nodes = generator_host_mesh.sizes["hosts"]
-            assert per_generator_world_size % generator_nodes == 0
-            generator_gpus_per_node = per_generator_world_size // generator_nodes
-            generator_provisioner = EzpzPerHostProvisioner(total_gpus=gpus_per_node)
-            generator_boot = generator_provisioner.allocate(generator_gpus_per_node)
-            generator_meshes.append(
-                generator_host_mesh.spawn_procs(
-                    per_host={"gpus": generator_gpus_per_node},
-                    bootstrap=generator_boot,
-                    bootstrap_command=EzpzPerHostProvisioner.make_bootstrap_command_for_gpu_ids(
-                        generator_boot.gpu_ids,  # type: ignore[attr-defined]
-                        extra_env=generator_env,
-                    ),
-                )
-            )
-    else:
+    if host_meshes is None:
         # Single-node: partition tiles on this_host() via ZE_AFFINITY_MASK.
-        # Sunspot / Aurora compute nodes have 12 tiles per host (6 PVCs × 2).
-        provisioner = EzpzPerHostProvisioner(total_gpus=total_gpus)
-        # `bootstrap_command=` injects env (ZE_AFFINITY_MASK, LOCAL_RANK,
-        # PALS_*) into the actor's process BEFORE execve, so the eager
-        # `import torch` in monarch's bootstrap_main.py sees the right
-        # tile visibility. `bootstrap=` runs AFTER torch imports — too
-        # late for the SYCL primary context to pick up ZE_AFFINITY_MASK.
-        trainer_boot = provisioner.allocate(trainer_world_size)
-        generator_boots = [
-            provisioner.allocate(per_generator_world_size)
-            for _ in range(num_generators)
-        ]
-        trainer_mesh = this_host().spawn_procs(
-            per_host={"gpus": trainer_world_size},
-            bootstrap=trainer_boot,
-            bootstrap_command=EzpzPerHostProvisioner.make_bootstrap_command_for_gpu_ids(
-                trainer_boot.gpu_ids  # type: ignore[attr-defined]
-            ),
+        # Sunspot / Aurora compute nodes have 12 tiles per host (6 PVCs x 2).
+        # One mesh object, so the trainer and generators share one provisioner.
+        host_mesh = this_host()
+        host_meshes = HostMeshes(
+            trainer=host_mesh,
+            generators=[host_mesh] * num_generators,
+            gpus_per_node=total_gpus,
         )
-        generator_meshes = [
-            this_host().spawn_procs(
-                per_host={"gpus": per_generator_world_size},
-                bootstrap=generator_boot,
-                bootstrap_command=EzpzPerHostProvisioner.make_bootstrap_command_for_gpu_ids(
-                    generator_boot.gpu_ids,  # type: ignore[attr-defined]
-                    extra_env=generator_env,
-                ),
-            )
-            for generator_boot in generator_boots
-        ]
 
+    assert len(host_meshes.generators) == num_generators, (
+        f"expected {num_generators} generator host mesh(es), "
+        f"got {len(host_meshes.generators)}"
+    )
+    _check_gpus_per_host(host_meshes, trainer_world_size, per_generator_world_size)
+    # Keyed by id(mesh) because a HostMesh can't be a dict key.
+    provisioners: dict[int, EzpzPerHostProvisioner] = {}
+    for host_mesh in [host_meshes.trainer, *host_meshes.generators]:
+        provisioners.setdefault(
+            id(host_mesh), EzpzPerHostProvisioner(total_gpus=host_meshes.gpus_per_node)
+        )
+    trainer_mesh = _spawn_role_mesh(
+        host_meshes.trainer,
+        trainer_world_size,
+        provisioners[id(host_meshes.trainer)],
+    )
+    generator_meshes = [
+        _spawn_role_mesh(
+            generator_host_mesh,
+            per_generator_world_size,
+            provisioners[id(generator_host_mesh)],
+            extra_env=generator_env,
+        )
+        for generator_host_mesh in host_meshes.generators
+    ]
     return trainer_mesh, generator_meshes
 
 
-async def main():
+class EzpzMonarchActorSystem(MonarchActorSystem):
+    """`MonarchActorSystem` that places the trainer and generators on XPU tiles.
+
+    Only `provision` differs: it spawns the GPU proc meshes with ezpz's
+    `spawn_proc_mesh`. Its body otherwise mirrors upstream
+    `MonarchActorSystem.provision`; keep the two in step on upstream syncs.
+    """
+
+    @dataclass(kw_only=True, slots=True)
+    class Config(MonarchActorSystem.Config):
+        pass
+
+    async def provision(
+        self,
+        *,
+        trainer_parallelism: ParallelismConfig,
+        generator_parallelism: InferenceParallelismConfig,
+        num_generators: int,
+    ) -> None:
+        self._trainer_mesh, self._generator_meshes = spawn_proc_mesh(
+            compute_trainer_world_size(trainer_parallelism),
+            compute_generator_world_size(generator_parallelism),
+            host_meshes=self._host_meshes,
+            num_generators=num_generators,
+        )
+        # Router and batcher each get their own CPU proc, as upstream.
+        self._router_mesh = spawn_cpu_procs(1)
+        self._batcher_mesh = spawn_cpu_procs(1)
+
+        await setup_torch_elastic_env(self._trainer_mesh)
+        for generator_mesh in self._generator_meshes:
+            await setup_torch_elastic_env(generator_mesh)
+
+
+def use_ezpz_actor_system(config: Controller.Config) -> None:
+    """Swap the default `MonarchActorSystem.Config` for `EzpzMonarchActorSystem`."""
+    if isinstance(config.actor_system, EzpzMonarchActorSystem.Config):
+        return
+    if type(config.actor_system) is not MonarchActorSystem.Config:
+        raise ValueError(
+            "train_upstream places actors with EzpzMonarchActorSystem; got "
+            f"actor_system={type(config.actor_system).__qualname__}"
+        )
+    config.actor_system = EzpzMonarchActorSystem.Config()
+
+
+class EzpzHostMeshController(Controller):
+    """`Controller` whose actor system runs on caller-provided host meshes.
+
+    Upstream passes launcher-allocated hosts through
+    `MonarchControllerWithLauncher._build_actor_system`; ezpz's multi-host
+    entry point attaches its hosts itself (`host_mesh_from_store`) and hands
+    them in here.
+    """
+
+    def __init__(self, config: Controller.Config, *, host_meshes: HostMeshes):
+        use_ezpz_actor_system(config)
+        super().__init__(config)
+        self._host_meshes = host_meshes
+
+    async def _build_actor_system(self) -> EzpzMonarchActorSystem:
+        actor_system_config = self.config.actor_system
+        assert isinstance(actor_system_config, EzpzMonarchActorSystem.Config)
+        return actor_system_config.build(host_meshes=self._host_meshes)
+
+
+async def main() -> ActorSystem | None:
+    """Run RL training; return the actor system for the caller to shut down."""
     init_logger()
     os.environ["MONARCH_ACTOR_QUEUE_DISPATCH"] = "0"
     config = ConfigManager().parse_args()
     assert isinstance(config, Controller.Config)
+    use_ezpz_actor_system(config)
     sl.init_structured_logger(
         source="rl_controller",
         output_dir=config.dump_folder,
@@ -202,30 +279,27 @@ async def main():
 
     rl_trainer: Controller = config.build()
     try:
-        trainer_world_size = _compute_trainer_world_size(config.trainer.parallelism)
-        per_generator_world_size = _compute_generator_world_size(
-            config.generator.parallelism
-        )
-        trainer_mesh, generator_meshes = spawn_proc_mesh(
-            trainer_world_size,
-            per_generator_world_size,
-            host_meshes=None,
-            num_generators=config.num_generators,
-            generator_env=None,
-        )
-        await rl_trainer.setup_async(
-            trainer_mesh=trainer_mesh,
-            generator_meshes=generator_meshes,
-        )
+        await rl_trainer.setup_async()
         await rl_trainer.run()
     except KeyboardInterrupt:
         logger.info("Interrupted; attempting graceful shutdown...")
+        raise
     except asyncio.CancelledError:
         logger.exception("RL controller cancelled; propagating failure after shutdown")
         raise
     finally:
         await rl_trainer.close()
+    return rl_trainer.actor_system
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    actor_system = asyncio.run(main())
+    # Same exit path as upstream rl/train.py: shut down Monarch's client, flush,
+    # and skip interpreter finalization (before CPython 3.14 it can abort with
+    # exit 134 while Monarch's daemon threads are inside PyO3 calls).
+    if actor_system is not None:
+        actor_system.shutdown()
+    logging.shutdown()
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(0)

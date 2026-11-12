@@ -11,25 +11,23 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import logging
 import os
+import sys
 from datetime import timedelta
 from pathlib import Path
 
 import torch.distributed as dist
 from monarch._src.spmd.host_mesh import host_mesh_from_store
 from monarch.config import configure
+
 from torchtitan.experiments.ezpz.config_manager import ConfigManager
 
 # Importing this module applies the XPU compatibility patches before rl imports.
 from torchtitan.experiments.ezpz.rl import train_upstream
 from torchtitan.observability import structured_logger as sl
 from torchtitan.observability.logging import init_logger
-from torchtitan.rl.controller import Controller
-from torchtitan.rl.train import (
-    _compute_generator_world_size,
-    _compute_trainer_world_size,
-    HostMeshes,
-)
+from torchtitan.rl.controller.controller import Controller
 
 
 def _rank() -> int:
@@ -41,14 +39,16 @@ def _rank() -> int:
 
 
 async def _run_controller(config: Controller.Config, hosts) -> None:
-    trainer_world_size = _compute_trainer_world_size(config.trainer.parallelism)
-    per_generator_world_size = _compute_generator_world_size(
+    trainer_world_size = train_upstream.compute_trainer_world_size(
+        config.trainer.parallelism
+    )
+    per_generator_world_size = train_upstream.compute_generator_world_size(
         config.generator.parallelism
     )
     if config.num_generators != 1:
         raise ValueError("two-host validation requires exactly one generator")
 
-    placement = HostMeshes(
+    placement = train_upstream.HostMeshes(
         trainer=hosts.slice(hosts=slice(0, 1)),
         generators=[hosts.slice(hosts=slice(1, 2))],
         gpus_per_node=12,
@@ -61,19 +61,11 @@ async def _run_controller(config: Controller.Config, hosts) -> None:
         flush=True,
     )
 
-    controller: Controller = config.build()
+    # The actor system provisions the trainer on host 0 and the generator on
+    # host 1 through train_upstream.spawn_proc_mesh (ZE_AFFINITY_MASK tiles).
+    controller = train_upstream.EzpzHostMeshController(config, host_meshes=placement)
     try:
-        trainer_mesh, generator_meshes = train_upstream.spawn_proc_mesh(
-            trainer_world_size,
-            per_generator_world_size,
-            host_meshes=placement,
-            num_generators=config.num_generators,
-            generator_env=None,
-        )
-        await controller.setup_async(
-            trainer_mesh=trainer_mesh,
-            generator_meshes=generator_meshes,
-        )
+        await controller.setup_async()
         await controller.run()
     finally:
         await controller.close()
@@ -137,6 +129,13 @@ def main() -> None:
             hosts.shutdown().get()
         finally:
             store.set("multihost_rl_done", b"1")
+    # Same exit path as upstream rl/train.py: flush, then skip interpreter
+    # finalization, which can abort (exit 134) while Monarch's daemon threads
+    # are inside PyO3 calls before CPython 3.14.
+    logging.shutdown()
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(0)
 
 
 if __name__ == "__main__":
