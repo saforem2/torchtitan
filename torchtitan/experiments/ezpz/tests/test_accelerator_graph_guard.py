@@ -4,7 +4,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-"""ezpz drops to eager when the model cannot run under CUDA graph capture."""
+"""ezpz drops to eager when the run cannot use upstream accelerator graphs."""
 
 from types import SimpleNamespace
 
@@ -26,29 +26,30 @@ def _config(*, native_ddp=False, backends=(), optim_graph=False, per_group=False
     return SimpleNamespace(
         parallelism=SimpleNamespace(enable_data_parallel_native_ddp=native_ddp),
         model=SimpleNamespace(traverse=lambda cls: iter(moes)),
-        optim=SimpleNamespace(enable_cuda_graph=optim_graph),
+        optim=SimpleNamespace(enable_accelerator_graph=optim_graph),
         training=SimpleNamespace(
-            disable_cuda_graphs=False,
-            cuda_graph_per_accumulation_group=per_group,
+            disable_accelerator_graphs=False,
+            accelerator_graph_per_microbatch_group=per_group,
         ),
     )
 
 
 @pytest.fixture
 def cuda(monkeypatch):
-    monkeypatch.setattr(ezpz_trainer, "cuda_graphs_supported", lambda: True)
+    monkeypatch.setattr(ezpz_trainer, "accelerator_graphs_supported", lambda: True)
+    monkeypatch.setattr(ezpz_trainer, "dist_utils_device_type", lambda: "cuda")
 
 
 def test_dense_fsdp_keeps_graphs(cuda):
     cfg = _config()
-    ezpz_trainer.maybe_disable_cuda_graphs(cfg)
-    assert cfg.training.disable_cuda_graphs is False
+    ezpz_trainer.maybe_disable_accelerator_graphs(cfg)
+    assert cfg.training.disable_accelerator_graphs is False
 
 
 def test_grouped_mm_moe_keeps_graphs(cuda):
     cfg = _config(backends=("grouped_mm", "grouped_mm"))
-    ezpz_trainer.maybe_disable_cuda_graphs(cfg)
-    assert cfg.training.disable_cuda_graphs is False
+    ezpz_trainer.maybe_disable_accelerator_graphs(cfg)
+    assert cfg.training.disable_accelerator_graphs is False
 
 
 @pytest.mark.parametrize(
@@ -61,20 +62,29 @@ def test_grouped_mm_moe_keeps_graphs(cuda):
 )
 def test_host_syncing_paths_disable_graphs(cuda, kwargs, reason):
     cfg = _config(**kwargs)
-    assert ezpz_trainer.cuda_graph_blockers(cfg) == [reason]
-    ezpz_trainer.maybe_disable_cuda_graphs(cfg)
-    assert cfg.training.disable_cuda_graphs is True
+    assert ezpz_trainer.accelerator_graph_blockers(cfg, "cuda") == [reason]
+    ezpz_trainer.maybe_disable_accelerator_graphs(cfg)
+    assert cfg.training.disable_accelerator_graphs is True
+
+
+def test_xpu_keeps_upstream_capture_off(monkeypatch):
+    """XPU capture stays with ezpz's opt-in wrapper, never upstream's."""
+    monkeypatch.setattr(ezpz_trainer, "accelerator_graphs_supported", lambda: True)
+    monkeypatch.setattr(ezpz_trainer, "dist_utils_device_type", lambda: "xpu")
+    cfg = _config()
+    ezpz_trainer.maybe_disable_accelerator_graphs(cfg)
+    assert cfg.training.disable_accelerator_graphs is True
 
 
 @pytest.mark.parametrize("flag", ["optim_graph", "per_group"])
 def test_explicit_graph_features_raise(cuda, flag):
     cfg = _config(native_ddp=True, **{flag: True})
     with pytest.raises(ValueError, match="native DDP"):
-        ezpz_trainer.maybe_disable_cuda_graphs(cfg)
+        ezpz_trainer.maybe_disable_accelerator_graphs(cfg)
 
 
-def test_noop_without_cuda_graph_support(monkeypatch):
-    monkeypatch.setattr(ezpz_trainer, "cuda_graphs_supported", lambda: False)
+def test_noop_without_accelerator_graph_support(monkeypatch):
+    monkeypatch.setattr(ezpz_trainer, "accelerator_graphs_supported", lambda: False)
     cfg = _config(native_ddp=True)
-    ezpz_trainer.maybe_disable_cuda_graphs(cfg)
-    assert cfg.training.disable_cuda_graphs is False
+    ezpz_trainer.maybe_disable_accelerator_graphs(cfg)
+    assert cfg.training.disable_accelerator_graphs is False

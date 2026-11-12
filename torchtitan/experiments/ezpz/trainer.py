@@ -29,7 +29,7 @@ from torchtitan.components.data.types import TrainingMicrobatch
 from torchtitan.components.loss import IGNORE_INDEX
 from torchtitan.config import apply_overrides
 from torchtitan.distributed import ParallelismContext, utils as dist_utils
-from torchtitan.distributed.cuda_graph import cuda_graphs_supported
+from torchtitan.distributed.accelerator_graph import accelerator_graphs_supported
 from torchtitan.experiments.ezpz import signal_stop
 from torchtitan.experiments.ezpz.ckpt_key_compat import (
     maybe_install_flat_attention_compat,
@@ -332,7 +332,7 @@ class EzpzTrainingEngine(TorchFTTrainingEngine):
         states[MODEL] = ModelWrapper(unwrapped_parts)
 
     def _initialize_forward_backward(self) -> None:
-        maybe_disable_cuda_graphs(self.config)
+        maybe_disable_accelerator_graphs(self.config)
         super()._initialize_forward_backward()
         if not self.parallelism_context.pp_enabled:
             self._run_forward_backward = maybe_wrap_with_xpu_graph(
@@ -598,19 +598,24 @@ class EzpzTrainingEngine(TorchFTTrainingEngine):
         xpu_graph_teardown()
 
 
-def cuda_graph_blockers(config: Any) -> list[str]:
-    """Reasons the configured model cannot run under CUDA graph capture.
+def accelerator_graph_blockers(config: Any, device_type: str) -> list[str]:
+    """Reasons the configured run cannot use upstream accelerator graph capture.
 
     Upstream captures forward/backward by default
-    (``training.disable_cuda_graphs=False``). Two ezpz paths sync with the
-    host and fail during capture (Polaris job ``7839433``):
+    (``training.disable_accelerator_graphs=False``) on any device whose
+    ``torch.accelerator.Graph`` works (#5353). Three ezpz cases opt out:
 
+    - XPU: capture stays opt-in through ezpz's own wrapper
+      (``EZPZ_XPU_GRAPHS=1``, ``xpu_graph.py``), as before the sync; upstream
+      capture is never stacked on top of it;
     - native DDP: ``DistributedDataParallel._pre_forward`` raises "operation
-      not permitted when stream is capturing";
+      not permitted when stream is capturing" (Polaris job ``7839433``);
     - any expert backend other than ``grouped_mm``: ``for_loop`` (the SM<90
-      fallback) copies per-expert token counts to the host.
+      and XPU fallback) copies per-expert token counts to the host.
     """
     reasons: list[str] = []
+    if device_type == "xpu":
+        reasons.append("XPU (ezpz XPU graphs are opt-in via EZPZ_XPU_GRAPHS=1)")
     if getattr(config.parallelism, "enable_data_parallel_native_ddp", False):
         reasons.append("native DDP")
     model = getattr(config, "model", None)
@@ -625,30 +630,40 @@ def cuda_graph_blockers(config: Any) -> list[str]:
     return reasons
 
 
-def maybe_disable_cuda_graphs(config: Any) -> None:
-    """Run eagerly instead of capturing when the model cannot be captured.
+def maybe_disable_accelerator_graphs(config: Any) -> None:
+    """Run eagerly instead of capturing when the run cannot be captured.
 
     Raises if the config explicitly asks for a graph feature that needs
     capture, since silently dropping it would change what the user asked for.
     """
     training = config.training
-    if training.disable_cuda_graphs or not cuda_graphs_supported():
+    if training.disable_accelerator_graphs or not accelerator_graphs_supported():
         return
-    reasons = cuda_graph_blockers(config)
+    reasons = accelerator_graph_blockers(config, dist_utils_device_type())
     if not reasons:
         return
-    if config.optim.enable_cuda_graph or training.cuda_graph_per_accumulation_group:
+    if (
+        config.optim.enable_accelerator_graph
+        or training.accelerator_graph_per_microbatch_group
+    ):
         raise ValueError(
-            f"CUDA graphs cannot capture {', '.join(reasons)}; unset "
-            "optim.enable_cuda_graph / training.cuda_graph_per_accumulation_group "
-            "or change the model config."
+            f"Accelerator graphs cannot capture {', '.join(reasons)}; unset "
+            "optim.enable_accelerator_graph / "
+            "training.accelerator_graph_per_microbatch_group or change the config."
         )
     logger.warning(
-        "Disabling CUDA graphs: %s cannot run under capture. Pass "
-        "--training.disable-cuda-graphs to silence this.",
-        ", ".join(reasons),
+        "Disabling accelerator graphs: %s. Pass "
+        "--training.disable-accelerator-graphs to silence this.",
+        "; ".join(reasons),
     )
-    training.disable_cuda_graphs = True
+    training.disable_accelerator_graphs = True
+
+
+def dist_utils_device_type() -> str:
+    """The device type upstream's graph code checks (``tools.utils``)."""
+    from torchtitan.tools import utils
+
+    return utils.device_type
 
 
 class FaultTolerantTrainer(TorchFTTrainer):

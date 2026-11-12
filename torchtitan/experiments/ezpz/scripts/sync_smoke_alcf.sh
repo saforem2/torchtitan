@@ -29,7 +29,7 @@
 #   SMOKE_RESUME_AT  checkpoint step (default 3); SMOKE_RESUME_TOL (default 1e-3)
 #   SMOKE_RESUME_EXTRA  extra flags for both resume runs ("{NPROC}" substituted)
 #   SEED             debug seed (default 42)
-#   SMOKE_CUDA_GRAPHS  0 to run eager on CUDA (default 1: upstream CUDA graph capture)
+#   SMOKE_CUDA_GRAPHS  0 to run eager on CUDA (default 1: upstream accelerator graph capture)
 
 set -o pipefail
 
@@ -234,15 +234,14 @@ grep -q "IMPORT_OK" "${LOG}" || { echo "VERDICT: import_failed" | tee -a "${LOG}
 # --- Phase 2: per-config train smoke ---
 WANDB=(--metrics.no-enable-wandb)
 [[ "${SMOKE_WANDB:-0}" == 1 ]] && WANDB=(--metrics.enable-wandb)
-# Upstream captures fwd/bwd in a CUDA graph by default (training.
-# disable_cuda_graphs=False). The ezpz for-loop MoE experts and native DDP are
-# not capture-safe and fail at the first captured step on CUDA (Polaris job
-# 7839433; docs/guides/known-bugs/cuda-graphs-moe-native-ddp.md). The ezpz
-# trainer now drops those to eager itself, so smoke keeps upstream's default;
-# SMOKE_CUDA_GRAPHS=0 forces eager everywhere.
+# Upstream captures fwd/bwd in an accelerator graph by default (training.
+# disable_accelerator_graphs=False, backend-agnostic since #5353). The ezpz
+# trainer drops to eager itself for native DDP, host-syncing MoE expert
+# backends and XPU (docs/guides/known-bugs/cuda-graphs-moe-native-ddp.md), so
+# smoke keeps upstream's default; SMOKE_CUDA_GRAPHS=0 forces eager on CUDA.
 GRAPHS=()
 [[ "${ACCEL}" == cuda && "${SMOKE_CUDA_GRAPHS:-1}" == 0 ]] \
-    && GRAPHS=(--training.disable-cuda-graphs)
+    && GRAPHS=(--training.disable-accelerator-graphs)
 declare -a FAILED=() KNOWN=()
 idx=0
 for spec in "${CONFIGS[@]}"; do

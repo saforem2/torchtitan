@@ -36,7 +36,7 @@ def agpt_rl_model_configs(
 
     ``build_rl_model_configs`` applies the fp32 lm_head conversion (RL
     logprob/KL math needs fp32 logits); LoRA then freezes every other
-    parameter and adds adapters on ``wqkv`` and ``wo``. ``freeze_moe_routing``
+    parameter and adds adapters on ``wqkv`` and ``wo``. ``disable_moe_load_balancing``
     is off: the dense AuroraGPT model has no router.
     """
     trainer_model, generator_model = build_rl_model_configs(
@@ -44,7 +44,7 @@ def agpt_rl_model_configs(
         "2b-rl",
         trainer_parallelism=trainer_parallelism,
         generator_parallelism=generator_parallelism,
-        freeze_moe_routing=False,
+        disable_moe_load_balancing=False,
     )
     lora = LoRATransform(
         rank=lora_rank,

@@ -203,7 +203,7 @@ def _agpt_grpo_config(
             ),
             training=TrainingConfig(
                 dtype="float32",
-                disable_cuda_graphs=True,
+                disable_accelerator_graphs=True,
                 num_tokens_per_microbatch_per_dp_rank=2 * 2048,
                 max_context_length=2048,
             ),
