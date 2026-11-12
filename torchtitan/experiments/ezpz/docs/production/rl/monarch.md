@@ -38,9 +38,12 @@ TrainerActor ── TorchStore/Gloo policy publication ──> GeneratorActor/vL
 
 The production entry point is
 `torchtitan/experiments/ezpz/rl/scripts/grpo/multihost_train_upstream.py`.
-It supplies separate trainer/generator `HostMeshes` to the existing
-`train_upstream.spawn_proc_mesh()` path; model, controller, reward, and
-checkpoint logic remain the normal TorchTitan RL implementation.
+It passes the trainer/generator `HostMeshes` from `host_mesh_from_store` to
+`EzpzHostMeshController`, a `Controller` subclass whose actor system,
+`train_upstream.EzpzMonarchActorSystem`, overrides only `provision()` to spawn
+the GPU proc meshes with ezpz `spawn_proc_mesh` (per-host `ZE_AFFINITY_MASK`).
+Model, controller, reward, and checkpoint logic remain the normal TorchTitan RL
+implementation.
 
 ## Automatic transport locality and the former forced-Gloo workaround
 
