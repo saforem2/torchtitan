@@ -80,6 +80,10 @@ def _env_resume_consumed_samples() -> int | None:
 
 
 class BlendCorpusDataLoader(BaseDataLoader):
+    # Class-level default so a loader built without __init__ (the resume and
+    # fold-batch tests use object.__new__) still iterates.
+    _batch_input_witness: BatchInputWitness | None = None
+
     @dataclass(kw_only=True, slots=True)
     class Config(BaseDataLoader.Config):
         # 80th sync (#4088, Grain): BaseDataLoader.Config lost `dataset` and
