@@ -1,5 +1,144 @@
 # Upstream Sync Log
 
+## 2026-11-11: pre-sync gate, `ezpz` `b9dd4eb7`, 274 commits behind upstream
+
+No merge yet. `origin/ezpz` at `b9dd4eb7` is 274 commits behind
+`upstream/main` (merge base `5a7a622f16`, the 2026-10-15 sync below). Before
+the next sync the open `ezpz` PRs are landed in this order, so the merge
+starts from one tree:
+
+1. #77, MoE TP=2 doc salvage (docs only)
+2. #74, AGPT XPU throughput recovery (includes the ZeRO-1 BF16 resume fix,
+   `da9ceb8f`)
+3. #78, cross-system smoke script (this entry)
+4. #76, grain SFT CoT. Its manifest builder sorted the olmo-mix file list,
+   which `split_dataset_by_node` turns into a curriculum (no `starcoder` until
+   each rank's last file). Fixed in #76 (`288020c3`): seed-0 shuffle by
+   default, and the 10B seat defaults to `olmo-mix-dp6144-shuf0.txt`. The 4B
+   stays on the sorted file it resumes from. Queued 10B job `9076371` was
+   submitted before the fix and must be resubmitted to pick it up.
+
+   After #77 #74 #78 land, #76 conflicts with `ezpz` in
+   `agpt/config_registry.py` (2 hunks, against #74's reformatting) and
+   `docs/production/sft/README.md` (1 hunk). Every hunk resolves to #76's
+   added lines; merge `ezpz` into the #76 branch and keep its side of each
+   hunk.
+
+During the sync take upstream's `models/common/attn_gym.py` and
+`tests/unit_tests/cpu/models/common/test_optional_imports.py`; #76's copies
+were a stopgap for the same optional-import fix.
+
+### Smoke script
+
+`scripts/sync_smoke_alcf.sh` replaces the per-machine scripts. The wrappers
+`sync_smoke_{sunspot,aurora,polaris,sirius}.sh` carry only the `#PBS` headers.
+
+```bash
+qsub -A <account> -q debug -l select=2 -l walltime=01:00:00 \
+  -l filesystems=<fs> torchtitan/experiments/ezpz/scripts/sync_smoke_sunspot.sh
+```
+
+It picks the venv and tokenizer per machine, probes `import torch` under
+`mpiexec` before training, runs each config under `SMOKE_CONFIG_TIMEOUT`
+(default `900` s), and runs an exact resume check: `6` steps with a checkpoint
+at `3`, resume a copy, compare steps `4`-`6` (`SMOKE_RESUME_TOL`, default
+`1e-3`). The last line is `VERDICT: ok`, `ok_with_known_failures` or
+`failed`. Env knobs are listed at the top of the script.
+
+| Machine | Default venv | torch |
+|---|---|---|
+| Sunspot | `/lus/tegu/projects/datascience/foremans/venvs/xpu-torch216-sync-5a7a622f16` | `2.16.0.dev20261015+xpu` |
+| Aurora | `/flare/AuroraGPT/foremans/venvs/xpu-torch216-sync-5a7a622f16` | same |
+| Polaris | `/eagle/AuroraGPT/foremans/venvs/cuda-torch215-cu132` | `2.15.0+cu132` |
+| Sirius | `/home/foremans/torchtitan/.venv` | `2.15.0+cu132` |
+
+### Results, `ezpz` + #77 #74 #76 #78
+
+2 nodes, `agpt_debugmodel` and `moe_debugmodel`, `6` steps, seed `42`,
+deterministic.
+
+| Check | Sunspot `12483333` | Aurora `9077299` | Polaris `7839481` | Sirius `33453` |
+|---|---|---|---|---|
+| agpt TP=1 | `10.881` -> `9.934`, same as `ezpz` | bit-identical to Sunspot | `10.880` -> `10.107` | `10.854` -> `9.967`, same as `ezpz`* |
+| agpt TP=2 | known failure | known failure | known failure | known failure |
+| MoE TP=1 | `12.941` -> `10.975`, same as `ezpz` | same as Sunspot | `12.990` -> `11.069` | `12.962` -> `11.079`, same as `ezpz`* |
+| resume, FSDP | exact, diff `0` | exact, diff `0` | not run | exact, diff `0`* |
+| resume, ZeRO-1 BF16 all-gather | diff `0.0041` | diff `0.0041` | diff `0.0041` | diff `0.0041` |
+| same, pre-fix `zero1.py` | diff `0.318` | diff `0.318` | diff `0.278` | not run |
+
+`0.0041` is the documented ZeRO-1 limitation: the FP32 master is not
+checkpointed and is rebuilt from the BF16 weights. Aurora's baseline MoE run
+hit a transient Lustre `EBADF` in inductor; the candidate MoE run passed.
+
+Polaris `7839481` ran eager (`--training.disable-cuda-graphs`). Rerun
+`7839729` with the CUDA graph guard and graphs on gave the same losses and
+resume diff; the smoke now leaves graphs on by default. Both used the new venv
+with torch `2.15.0+cu132`. It needed three
+environment fixes first: a `libmpi.so.12` link for pip's `mpi4py`,
+`PALS_TRANSFER=0` for the `uv`-managed interpreter, and `blendcorpus` in the
+venv. Plain `ezpz` does not import there (`cutlass`, below), so Polaris has no
+baseline column; CUDA and XPU losses are not expected to match.
+
+Beyond the smoke (Sunspot, 2026-11-12):
+
+- **Unit tests**, `ezpz/tests` and `tests/unit_tests/cpu/models/common`, run
+  one file at a time on `ezpz` and on the candidate. Three files passed on
+  `ezpz` and failed on the candidate; all are fixed. #74's
+  `_batch_input_witness` was set only in `__init__` (6 blendcorpus tests,
+  `4cab5c50`). #76 copied upstream's optional-import test without upstream's
+  `require_attn_gym` calls in `cp_kda.py`/`cp_gdn.py` (4 tests, `29e5af07`).
+  16 files fail identically on both trees and predate these PRs (HF
+  conversion and `ckpt_key_compat` imports, `test_cp_attention` circular
+  import, script-style files that `sys.exit` on import).
+- **Local batch 2** (`agpt_debugmodel`, 1024 tokens over 512 context): `ezpz`
+  dies at step 1 (`shape '[1024, 1, 8]' is invalid for input of size 4096`);
+  the candidate trains (`10.878` -> `9.861`). #74's per-row RoPE positions.
+- **`agpt_2b`, 24 ranks**: `ezpz` fails at `fully_shard` (`11008` rows over
+  24); the candidate shards (#74's padded fallback) and then runs out of
+  memory in SDPA at the default context. At 16 ranks and 4096 tokens both
+  run: median `3524` (`ezpz`) vs `3449`/`3484` tok/s (candidate) over steps
+  11-30, same step-1 loss `12.91284`, same `17.56 GiB`. #74's speedups are
+  opt-in and were off.
+
+\* Sirius compares against `ezpz` plus only #76's optional-import model files
+and #78's smoke scripts, the same baseline as below: plain `ezpz` does not
+import on CUDA systems with `attn_gym` installed.
+
+Sirius (2026-11-12) needed `blendcorpus` in the venv and a third column
+(`books`) in `data-lists/sirius/books.txt` (`3e97da72`); the earlier
+`encodings` failure was `PYTHONHOME`, already fixed. Against that baseline:
+
+- local batch 2: baseline dies with the same `shape '[1024, 1, 8]'` error,
+  candidate trains (`10.851` -> `9.749`);
+- `agpt_2b`, 8 ranks, 4096 tokens: median `994` vs `986` tok/s, same
+  `16.42 GiB`, same step-1 loss `12.91722` (one warm run per tree);
+- unit tests on a compute node (`33455`): no file regresses. #74's
+  `test_zero1.py` and `test_agpt_fsdp_uneven_rows.py` pass (they SIGSEGV on
+  login nodes, an environment artifact); #76's `test_optional_imports.py` goes
+  from 3 failures to 25 passes. 19 files fail identically on both trees.
+
+### Known failures the next sync inherits
+
+- **TP=2**: attention receives sequence-sharded tokens (`256` of `512`), so
+  dense TP=2 fails on every system. Open `local_map` bug,
+  [moe-tp2-wo-placement.md](guides/known-bugs/moe-tp2-wo-placement.md). The
+  smoke labels it `KNOWN_FAILURES`.
+- **XPU hang after step 7**: all ranks wait in the same FSDP all-gather, about
+  half of default-env runs. The smoke runs `6` steps.
+  [xpu-fsdp-allgather-hang-after-step-7.md](guides/known-bugs/xpu-fsdp-allgather-hang-after-step-7.md).
+- **CUDA graphs on by default**: since `5a7a622f16` upstream captures
+  fwd/bwd in a CUDA graph. ezpz MoE (`for_loop` experts) and native DDP failed
+  at the first captured step on Polaris (`7839433`). Fixed in #78
+  (`bae44ff5`): the ezpz trainer drops those to eager with a warning, and
+  Polaris `7839729` passes with graphs on.
+  [cuda-graphs-moe-native-ddp.md](guides/known-bugs/cuda-graphs-moe-native-ddp.md).
+  The note near the 78th sync saying `disable_cuda_graphs` defaults `True` is
+  out of date.
+- **Plain `ezpz` does not import on Polaris** when `attn_gym` is installed
+  without `cutlass`; #76 (and upstream) make that import optional.
+- Still open from the 2026-10-15 entry: MoE EP, MoE flex attention, RL
+  overlays.
+
 ## 2026-10-15: upstream `5a7a622f16`, 236 commits, smoke-validated on Sunspot
 
 Branch `sync/upstream-5a7a622f16` merges **236 upstream commits**
@@ -701,7 +840,7 @@ exercised it, so behaviour is unchanged from pre-merge).
 
 This is the **second** time an upstream `__init__` attribute has gone missing
 this way (`num_pipeline_parallel_microbatches` was the first). Added
-[`tests/test_trainer_init_parity.py`](../../tests/test_trainer_init_parity.py)
+[`tests/test_trainer_init_parity.py`](../tests/test_trainer_init_parity.py)
 -- a static AST diff of what each `__init__` sets. Pure stdlib, no torch
 needed, mutation-tested. **Run it on every sync.**
 
