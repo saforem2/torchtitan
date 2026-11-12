@@ -29,6 +29,7 @@
 #   SMOKE_RESUME_AT  checkpoint step (default 3); SMOKE_RESUME_TOL (default 1e-3)
 #   SMOKE_RESUME_EXTRA  extra flags for both resume runs ("{NPROC}" substituted)
 #   SEED             debug seed (default 42)
+#   SMOKE_CUDA_GRAPHS  1 to keep upstream CUDA graph capture on CUDA (default 0: eager)
 
 set -o pipefail
 
@@ -233,6 +234,14 @@ grep -q "IMPORT_OK" "${LOG}" || { echo "VERDICT: import_failed" | tee -a "${LOG}
 # --- Phase 2: per-config train smoke ---
 WANDB=(--metrics.no-enable-wandb)
 [[ "${SMOKE_WANDB:-0}" == 1 ]] && WANDB=(--metrics.enable-wandb)
+# Upstream captures fwd/bwd in a CUDA graph by default (training.
+# disable_cuda_graphs=False). The ezpz for-loop MoE experts and native DDP are
+# not capture-safe and fail at the first captured step on CUDA (Polaris job
+# 7839433; docs/guides/known-bugs/cuda-graphs-moe-native-ddp.md). Smoke runs
+# eager on CUDA by default; SMOKE_CUDA_GRAPHS=1 tests the capture path.
+GRAPHS=()
+[[ "${ACCEL}" == cuda && "${SMOKE_CUDA_GRAPHS:-0}" != 1 ]] \
+    && GRAPHS=(--training.disable-cuda-graphs)
 declare -a FAILED=() KNOWN=()
 idx=0
 for spec in "${CONFIGS[@]}"; do
@@ -261,6 +270,7 @@ for spec in "${CONFIGS[@]}"; do
         --debug.deterministic \
         --checkpoint.no-enable \
         "${WANDB[@]}" \
+        "${GRAPHS[@]}" \
         ${extra} \
         > "${clog}" 2>&1
     rc=$?
@@ -320,7 +330,7 @@ if [[ "${SMOKE_RESUME:-1}" == 1 ]]; then
             "${VENV}/bin/python" -m torchtitan.experiments.ezpz.train \
             --module="${module}" --config="${config}" \
             --hf-assets-path="${HF_ASSETS}" --training.steps="${STEPS}" \
-            --debug.seed="${SEED}" --debug.deterministic "${WANDB[@]}" \
+            --debug.seed="${SEED}" --debug.deterministic "${WANDB[@]}" "${GRAPHS[@]}" \
             --checkpoint.enable --checkpoint.interval="${RESUME_AT}" \
             --checkpoint.keep-latest-k=0 \
             --dump-folder="${LOG_DIR}/resume-$1" \

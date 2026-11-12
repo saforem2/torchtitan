@@ -73,6 +73,15 @@ still die with `No module named 'encodings'`.
 - **XPU hang after step 7**: all ranks wait in the same FSDP all-gather, about
   half of default-env runs. The smoke runs `6` steps.
   [xpu-fsdp-allgather-hang-after-step-7.md](guides/known-bugs/xpu-fsdp-allgather-hang-after-step-7.md).
+- **CUDA graphs on by default**: since `5a7a622f16` upstream captures
+  fwd/bwd in a CUDA graph. ezpz MoE (for-loop experts) and native DDP fail at
+  the first captured step on Polaris; dense FSDP passes. The smoke runs eager
+  on CUDA.
+  [cuda-graphs-moe-native-ddp.md](guides/known-bugs/cuda-graphs-moe-native-ddp.md).
+  The note near the 78th sync saying `disable_cuda_graphs` defaults `True` is
+  out of date.
+- **Plain `ezpz` does not import on Polaris** when `attn_gym` is installed
+  without `cutlass`; #76 (and upstream) make that import optional.
 - Still open from the 2026-10-15 entry: MoE EP, MoE flex attention, RL
   overlays.
 
