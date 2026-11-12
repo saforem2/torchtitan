@@ -47,18 +47,25 @@ at `3`, resume a copy, compare steps `4`-`6` (`SMOKE_RESUME_TOL`, default
 2 nodes, `agpt_debugmodel` and `moe_debugmodel`, `6` steps, seed `42`,
 deterministic.
 
-| Check | Sunspot `12483333` | Aurora `9077299` | Polaris | Sirius |
+| Check | Sunspot `12483333` | Aurora `9077299` | Polaris `7839481` | Sirius |
 |---|---|---|---|---|
-| agpt TP=1 | `10.881` -> `9.934`, same as `ezpz` | bit-identical to Sunspot | pending | does not start |
-| agpt TP=2 | known failure | known failure | | |
-| MoE TP=1 | `12.941` -> `10.975`, same as `ezpz` | same as Sunspot | | |
-| resume, FSDP | exact, diff `0` | exact, diff `0` | | |
-| resume, ZeRO-1 BF16 all-gather | diff `0.0041` | diff `0.0041` | | |
-| same, pre-fix `zero1.py` | diff `0.318` | diff `0.318` | | |
+| agpt TP=1 | `10.881` -> `9.934`, same as `ezpz` | bit-identical to Sunspot | `10.880` -> `10.107` | does not start |
+| agpt TP=2 | known failure | known failure | known failure | |
+| MoE TP=1 | `12.941` -> `10.975`, same as `ezpz` | same as Sunspot | `12.990` -> `11.069` | |
+| resume, FSDP | exact, diff `0` | exact, diff `0` | not run | |
+| resume, ZeRO-1 BF16 all-gather | diff `0.0041` | diff `0.0041` | diff `0.0041` | |
+| same, pre-fix `zero1.py` | diff `0.318` | diff `0.318` | diff `0.278` | |
 
 `0.0041` is the documented ZeRO-1 limitation: the FP32 master is not
 checkpointed and is rebuilt from the BF16 weights. Aurora's baseline MoE run
 hit a transient Lustre `EBADF` in inductor; the candidate MoE run passed.
+
+Polaris runs eager (`--training.disable-cuda-graphs`, see the CUDA graph item
+below), on the new venv with torch `2.15.0+cu132`. It needed three
+environment fixes first: a `libmpi.so.12` link for pip's `mpi4py`,
+`PALS_TRANSFER=0` for the `uv`-managed interpreter, and `blendcorpus` in the
+venv. Plain `ezpz` does not import there (`cutlass`, below), so Polaris has no
+baseline column; CUDA and XPU losses are not expected to match.
 
 Sirius does not start: after four environment fixes (newer ezpz utils pin,
 GTL flag after module load, mpi-compat shim, `unset PYTHONHOME`) 3 of 8 ranks
