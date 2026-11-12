@@ -18,13 +18,13 @@ from datetime import timedelta
 from pathlib import Path
 
 import torch.distributed as dist
-from monarch._src.spmd.host_mesh import host_mesh_from_store
 from monarch.config import configure
 
 from torchtitan.experiments.ezpz.config_manager import ConfigManager
 
 # Importing this module applies the XPU compatibility patches before rl imports.
 from torchtitan.experiments.ezpz.rl import train_upstream
+from torchtitan.experiments.ezpz.rl.monarch_compat import host_mesh_from_store
 from torchtitan.observability import structured_logger as sl
 from torchtitan.observability.logging import init_logger
 from torchtitan.rl.controller.controller import Controller
