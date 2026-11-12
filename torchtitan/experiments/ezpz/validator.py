@@ -86,9 +86,10 @@ class EzpzValidator(Validator):
                     tokens_per_step = getattr(
                         training_cfg, "num_tokens_per_train_step", None
                     )
-                    seq_len = getattr(training_cfg, "max_context_length", None)
-                    if tokens_per_step and tokens_per_step > 0 and seq_len:
-                        extra["global_batch_size"] = tokens_per_step // seq_len
+                    # #5779 moved the sequence length to the model config;
+                    # the validator gets it as seq_len.
+                    if tokens_per_step and tokens_per_step > 0 and self.seq_len:
+                        extra["global_batch_size"] = tokens_per_step // self.seq_len
             # Same unit split as the trainer's dataloader build: blendcorpus
             # counts SEQUENCES (local_batch_size/seq_len), Grain counts TOKENS
             # (num_tokens_per_batch/max_context_length). Both loaders take
@@ -150,8 +151,10 @@ class EzpzValidator(Validator):
             # torchtitan/components/validate.py. Both attributes come from the
             # base Validator (self.parallelism_context and self.parallelism set in its
             # __init__), so no plumbing is needed here.
+            # Upstream now also returns the loss kwargs; validation calls the
+            # loss without them, as core's Validator does.
             with self.parallelism_context.activate_spmd():
-                inputs, labels, extra_kwargs = cast(
+                inputs, labels, extra_kwargs, _ = cast(
                     BaseModel, model_parts[0]
                 ).preprocess_inputs(
                     {**input_dict, "labels": labels},

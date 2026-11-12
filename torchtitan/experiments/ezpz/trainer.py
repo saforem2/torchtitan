@@ -798,6 +798,7 @@ class FaultTolerantTrainer(TorchFTTrainer):
         self.engine = self.engine_cls(
             config,
             model_config=model_config,
+            precision=config.precision,
             max_num_documents=config.dataloader.max_num_documents,
             output_dir=config.dump_folder,
             fault_tolerance=config.fault_tolerance,
@@ -867,6 +868,11 @@ class FaultTolerantTrainer(TorchFTTrainer):
             config_dict=config.to_dict(),
             has_quantization=engine.has_quantization,
         )
+        # Logical FLOPs of the steps in the metrics window (#4819: the engine
+        # counts them per microbatch; MetricsProcessor no longer multiplies a
+        # per-token constant). See ``_num_flops_in_window``.
+        self._local_num_flops_since_last_log = 0
+        self._flops_window_start: float | None = None
         color = self.metrics_processor.color
 
         engine.initialize(
@@ -883,14 +889,14 @@ class FaultTolerantTrainer(TorchFTTrainer):
                 pp_schedule=config.parallelism.pipeline_parallel_schedule,
                 color=color,
             )
-        self.metrics_processor.num_flops_per_token = engine.num_flops_per_token
         self.metrics_processor.optimizers = engine.optim.optimizers
         self.metrics_processor.model_parts = engine.model_parts
 
-        logger.info(
-            "Peak FLOPS used for computing MFU: "
-            f"{self.metrics_processor.gpu_peak_flops:.3e}"
-        )
+        if self.metrics_processor.gpu_peak_flops is not None:
+            logger.info(
+                "Peak FLOPS used for computing MFU: "
+                f"{self.metrics_processor.gpu_peak_flops:.3e}"
+            )
         logger.info(
             f"{engine.device.type.upper()} memory usage for model: "
             f"{engine.model_device_mem_stats.max_reserved_gib:.2f}GiB"
@@ -1028,6 +1034,22 @@ class FaultTolerantTrainer(TorchFTTrainer):
         gas = round(start + (full - start) * frac)
         return max(start, min(full, gas))
 
+    def _num_flops_in_window(self, step_num_flops: int) -> int:
+        """Add this step's FLOPs to the metrics window and return the window total.
+
+        The window is the one ``MetricsProcessor`` measures tokens and time
+        over: it restarts whenever ``MetricsProcessor.reset()`` moves
+        ``time_last_log`` (validators call it). The ezpz loop does not call
+        ``reset()`` after a log, so, as before #4819, throughput, TFLOPs and MFU
+        cover the steps since the start or the last validation.
+        """
+        window_start = self.metrics_processor.time_last_log
+        if window_start != self._flops_window_start:
+            self._flops_window_start = window_start
+            self._local_num_flops_since_last_log = 0
+        self._local_num_flops_since_last_log += step_num_flops
+        return self._local_num_flops_since_last_log
+
     def train_step(self, data_iterator: Iterator[TrainingMicrobatch]) -> float | None:
         original_gas = self.gradient_accumulation_steps
         self.gradient_accumulation_steps = self._effective_gas()
@@ -1096,6 +1118,7 @@ class FaultTolerantTrainer(TorchFTTrainer):
 
         lr_metrics = engine.optim.lr_schedulers.get_metrics() if should_log else {}
         grad_norm = engine.optim_step()
+        mean_num_flops = self._num_flops_in_window(forward_backward_result.num_flops)
 
         if not should_log:
             return float(accumulated_loss.detach().item())
@@ -1119,8 +1142,20 @@ class FaultTolerantTrainer(TorchFTTrainer):
                     ft_pg,
                 ),
             )
+            dp_mesh = parallelism_context.get_optional_mesh("dp")
+            if dp_mesh is not None or ft_pg is not None:
+                mean_num_flops = dist_utils.dist_sum(
+                    torch.tensor(
+                        mean_num_flops, dtype=torch.float64, device=engine.device
+                    ),
+                    dp_mesh,
+                    ft_pg,
+                )
+                if dp_mesh is not None:
+                    mean_num_flops /= dp_mesh.size()
             if ft_pg is not None:
                 global_avg_loss /= ft_pg.size()
+                mean_num_flops /= ft_pg.size()
         else:
             global_avg_loss = global_max_loss = float(accumulated_loss.item())
             global_ntokens_seen = engine.ntokens_seen
@@ -1146,6 +1181,7 @@ class FaultTolerantTrainer(TorchFTTrainer):
             global_max_loss,
             float(grad_norm.item()),
             extra_metrics=extra_metrics,
+            num_flops=mean_num_flops,
         )
 
         if isinstance(global_avg_loss, torch.Tensor):
@@ -1300,7 +1336,12 @@ class FaultTolerantTrainer(TorchFTTrainer):
                 finally:
                     if numerics_capture is not None:
                         numerics_capture.__exit__(None, None, None)
-        finally:
+        except BaseException as e:
+            # Upstream passes the failure so an OOM writes the exit memory
+            # snapshot.
+            engine.close_profiler(e)
+            raise
+        else:
             engine.close_profiler()
 
         if torch.distributed.get_rank() == 0:
