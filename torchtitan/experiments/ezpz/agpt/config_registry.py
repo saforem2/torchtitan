@@ -50,8 +50,8 @@ from torchtitan.experiments.ezpz.trainer import (
     set_max_context_length,
 )
 from torchtitan.experiments.ezpz.validator import EzpzValidator
+from torchtitan.experiments.ezpz.wandb_logger import EzpzWandBLogger
 from torchtitan.experiments.torchft.config.job_config import FaultTolerance
-from torchtitan.observability.metrics import WandBLogger
 
 from . import model_registry
 from .sft_data import (
@@ -353,7 +353,7 @@ def agpt(
         cfg.validator.dataloader.dataset_path = dataset_path
         cfg.validator.dataloader.data_cache_path = cfg.dataloader.data_cache_path
     cfg.metrics.log_freq = 1
-    cfg.metrics.loggers = [WandBLogger.Config()]
+    cfg.metrics.loggers = [EzpzWandBLogger.Config()]
     if compile:
         cfg.compile = CompileConfig()
     cfg.parallelism.fsdp_reshard_after_forward = fsdp_reshard_after_forward
@@ -600,7 +600,7 @@ def _agpt_2b_mds_anneal_base() -> FaultTolerantTrainer.Config:
     # retry, which also used a low constant LR on the same base family).
     cfg.optim.optimizer = default_adamw(lr=_MDS_ANNEAL_LR)
     cfg.training.steps = _MDS_ANNEAL_STEPS
-    cfg.metrics.loggers = [WandBLogger.Config()]
+    cfg.metrics.loggers = [EzpzWandBLogger.Config()]
     return cfg
 
 
@@ -652,7 +652,7 @@ def agpt_mds_shape_benchmark_adamw() -> FaultTolerantTrainer.Config:
     cfg.optim.optimizer = default_adamw(lr=2e-4, betas=(0.9, 0.95), weight_decay=0.1)
     cfg.optim.lr_scheduler.warmup_steps = 0
     cfg.checkpointer.folder = "checkpoints/agpt-mds-shape-benchmark"
-    cfg.metrics.loggers = [WandBLogger.Config()]
+    cfg.metrics.loggers = [EzpzWandBLogger.Config()]
     return cfg
 
 
@@ -669,7 +669,7 @@ def agpt_2b_loss_ab() -> FaultTolerantTrainer.Config:
     cfg.optim.lr_scheduler.min_lr_factor = 1.0
     cfg.validator.enable = False
     cfg.checkpointer.folder = "checkpoints/agpt-2b-loss-ab"
-    cfg.metrics.loggers = [WandBLogger.Config()]
+    cfg.metrics.loggers = [EzpzWandBLogger.Config()]
     return cfg
 
 
@@ -758,7 +758,7 @@ def agpt_2b_mds154391_tulu_math_uc_streaming() -> FaultTolerantTrainer.Config:
     # references identical so config parsing cannot erase this specialized
     cfg.checkpoint = cfg.checkpointer
     cfg.metrics.log_freq = 10
-    cfg.metrics.loggers = [WandBLogger.Config()]
+    cfg.metrics.loggers = [EzpzWandBLogger.Config()]
     cfg.validator = None
     return cfg
 
@@ -840,7 +840,7 @@ def _cot_sft_config(
     cfg.training.steps = steps
     cfg.training.num_tokens_per_train_step = 6_144 * seq_len
     cfg.metrics.log_freq = 10
-    cfg.metrics.loggers = [WandBLogger.Config()]
+    cfg.metrics.loggers = [EzpzWandBLogger.Config()]
     cfg.validator = None
     return cfg
 
@@ -1149,7 +1149,7 @@ def _agpt_2b_olmo_anneal_base() -> FaultTolerantTrainer.Config:
     cfg.dataloader.dataset_path = None
     cfg.optim.optimizer = default_adamw(lr=_MDS_ANNEAL_LR)
     cfg.training.steps = _MDS_ANNEAL_STEPS
-    cfg.metrics.loggers = [WandBLogger.Config()]
+    cfg.metrics.loggers = [EzpzWandBLogger.Config()]
     return cfg
 
 

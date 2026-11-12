@@ -41,9 +41,9 @@ def test_build_owner_is_metrics_processor():
 @pytest.mark.parametrize(
     ("start", "wandb", "tensorboard", "expected"),
     [
-        ([], True, None, ["WandBLogger.Config"]),
-        ([], True, True, ["WandBLogger.Config", "TensorBoardLogger.Config"]),
-        ([WandBLogger.Config()], True, None, ["WandBLogger.Config"]),
+        ([], True, None, ["EzpzWandBLogger.Config"]),
+        ([], True, True, ["EzpzWandBLogger.Config", "TensorBoardLogger.Config"]),
+        ([WandBLogger.Config()], True, None, ["EzpzWandBLogger.Config"]),
         ([WandBLogger.Config()], False, None, []),
         (
             [WandBLogger.Config(), TensorBoardLogger.Config()],
@@ -52,6 +52,8 @@ def test_build_owner_is_metrics_processor():
             ["TensorBoardLogger.Config"],
         ),
         ([TensorBoardLogger.Config()], None, None, ["TensorBoardLogger.Config"]),
+        # A plain upstream W&B entry becomes the failure-tolerant ezpz one.
+        ([WandBLogger.Config()], None, None, ["EzpzWandBLogger.Config"]),
     ],
 )
 def test_apply_legacy_metrics_fields(start, wandb, tensorboard, expected):
@@ -69,14 +71,14 @@ def test_apply_legacy_metrics_fields(start, wandb, tensorboard, expected):
 @pytest.mark.parametrize(
     ("flags", "expected"),
     [
-        ([], ["WandBLogger.Config"]),
-        (["--metrics.enable-wandb"], ["WandBLogger.Config"]),
-        (["--metrics.enable_wandb"], ["WandBLogger.Config"]),
+        ([], ["EzpzWandBLogger.Config"]),
+        (["--metrics.enable-wandb"], ["EzpzWandBLogger.Config"]),
+        (["--metrics.enable_wandb"], ["EzpzWandBLogger.Config"]),
         (["--metrics.no-enable-wandb"], []),
         (["--metrics.no-enable_wandb"], []),
         (
             ["--metrics.enable-tensorboard"],
-            ["WandBLogger.Config", "TensorBoardLogger.Config"],
+            ["EzpzWandBLogger.Config", "TensorBoardLogger.Config"],
         ),
         (
             ["--metrics.no-enable-wandb", "--metrics.enable-tensorboard"],
@@ -101,5 +103,5 @@ def test_json_enable_wandb(tmp_path, monkeypatch):
 
     cfg = config_registry.ezpz_agpt_debugmodel_from_json()
     cfg.__post_init__()
-    assert _types(cfg.metrics) == ["WandBLogger.Config"]
+    assert _types(cfg.metrics) == ["EzpzWandBLogger.Config"]
     assert cfg.metrics.log_freq == 3

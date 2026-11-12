@@ -34,6 +34,7 @@ from typing import Literal
 
 from torchtitan.config import TrainingConfig
 from torchtitan.config.parallelism import ParallelismConfig
+from torchtitan.experiments.ezpz.wandb_logger import EzpzWandBLogger
 from torchtitan.observability.metrics import (
     BaseLogger,
     MetricsProcessor,
@@ -111,11 +112,14 @@ class EzpzMetricsConfig(MetricsProcessor.Config):
     """Legacy switch for a ``TensorBoardLogger.Config`` entry in ``loggers``."""
 
 
-# Legacy field -> exporter config type. Pre-sync core built W&B before
-# TensorBoard; this order keeps that when both switches are set.
-_LEGACY_METRICS_LOGGERS: dict[str, type[BaseLogger.Config]] = {
-    "enable_wandb": WandBLogger.Config,
-    "enable_tensorboard": TensorBoardLogger.Config,
+# Legacy field -> (exporter config type it controls, type it adds). Pre-sync
+# core built W&B before TensorBoard; this order keeps that when both switches
+# are set. W&B is added as EzpzWandBLogger (see wandb_logger.py).
+_LEGACY_METRICS_LOGGERS: dict[
+    str, tuple[type[BaseLogger.Config], type[BaseLogger.Config]]
+] = {
+    "enable_wandb": (WandBLogger.Config, EzpzWandBLogger.Config),
+    "enable_tensorboard": (TensorBoardLogger.Config, TensorBoardLogger.Config),
 }
 
 
@@ -123,16 +127,19 @@ def set_metrics_logger(
     metrics: MetricsProcessor.Config,
     logger_config_cls: type[BaseLogger.Config],
     enabled: bool,
+    *,
+    new_config_cls: type[BaseLogger.Config] | None = None,
 ) -> None:
     """Enable or disable one exporter type in ``metrics.loggers``.
 
-    Enabling appends ``logger_config_cls()`` unless an exporter of that type
-    (or a subclass) is already listed, so a registry entry with settings is
-    kept as is. Disabling removes every entry of that type.
+    Enabling appends ``new_config_cls()`` (default ``logger_config_cls()``)
+    unless an exporter of type ``logger_config_cls`` (or a subclass) is
+    already listed, so a registry entry with settings is kept as is.
+    Disabling removes every entry of that type.
     """
     present = any(isinstance(c, logger_config_cls) for c in metrics.loggers)
     if enabled and not present:
-        metrics.loggers = [*metrics.loggers, logger_config_cls()]
+        metrics.loggers = [*metrics.loggers, (new_config_cls or logger_config_cls)()]
     elif not enabled and present:
         metrics.loggers = [
             c for c in metrics.loggers if not isinstance(c, logger_config_cls)
@@ -140,13 +147,25 @@ def set_metrics_logger(
 
 
 def apply_legacy_metrics_fields(metrics: MetricsProcessor.Config) -> None:
-    """Copy set legacy exporter switches into ``loggers``, then reset them."""
-    for name, logger_config_cls in _LEGACY_METRICS_LOGGERS.items():
+    """Copy set legacy exporter switches into ``loggers``, then reset them.
+
+    Also replaces a plain upstream ``WandBLogger.Config`` with
+    ``EzpzWandBLogger.Config`` (no extra fields), so every ezpz run gets the
+    failure-tolerant W&B exporter however the entry was added.
+    """
+    for name, (logger_config_cls, new_config_cls) in _LEGACY_METRICS_LOGGERS.items():
         value = getattr(metrics, name, None)
         if value is None:
             continue
-        set_metrics_logger(metrics, logger_config_cls, bool(value))
+        set_metrics_logger(
+            metrics, logger_config_cls, bool(value), new_config_cls=new_config_cls
+        )
         setattr(metrics, name, None)
+    if any(type(c) is WandBLogger.Config for c in metrics.loggers):
+        metrics.loggers = [
+            EzpzWandBLogger.Config() if type(c) is WandBLogger.Config else c
+            for c in metrics.loggers
+        ]
 
 
 @dataclass(kw_only=True)

@@ -33,9 +33,9 @@ from torchtitan.experiments.ezpz.trainer import (
     FaultTolerantTrainer,
     set_max_context_length,
 )
+from torchtitan.experiments.ezpz.wandb_logger import EzpzWandBLogger
 from torchtitan.experiments.torchft.config.job_config import FaultTolerance
 from torchtitan.models.common.moe import MoE
-from torchtitan.observability.metrics import WandBLogger
 
 from . import model_registry
 
@@ -287,7 +287,7 @@ def moe(
         dataset_path = f"torchtitan/experiments/ezpz/data-lists/{ezpz.distributed.get_machine().lower()}/books.txt"
     cfg.dataloader.dataset_path = dataset_path
     cfg.metrics.log_freq = 1
-    cfg.metrics.loggers = [WandBLogger.Config()]
+    cfg.metrics.loggers = [EzpzWandBLogger.Config()]
     if compile:
         cfg.compile = CompileConfig()
     assert cfg.checkpointer is not None
