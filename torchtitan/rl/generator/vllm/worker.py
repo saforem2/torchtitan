@@ -11,6 +11,7 @@ from contextlib import nullcontext
 
 from vllm.config import CUDAGraphMode
 from vllm.forward_context import BatchDescriptor
+from vllm.platforms import current_platform
 from vllm.utils.math_utils import round_up
 from vllm.v1.cudagraph_dispatcher import CudagraphDispatcher
 from vllm.v1.worker import gpu_model_runner as vllm_gpu_model_runner
