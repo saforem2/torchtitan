@@ -21,7 +21,7 @@ Differences vs the upstream lifecycle:
   ``set_force_sum_reduction_for_comms(True)`` for non-NCCL backends (CCL on
   XPU). Upstream's version only sets the divide factor.
 - Per-block ``block.compile`` is gone with ``CompileConfig``; compilation is
-  selected through ``local_compile_regions`` (see ``ezpz/compile.py``).
+  selected through ``local_compile.regions`` (see ``ezpz/compile.py``).
 """
 
 import contextlib
@@ -33,12 +33,12 @@ import torch.distributed
 import torch.nn as nn
 from ezpz.models import summarize_model
 
-from torchtitan.config import TORCH_DTYPE_MAP, TrainingConfig
+from torchtitan.config import PrecisionConfig, TORCH_DTYPE_MAP
 from torchtitan.config.parallelism import ParallelismConfig
 from torchtitan.distributed import fsdp as core_fsdp, ParallelismContext
 from torchtitan.distributed.activation_remat import ActivationRematConfig
 from torchtitan.distributed.fsdp import apply_fsdp_to_decoder
-from torchtitan.distributed.local_compile import apply_local_compile
+from torchtitan.distributed.local_compile import LocalCompileConfig
 from torchtitan.experiments.ezpz.fsdp_compat import (
     resolve_fsdp_mesh,
     resolve_sparse_fsdp_mesh,
@@ -122,9 +122,9 @@ def parallelize_moe(
     model: moeModel,
     *,
     parallelism_context: ParallelismContext,
-    training: TrainingConfig,
+    precision: PrecisionConfig,
     parallelism: ParallelismConfig,
-    local_compile_regions: list[str],
+    local_compile: LocalCompileConfig,
     activation_remat: ActivationRematConfig | None,
     dump_folder: str,
 ):
@@ -138,12 +138,12 @@ def parallelize_moe(
     """
     del dump_folder
     # Bind the @local_compile regions before any module runs (process-wide).
-    apply_local_compile(local_compile_regions)
+    local_compile.apply()
     parallel_dims = parallelism_context
     assert (
-        training.max_context_length % parallel_dims.seq_len_divisor == 0
+        model.config.max_context_length % parallel_dims.seq_len_divisor == 0
     ), f"""
-        Sequence length {training.max_context_length} must be divisible by the product of TP degree
+        Sequence length {model.config.max_context_length} must be divisible by the product of TP degree
         ({parallel_dims.tp}) and 2 * CP degree ({parallel_dims.cp}).
         """
 
@@ -172,10 +172,10 @@ def parallelize_moe(
         apply_fsdp_to_decoder(
             model,
             dp_mesh,
-            param_dtype=TORCH_DTYPE_MAP[training.mixed_precision_param],
-            reduce_dtype=TORCH_DTYPE_MAP[training.mixed_precision_reduce],
+            param_dtype=TORCH_DTYPE_MAP[precision.param_dtype],
+            reduce_dtype=TORCH_DTYPE_MAP[precision.reduce_dtype],
             pp_enabled=parallel_dims.pp_enabled,
-            cpu_offload=training.enable_cpu_offload,
+            cpu_offload=parallelism.fsdp_enable_cpu_offloading,
             reshard_after_forward_policy=parallelism.fsdp_reshard_after_forward,
             ep_degree=parallel_dims.ep,
             edp_mesh=edp_mesh,

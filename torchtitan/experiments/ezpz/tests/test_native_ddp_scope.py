@@ -16,8 +16,9 @@ import torch.nn as nn
 from torch.multiprocessing.spawn import spawn
 
 from torchtitan.components.loss import CrossEntropyLoss, MSELoss
-from torchtitan.config import TrainingConfig
+from torchtitan.config import PrecisionConfig
 from torchtitan.distributed import ParallelismContext
+from torchtitan.distributed.local_compile import LocalCompileConfig
 from torchtitan.experiments.ezpz.agpt import parallelize as agpt_parallelize
 from torchtitan.experiments.ezpz.config import EzpzParallelismConfig
 from torchtitan.experiments.ezpz.native_ddp import (
@@ -58,10 +59,10 @@ def _validate(
     validate_native_ddp(
         model_name="ezpz.agpt",
         parallel_dims=_parallel_dims(pp=pp),
-        training=TrainingConfig(
+        precision=PrecisionConfig(
             dtype="float32",
-            mixed_precision_param="bfloat16",
-            mixed_precision_reduce="float32",
+            param_dtype="bfloat16",
+            reduce_dtype="float32",
         ),
         parallelism=_parallelism(native_ddp_compute_policy=policy, **parallelism),
         loss_fn=loss_fn or CrossEntropyLoss(CrossEntropyLoss.Config()),
@@ -130,6 +131,7 @@ def test_agpt_parallelization_skips_fsdp_for_native_ddp(monkeypatch) -> None:
     class Model:
         def __init__(self) -> None:
             self.parallelized = False
+            self.config = SimpleNamespace(max_context_length=8)
 
         def _parallelize(self, _parallel_dims) -> None:
             self.parallelized = True
@@ -143,9 +145,9 @@ def test_agpt_parallelization_skips_fsdp_for_native_ddp(monkeypatch) -> None:
     result = agpt_parallelize.parallelize_llama(
         cast(Any, model),
         parallelism_context=_parallel_dims(),
-        training=TrainingConfig(max_context_length=8),
+        precision=PrecisionConfig(),
         parallelism=_parallelism(),
-        local_compile_regions=[],
+        local_compile=LocalCompileConfig(),
         activation_remat=None,
         dump_folder=".",
     )

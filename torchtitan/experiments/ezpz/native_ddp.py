@@ -17,7 +17,7 @@ from torch.distributed.device_mesh import DeviceMesh
 from torch.nn.parallel import DistributedDataParallel
 
 from torchtitan.components.loss import CrossEntropyLoss
-from torchtitan.config import TrainingConfig
+from torchtitan.config import PrecisionConfig
 from torchtitan.distributed import ParallelismContext
 from torchtitan.experiments.ezpz.config import EzpzParallelismConfig
 
@@ -124,7 +124,7 @@ def validate_native_ddp(
     *,
     model_name: str,
     parallel_dims: ParallelismContext,
-    training: TrainingConfig,
+    precision: PrecisionConfig,
     parallelism: EzpzParallelismConfig,
     loss_fn: object,
     gradient_accumulation_steps: int,
@@ -149,15 +149,15 @@ def validate_native_ddp(
         raise ValueError("native DDP does not support pipeline parallelism")
     if getattr(parallelism, "native_ddp_compute_policy", None) != "autocast":
         raise ValueError("native DDP only supports the autocast compute policy")
-    if training.enable_cpu_offload:
+    if parallelism.fsdp_enable_cpu_offloading:
         raise ValueError("native DDP does not support CPU offload")
-    if training.dtype != "float32" or training.mixed_precision_reduce != "float32":
+    if precision.dtype != "float32" or precision.reduce_dtype != "float32":
         raise ValueError(
             "native DDP requires FP32 master parameters and gradient accumulation"
         )
     if parallelism.native_ddp_communication_dtype not in ("float32", "bfloat16"):
         raise ValueError("native_ddp_communication_dtype must be float32 or bfloat16")
-    if training.mixed_precision_param != "bfloat16":
+    if precision.param_dtype != "bfloat16":
         raise ValueError("native DDP currently requires BF16 autocast")
     if not isinstance(loss_fn, CrossEntropyLoss):
         raise ValueError("native DDP currently requires standard CrossEntropyLoss")

@@ -27,7 +27,7 @@ from torchtitan.components.data.text_datasets import TextProcessor
 from torchtitan.components.loss import ChunkedLossWrapper, CrossEntropyLoss
 
 from torchtitan.components.optim import LRSchedulersContainer, Optim
-from torchtitan.config import CommConfig, TrainingConfig
+from torchtitan.config import CommConfig
 from torchtitan.distributed.activation_remat import (
     DefaultActivationRematConfig,
     FullActivationRematConfig,
@@ -37,6 +37,7 @@ from torchtitan.experiments.ezpz.blendcorpus.blendcorpus_builder import (
 )
 from torchtitan.experiments.ezpz.blendcorpus.build_tokenizer import EZPZTokenizer
 from torchtitan.experiments.ezpz.compile import CompileConfig
+from torchtitan.experiments.ezpz.config import EzpzTrainingConfig
 from torchtitan.experiments.ezpz.grain_checkpoint import GrainStreamingCheckpointManager
 from torchtitan.experiments.ezpz.optimizer.containers import (
     default_adamw,
@@ -44,7 +45,10 @@ from torchtitan.experiments.ezpz.optimizer.containers import (
     default_muon,
     default_sophiag,
 )
-from torchtitan.experiments.ezpz.trainer import FaultTolerantTrainer
+from torchtitan.experiments.ezpz.trainer import (
+    FaultTolerantTrainer,
+    set_max_context_length,
+)
 from torchtitan.experiments.ezpz.validator import EzpzValidator
 from torchtitan.experiments.torchft.config.job_config import FaultTolerance
 from torchtitan.observability.metrics import MetricsProcessor
@@ -326,8 +330,8 @@ def agpt(
         cfg.activation_remat = DefaultActivationRematConfig()
     else:
         cfg.activation_remat = FullActivationRematConfig()
-    cfg.training.max_context_length = seq_len
-    cfg.training.dtype = dtype
+    set_max_context_length(cfg, seq_len)
+    cfg.precision.dtype = dtype
     cfg.dataloader.dataset = "blendcorpus"
     if dataset_path is None:
         dataset_path = f"torchtitan/experiments/ezpz/data-lists/{ezpz.distributed.get_machine().lower()}/books.txt"
@@ -374,7 +378,7 @@ def _base_config(flavor: str) -> FaultTolerantTrainer.Config:
                 min_lr_factor=0.0,
             ),
         ),
-        training=TrainingConfig(
+        training=EzpzTrainingConfig(
             # #4121: tokens, not sequences. 8 seqs x 2048 = 16384.
             num_tokens_per_microbatch_per_dp_rank=8 * 2048,
             max_context_length=2048,
@@ -459,7 +463,7 @@ def agpt_debugmodel_local() -> FaultTolerantTrainer.Config:
     cfg.metrics.enable_wandb = False
     cfg.checkpointer = None
     cfg.training.steps = 10
-    cfg.training.max_context_length = 512
+    set_max_context_length(cfg, 512)
     # 2 seqs x 512 = 1024 tokens (#4121 unit change)
     cfg.training.num_tokens_per_microbatch_per_dp_rank = 2 * 512
     return cfg
@@ -1129,7 +1133,7 @@ def _agpt_2b_olmo_anneal_base() -> FaultTolerantTrainer.Config:
     # currently a no-op -- but only by coincidence. Recompute explicitly so it
     # stays correct if that default ever moves.
     _lbs = cfg.training.num_tokens_per_microbatch_per_dp_rank // 8192
-    cfg.training.max_context_length = 8192
+    set_max_context_length(cfg, 8192)
     cfg.training.num_tokens_per_microbatch_per_dp_rank = _lbs * 8192
     cfg.activation_remat = None
     if not (Path(_OLMO_ANNEAL_BASE) / ".metadata").is_file():

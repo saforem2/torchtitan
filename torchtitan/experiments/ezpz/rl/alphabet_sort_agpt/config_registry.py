@@ -42,7 +42,7 @@ from torchtitan.components.loss import ChunkedLossWrapper
 
 from torchtitan.components.optim import LRSchedulersContainer, Optim
 from torchtitan.components.renderer import from_renderers
-from torchtitan.config import TrainingConfig
+from torchtitan.config import PrecisionConfig, TrainingConfig
 from torchtitan.config.parallelism import ParallelismConfig
 from torchtitan.experiments.ezpz.optimizer.containers import default_adamw
 from torchtitan.experiments.ezpz.rl.alphabet_sort_agpt.few_shot_env import (
@@ -146,7 +146,12 @@ def _agpt_grpo_config(
         lora_rank=lora_rank,
         lora_alpha=2.0 * lora_rank,
     )
+    # Before #5779 the RL trainer packed at training.max_context_length=2048
+    # while the generator served the flavor's own length; keep both.
+    trainer_model.max_context_length = 2048
     return Controller.Config(
+        # fp32 master weights (was training.dtype before #5776).
+        precision=PrecisionConfig(dtype="float32"),
         # Overridden on the CLI with --hf_assets_path=<staged ckpt-900 dir>.
         hf_assets_path=(
             "outputs/sft/agpt-2b-gs138650-tulu-math-uc-mix-8n-gbs6144/checkpoint-900-hf"
@@ -179,10 +184,8 @@ def _agpt_grpo_config(
                 ),
             ),
             training=TrainingConfig(
-                dtype="float32",
                 disable_accelerator_graphs=True,
                 num_tokens_per_microbatch_per_dp_rank=2 * 2048,
-                max_context_length=2048,
             ),
             parallelism=trainer_parallelism,
             checkpointer=CheckpointManager.Config(

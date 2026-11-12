@@ -32,9 +32,44 @@ in our port reads them.
 from dataclasses import dataclass
 from typing import Literal
 
+from torchtitan.config import TrainingConfig
 from torchtitan.config.parallelism import ParallelismConfig
 
-__all__ = ["EzpzParallelismConfig"]
+__all__ = ["EzpzParallelismConfig", "EzpzTrainingConfig"]
+
+
+@dataclass(kw_only=True)
+class EzpzTrainingConfig(TrainingConfig):
+    """``TrainingConfig`` plus the ezpz CLI fields upstream moved elsewhere.
+
+    Upstream moved the model dtypes to ``precision`` and FSDP CPU offload to
+    ``parallelism`` (#5776), and dropped ``max_context_length`` in favour of the
+    model config's own field (#5779). ezpz launchers, PBS seats and JSON configs
+    still pass ``--training.max-context-length`` / ``--training.dtype`` /
+    ``--training.mixed-precision-*``, and ezpz cannot take
+    ``--model.max-context-length``: the model config is opaque to the CLI
+    (``config_manager.py``). These fields keep that surface.
+
+    They are one-way inputs, ``None`` unless set. ``FaultTolerantTrainer.Config``
+    copies each set field to its upstream home in ``__post_init__``; no code
+    reads them back. Code reads ``model.max_context_length``, ``precision.*`` and
+    ``parallelism.fsdp_enable_cpu_offloading``.
+    """
+
+    max_context_length: int | None = None
+    """Legacy alias for ``model.max_context_length`` (also resizes RoPE caches)."""
+
+    dtype: Literal["bfloat16", "float32"] | None = None
+    """Legacy alias for ``precision.dtype``."""
+
+    mixed_precision_param: Literal["bfloat16", "float32"] | None = None
+    """Legacy alias for ``precision.param_dtype``."""
+
+    mixed_precision_reduce: Literal["bfloat16", "float32"] | None = None
+    """Legacy alias for ``precision.reduce_dtype``."""
+
+    enable_cpu_offload: bool | None = None
+    """Legacy alias for ``parallelism.fsdp_enable_cpu_offloading``."""
 
 
 @dataclass(kw_only=True)

@@ -16,7 +16,7 @@ from torchtitan.components.checkpointer import CheckpointManager
 from torchtitan.components.loss import CrossEntropyLoss
 
 from torchtitan.components.optim import LRSchedulersContainer, Optim
-from torchtitan.config import CommConfig, TrainingConfig
+from torchtitan.config import CommConfig
 from torchtitan.distributed.activation_remat import (
     DefaultActivationRematConfig,
     FullActivationRematConfig,
@@ -26,9 +26,13 @@ from torchtitan.experiments.ezpz.blendcorpus.blendcorpus_builder import (
 )
 from torchtitan.experiments.ezpz.blendcorpus.build_tokenizer import EZPZTokenizer
 from torchtitan.experiments.ezpz.compile import CompileConfig
+from torchtitan.experiments.ezpz.config import EzpzTrainingConfig
 from torchtitan.experiments.ezpz.logging import logger
 from torchtitan.experiments.ezpz.optimizer.containers import default_adamw
-from torchtitan.experiments.ezpz.trainer import FaultTolerantTrainer
+from torchtitan.experiments.ezpz.trainer import (
+    FaultTolerantTrainer,
+    set_max_context_length,
+)
 from torchtitan.experiments.torchft.config.job_config import FaultTolerance
 from torchtitan.models.common.moe import MoE
 from torchtitan.observability.metrics import MetricsProcessor
@@ -165,7 +169,7 @@ def _base_config(flavor: str) -> FaultTolerantTrainer.Config:
                 min_lr_factor=0.0,
             ),
         ),
-        training=TrainingConfig(
+        training=EzpzTrainingConfig(
             # #4121: tokens, not sequences. 8 seqs x 8192 = 65536.
             num_tokens_per_microbatch_per_dp_rank=8 * 8192,
             max_context_length=8192,
@@ -264,8 +268,8 @@ def moe(
         cfg.activation_remat = FullActivationRematConfig()
     else:
         cfg.activation_remat = DefaultActivationRematConfig()
-    cfg.training.max_context_length = seq_len
-    cfg.training.dtype = dtype
+    set_max_context_length(cfg, seq_len)
+    cfg.precision.dtype = dtype
     cfg.dataloader.dataset = "blendcorpus"
     if dataset_path is None:
         dataset_path = f"torchtitan/experiments/ezpz/data-lists/{ezpz.distributed.get_machine().lower()}/books.txt"

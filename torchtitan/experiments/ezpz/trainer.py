@@ -30,13 +30,14 @@ from torchtitan.components.loss import IGNORE_INDEX
 from torchtitan.config import apply_overrides
 from torchtitan.distributed import ParallelismContext, utils as dist_utils
 from torchtitan.distributed.accelerator_graph import accelerator_graphs_supported
+from torchtitan.distributed.local_compile import LocalCompileConfig
 from torchtitan.experiments.ezpz import signal_stop
 from torchtitan.experiments.ezpz.ckpt_key_compat import (
     maybe_install_flat_attention_compat,
 )
 from torchtitan.experiments.ezpz.ckpt_owner_claim import check_and_claim
 from torchtitan.experiments.ezpz.compile import CompileConfig, local_compile_regions
-from torchtitan.experiments.ezpz.config import EzpzParallelismConfig
+from torchtitan.experiments.ezpz.config import EzpzParallelismConfig, EzpzTrainingConfig
 from torchtitan.experiments.ezpz.logging import logger
 from torchtitan.experiments.ezpz.lr_finder import LRFinderConfig
 from torchtitan.experiments.ezpz.native_ddp import (
@@ -260,7 +261,7 @@ class EzpzTrainingEngine(TorchFTTrainingEngine):
             validate_native_ddp(
                 model_name=self._model_name(),
                 parallel_dims=self.parallelism_context,
-                training=config.training,
+                precision=config.precision,
                 parallelism=config.parallelism,
                 loss_fn=self.loss_fn,
                 gradient_accumulation_steps=getattr(
@@ -598,6 +599,17 @@ class EzpzTrainingEngine(TorchFTTrainingEngine):
         xpu_graph_teardown()
 
 
+def set_max_context_length(config: Any, seq_len: int) -> None:
+    """Set the run's sequence length on the model config and its RoPE caches.
+
+    For registry functions that change the length after building a config;
+    ``--training.max-context-length`` does the same through
+    ``EzpzTrainingConfig``.
+    """
+    config.model.max_context_length = seq_len
+    config._sync_model_context_length()
+
+
 def accelerator_graph_blockers(config: Any, device_type: str) -> list[str]:
     """Reasons the configured run cannot use upstream accelerator graph capture.
 
@@ -674,6 +686,8 @@ class FaultTolerantTrainer(TorchFTTrainer):
         parallelism: EzpzParallelismConfig = field(
             default_factory=EzpzParallelismConfig
         )
+        training: EzpzTrainingConfig = field(default_factory=EzpzTrainingConfig)
+        """Upstream ``TrainingConfig`` plus the legacy ezpz CLI aliases."""
         checkpoint: CheckpointManager.Config | None = None
         compile: CompileConfig | None = None
         """Selects ``local_compile`` regions; see ``ezpz/compile.py``."""
@@ -693,28 +707,54 @@ class FaultTolerantTrainer(TorchFTTrainer):
         history_bridge: bool = False
         wandb_watch: bool = False
 
-        def _sync_model_context_length(self) -> None:
-            """Align the model (and RoPE caches) with ``training.max_context_length``.
+        def _apply_legacy_training_fields(self) -> None:
+            """Copy the legacy ``training.*`` aliases to their upstream homes.
 
-            Upstream requires ``training.max_context_length`` to equal the
-            model's, chosen when the model config is built
-            (``validate_model_training_config``). ezpz flavors are prebuilt
-            templates (``max_context_length=131072``) and launchers set the
-            sequence length on the CLI afterwards, so the trainer config owns
-            the single source of truth and propagates it here, before the
-            upstream validation runs.
+            See ``EzpzTrainingConfig``. Each alias is ``None`` unless a
+            launcher, JSON config or registry set it, and is consumed (reset to
+            ``None``) once copied, so a later ``__post_init__`` cannot overwrite
+            a value set directly on ``model``/``precision`` afterwards.
+            """
+            training = self.training
+            legacy = {
+                "dtype": (self.precision, "dtype"),
+                "mixed_precision_param": (self.precision, "param_dtype"),
+                "mixed_precision_reduce": (self.precision, "reduce_dtype"),
+                "enable_cpu_offload": (
+                    self.parallelism,
+                    "fsdp_enable_cpu_offloading",
+                ),
+            }
+            for name, (target, attr) in legacy.items():
+                value = getattr(training, name, None)
+                if value is not None:
+                    setattr(target, attr, value)
+                    setattr(training, name, None)
+            seq_len = getattr(training, "max_context_length", None)
+            if seq_len is not None and self.model is not None:
+                self.model.max_context_length = seq_len
+                training.max_context_length = None
+
+        def _sync_model_context_length(self) -> None:
+            """Size the model's RoPE caches to ``model.max_context_length``.
+
+            ezpz flavors are prebuilt templates (``max_context_length=131072``)
+            whose length is set afterwards, by a registry function or
+            ``--training.max-context-length``, so the RoPE caches are resized
+            to match here.
             """
             from torchtitan.models.common.rope import RoPE
 
-            seq_len = self.training.max_context_length
             model = self.model
-            if getattr(model, "max_context_length", seq_len) != seq_len:
-                model.max_context_length = seq_len
+            if model is None:
+                return
+            seq_len = model.max_context_length
             for _, rope, _, _ in model.traverse(RoPE.Config):
                 if rope.max_context_length != seq_len:
                     rope.max_context_length = seq_len
 
         def __post_init__(self):
+            self._apply_legacy_training_fields()
             self._sync_model_context_length()
             # ``@dataclass(slots=True)`` returns a replacement class object;
             # call the parent explicitly so Python 3.12 does not use the stale
@@ -737,7 +777,9 @@ class FaultTolerantTrainer(TorchFTTrainer):
         # but ezpz flavors are prebuilt templates and the CLI fixes
         # parallelism afterwards, so the model config re-applies its sharding
         # (and the legacy ``compile`` mapping) here.
-        model_config.local_compile_regions = local_compile_regions(config.compile)
+        model_config.local_compile = LocalCompileConfig(
+            regions=local_compile_regions(config.compile)
+        )
         update_from_config = getattr(model_config, "update_from_config", None)
         if update_from_config is not None:
             update_from_config(config=config)
@@ -796,7 +838,7 @@ class FaultTolerantTrainer(TorchFTTrainer):
             dp_degree=dp_degree,
             dp_rank=dp_rank,
             tokenizer=self.tokenizer,
-            max_context_length=config.training.max_context_length,
+            max_context_length=config.model.max_context_length,
             num_tokens_per_microbatch=num_tokens_per_microbatch,
             training_steps=config.training.steps * self.num_pp_microbatches,
             parallelism_context=parallelism_context,
@@ -805,7 +847,7 @@ class FaultTolerantTrainer(TorchFTTrainer):
 
         from torchtitan.experiments.ezpz.agpt import set_ezpz_max_context_length
 
-        set_ezpz_max_context_length(config.training.max_context_length)
+        set_ezpz_max_context_length(config.model.max_context_length)
 
         self.metrics_processor = config.metrics.build(
             parallelism_context=parallelism_context,
@@ -870,7 +912,7 @@ class FaultTolerantTrainer(TorchFTTrainer):
                 parallelism_context=parallelism_context,
                 loss_fn=engine.loss_fn,
                 metrics_processor=self.metrics_processor,
-                seq_len=config.training.max_context_length,
+                seq_len=config.model.max_context_length,
                 num_tokens_per_microbatch=num_tokens_per_microbatch,
                 pp_schedule=pp_schedule,
                 pp_has_first_stage=pp_has_first_stage,
@@ -897,7 +939,7 @@ class FaultTolerantTrainer(TorchFTTrainer):
             f"tokens/microbatch/dp-rank {num_tokens_per_microbatch}, "
             f"tokens/train-step {num_tokens_per_train_step}, "
             f"gradient accumulation steps {self.gradient_accumulation_steps}, "
-            f"sequence length {config.training.max_context_length}, "
+            f"sequence length {config.model.max_context_length}, "
             f"total steps {config.training.steps} "
             f"(warmup {config.optim.lr_scheduler.warmup_steps})"
         )
