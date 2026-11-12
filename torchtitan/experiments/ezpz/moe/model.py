@@ -11,7 +11,6 @@ import spmd_types as spmd
 import torch
 import torch.nn.functional as F
 import torch_remat as remat
-from torch import nn
 
 from torchtitan.distributed.local_compile import LocalCompileConfig
 
@@ -19,14 +18,9 @@ from torchtitan.experiments.ezpz.logging import logger, warn_once
 
 from torchtitan.models.common.attention import (
     FlexAttentionMetadata,
-    GQAttention,
     VarlenAttentionMetadata,
 )
 from torchtitan.models.common.decoder import Decoder
-from torchtitan.models.common.flops import (
-    get_nparams_and_active_nparams,
-    quadratic_attention_flops_per_token,
-)
 from torchtitan.models.common.linear import maybe_gather_tp_input
 from torchtitan.models.common.moe import MoE
 from torchtitan.models.common.moe.token_dispatcher import (
@@ -308,49 +302,6 @@ class moeModel(Decoder):  # noqa: N801
                 enable_sp=parallelism.enable_sequence_parallel,
                 enable_ep=parallelism.expert_parallel_degree > 1,
             )
-
-        def get_nparams_and_flops(
-            self, model: nn.Module, seq_len: int
-        ) -> tuple[int, int]:
-            # Upstream #4300 removed get_moe_model_nparams_and_flops. Its
-            # replacement returns (nparams, ACTIVE nparams) and no longer
-            # computes flops, so the attention term is summed here and the
-            # 6*N matmul term applied explicitly. Mirrors
-            # models/deepseek_v3/model.py:get_deepseek_v3_nparams_and_flops,
-            # minus its MTP lm_head term -- this decoder has no mtp_layers.
-            #
-            # Per-layer rather than layers[0] x depth: the old helper took a
-            # single head count for the whole model, which is only correct
-            # when every layer's attention is identical. Summing per layer
-            # costs nothing and does not silently mismeasure a mixed stack.
-            nparams, active_nparams = get_nparams_and_active_nparams(model)
-
-            attention_op_flops = 0
-            for layer in self.layers:
-                attention = layer.attention
-                if isinstance(attention, Attention.Config):
-                    qk_head_dim = (
-                        attention.qk_nope_head_dim + attention.qk_rope_head_dim
-                    )
-                    v_head_dim = attention.v_head_dim
-                elif isinstance(attention, GQAttention.Config):
-                    qk_head_dim = attention.head_dim or (
-                        attention.dim // attention.n_heads
-                    )
-                    v_head_dim = qk_head_dim
-                else:
-                    raise TypeError(
-                        "MoE FLOP accounting requires MLA Attention.Config or "
-                        f"GQAttention.Config; got {type(attention).__name__}"
-                    )
-                attention_op_flops += quadratic_attention_flops_per_token(
-                    num_heads=attention.n_heads,
-                    qk_head_dim=qk_head_dim,
-                    v_head_dim=v_head_dim,
-                    seq_len=seq_len,
-                )
-
-            return nparams, 6 * active_nparams + attention_op_flops
 
 
 # Imported after moeModel is defined because the adapter annotates its config.
