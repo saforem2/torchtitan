@@ -318,6 +318,39 @@ At accumulation `2` the speedup is smaller: `2.146`/`2.235`/`2.166` against
 `2`, where BF16 ran first in the job, and step time drifts by up to `5%`
 within one arm, so this range is not a precise estimate.
 
+### Checkpoint resume with the BF16 all-gather
+
+`native_ddp_zero1_allgather_dtype=bfloat16` keeps an FP32 master of each
+rank's shard and all-gathers BF16. Before `da9ceb8f` a DCP resume corrupted
+it. Loading optimizer state runs `init_optim_state`, which steps the optimizer
+and fires `pre_step` -> `ensure_master` before the checkpoint's model weights
+are copied in. The master latched the pre-load weights, and the first real step
+all-gathered them over the restored model. On CPU that is a max
+`|param - ckpt|` of `36` after one step, against `0.005` with an FP32
+all-gather.
+
+The fix resets the master from an optimizer `load_state_dict` post-hook and
+rebuilds it in a forward pre-hook, so it comes from the loaded weights.
+`test_bf16_master_rebuilt_from_weights_loaded_after_optimizer_state` fails on
+the old code.
+
+The FP32 master is not checkpointed. A resume rebuilds it from the BF16
+weights, so it is rounded to BF16 once.
+
+XPU check, 2 nodes, `agpt_debugmodel`, FP32 params, BF16 all-gather: run `6`
+steps with a checkpoint at `3`, resume a copy, compare steps `4`-`6`.
+
+| System, job | Fixed `zero1.py` | Pre-fix `zero1.py` |
+|---|---:|---:|
+| Sunspot `12483333` | max diff `0.0041` | `0.318` |
+| Aurora `9077299` | `0.0041` | `0.318` |
+
+`0.0041` is the BF16 rounding above. The same check with FSDP resumes
+bit-exact.
+
+`fsdp_defer_gradient_reduction` is now rejected under native DDP: the engine
+casts the model to `FSDPModule`, and `NativeDDP` has no `set_is_last_backward`.
+
 ### Against MDS AdamW/ZeRO-1 at AGPT-2B
 
 Job `12482619` (`24` tiles, two nodes, `2 x 1` accumulation, AdamW in both
