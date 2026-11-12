@@ -355,7 +355,16 @@ class ConfigManager:
             if default is tyro.constructors.MISSING or (
                 default is tyro.constructors.MISSING_NONPROP
             ):
-                return None
+                # No default instance, e.g. the struct branch of an
+                # ``X.Config | None = None`` field such as the RL vLLM engine's
+                # ``stat_logger: VllmOtelStatLogger.Config | None``, whose
+                # ``dict[str, AttributeValue]`` field forward-references
+                # OpenTelemetry's unresolvable ``AnyValue``. Fall back to the
+                # zero-argument instance when the config has one.
+                try:
+                    default = typ()
+                except Exception:
+                    return None
             return tyro.constructors.StructConstructorSpec(
                 instantiate=lambda: default, fields=()
             )
