@@ -1,7 +1,7 @@
 # CUDA: default CUDA graph capture breaks ezpz MoE and native DDP (2026-11-12)
 
-Status: **open**. Affects CUDA systems (Polaris, Sirius) only; XPU never takes
-the capture path.
+Status: **fixed** in `bae44ff5` (ezpz trainer drops to eager with a warning).
+Affects CUDA systems (Polaris, Sirius) only; XPU never takes the capture path.
 
 ## Symptom
 
@@ -29,16 +29,32 @@ Polaris job `7839433`, 2 nodes, 8 ranks, torch `2.15.0+cu132`, tree `ezpz` +
 - Native DDP: `torch.nn.parallel.DistributedDataParallel._pre_forward`, called
   from `experiments/ezpz/trainer.py` `_non_pp_forward_backward_microbatch`.
 
-## Workaround
+## Fix
 
-`--training.disable-cuda-graphs`. `scripts/sync_smoke_alcf.sh` passes it on
-CUDA unless `SMOKE_CUDA_GRAPHS=1`.
+`trainer.py` `maybe_disable_cuda_graphs`, called from
+`_initialize_forward_backward`. On CUDA with graphs enabled it sets
+`training.disable_cuda_graphs=True` and logs
 
-## Fix options
+```
+Disabling CUDA graphs: <reason> cannot run under capture. Pass --training.disable-cuda-graphs to silence this.
+```
 
-- Validate at startup: reject (or auto-disable with a warning) CUDA graphs when
-  native DDP or a host-syncing MoE backend is configured.
-- Default `disable_cuda_graphs=True` in the ezpz config registries.
+when native DDP is on or any MoE layer uses an expert backend other than
+`grouped_mm` (`for_loop` is the automatic fallback below SM90, so every ezpz
+MoE run on Polaris A100s). It raises instead if the config explicitly asks
+for `optim.enable_cuda_graph` or `training.cuda_graph_per_accumulation_group`.
+Dense FSDP and `grouped_mm` MoE keep capture. Unit tests:
+`tests/test_cuda_graph_guard.py`.
 
-Neither is done. Check what Polaris/Sirius production launchers pass before
-choosing.
+Polaris job `7839729`, same tree plus the fix, CUDA graphs left on
+(`SMOKE_CUDA_GRAPHS=1`):
+
+| Config | Guard | Result |
+|---|---|---|
+| `agpt_debugmodel`, FSDP | no warning, captured | `10.880` -> `10.107` |
+| `moe_debugmodel` | `MoE expert backend ['for_loop']` | `12.990` -> `11.069`, 6 steps |
+| native DDP + ZeRO-1 resume | `native DDP` | `RESUME_OK`, diff `0.0041` |
+
+Losses match the eager run `7839481`.
+
+`--training.disable-cuda-graphs` still forces eager everywhere.

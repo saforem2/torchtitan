@@ -29,7 +29,7 @@
 #   SMOKE_RESUME_AT  checkpoint step (default 3); SMOKE_RESUME_TOL (default 1e-3)
 #   SMOKE_RESUME_EXTRA  extra flags for both resume runs ("{NPROC}" substituted)
 #   SEED             debug seed (default 42)
-#   SMOKE_CUDA_GRAPHS  1 to keep upstream CUDA graph capture on CUDA (default 0: eager)
+#   SMOKE_CUDA_GRAPHS  0 to run eager on CUDA (default 1: upstream CUDA graph capture)
 
 set -o pipefail
 
@@ -237,10 +237,11 @@ WANDB=(--metrics.no-enable-wandb)
 # Upstream captures fwd/bwd in a CUDA graph by default (training.
 # disable_cuda_graphs=False). The ezpz for-loop MoE experts and native DDP are
 # not capture-safe and fail at the first captured step on CUDA (Polaris job
-# 7839433; docs/guides/known-bugs/cuda-graphs-moe-native-ddp.md). Smoke runs
-# eager on CUDA by default; SMOKE_CUDA_GRAPHS=1 tests the capture path.
+# 7839433; docs/guides/known-bugs/cuda-graphs-moe-native-ddp.md). The ezpz
+# trainer now drops those to eager itself, so smoke keeps upstream's default;
+# SMOKE_CUDA_GRAPHS=0 forces eager everywhere.
 GRAPHS=()
-[[ "${ACCEL}" == cuda && "${SMOKE_CUDA_GRAPHS:-0}" != 1 ]] \
+[[ "${ACCEL}" == cuda && "${SMOKE_CUDA_GRAPHS:-1}" == 0 ]] \
     && GRAPHS=(--training.disable-cuda-graphs)
 declare -a FAILED=() KNOWN=()
 idx=0

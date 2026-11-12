@@ -11,8 +11,18 @@ starts from one tree:
 2. #74, AGPT XPU throughput recovery (includes the ZeRO-1 BF16 resume fix,
    `da9ceb8f`)
 3. #78, cross-system smoke script (this entry)
-4. #76, grain SFT CoT. Its olmo-mix manifest sorts the file list, so the mix
-   trains as a curriculum (DCLM first). Decide before the 10B start.
+4. #76, grain SFT CoT. Its manifest builder sorted the olmo-mix file list,
+   which `split_dataset_by_node` turns into a curriculum (no `starcoder` until
+   each rank's last file). Fixed in #76 (`288020c3`): seed-0 shuffle by
+   default, and the 10B seat defaults to `olmo-mix-dp6144-shuf0.txt`. The 4B
+   stays on the sorted file it resumes from. Queued 10B job `9076371` was
+   submitted before the fix and must be resubmitted to pick it up.
+
+   After #77 #74 #78 land, #76 conflicts with `ezpz` in
+   `agpt/config_registry.py` (2 hunks, against #74's reformatting) and
+   `docs/production/sft/README.md` (1 hunk). Every hunk resolves to #76's
+   added lines; merge `ezpz` into the #76 branch and keep its side of each
+   hunk.
 
 During the sync take upstream's `models/common/attn_gym.py` and
 `tests/unit_tests/cpu/models/common/test_optional_imports.py`; #76's copies
@@ -60,8 +70,10 @@ deterministic.
 checkpointed and is rebuilt from the BF16 weights. Aurora's baseline MoE run
 hit a transient Lustre `EBADF` in inductor; the candidate MoE run passed.
 
-Polaris runs eager (`--training.disable-cuda-graphs`, see the CUDA graph item
-below), on the new venv with torch `2.15.0+cu132`. It needed three
+Polaris `7839481` ran eager (`--training.disable-cuda-graphs`). Rerun
+`7839729` with the CUDA graph guard and graphs on gave the same losses and
+resume diff; the smoke now leaves graphs on by default. Both used the new venv
+with torch `2.15.0+cu132`. It needed three
 environment fixes first: a `libmpi.so.12` link for pip's `mpi4py`,
 `PALS_TRANSFER=0` for the `uv`-managed interpreter, and `blendcorpus` in the
 venv. Plain `ezpz` does not import there (`cutlass`, below), so Polaris has no
@@ -81,9 +93,10 @@ still die with `No module named 'encodings'`.
   half of default-env runs. The smoke runs `6` steps.
   [xpu-fsdp-allgather-hang-after-step-7.md](guides/known-bugs/xpu-fsdp-allgather-hang-after-step-7.md).
 - **CUDA graphs on by default**: since `5a7a622f16` upstream captures
-  fwd/bwd in a CUDA graph. ezpz MoE (for-loop experts) and native DDP fail at
-  the first captured step on Polaris; dense FSDP passes. The smoke runs eager
-  on CUDA.
+  fwd/bwd in a CUDA graph. ezpz MoE (`for_loop` experts) and native DDP failed
+  at the first captured step on Polaris (`7839433`). Fixed in #78
+  (`bae44ff5`): the ezpz trainer drops those to eager with a warning, and
+  Polaris `7839729` passes with graphs on.
   [cuda-graphs-moe-native-ddp.md](guides/known-bugs/cuda-graphs-moe-native-ddp.md).
   The note near the 78th sync saying `disable_cuda_graphs` defaults `True` is
   out of date.
