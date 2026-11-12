@@ -19,8 +19,10 @@ Invoke via the arbitrary-dotted-path `--module` branch of the ConfigManager:
 
 Winning settings from the 3-way training study (docs/production/rl/
 grpo-lora-agpt2b-repro.md) are baked in:
-  - fp32 generation (`generator.model_dtype="float32"`): THE fix -- bf16 corrupts
-    agpt-2b generation through vLLM (large vocab/ffn -> rounding flips greedy argmax).
+  - fp32 generation: THE fix -- bf16 corrupts agpt-2b generation through vLLM
+    (large vocab/ffn -> rounding flips greedy argmax). Was
+    `generator.model_dtype="float32"`; the generator now mirrors
+    `precision.param_dtype` (#5776), so `AGPT_RL_PRECISION` sets it to float32.
   - linear reward (`RewardAlphabetSort.Config(similarity_power=1)`): the stock `**4`
     curve starves GRPO of gradient; linear gives partial-credit variance that trains.
   - one-shot format example (overlay `few_shot_env.py`) so the model emits the
@@ -34,7 +36,6 @@ below caps its autotune. The generator uses vLLM own attention regardless.
 
 from __future__ import annotations
 
-import torch
 from renderers import DefaultRendererConfig
 
 from torchtitan.components.checkpointer import CheckpointManager
@@ -42,16 +43,21 @@ from torchtitan.components.loss import ChunkedLossWrapper
 
 from torchtitan.components.optim import LRSchedulersContainer, Optim
 from torchtitan.components.renderer import from_renderers
-from torchtitan.config import PrecisionConfig, TrainingConfig
+from torchtitan.config import TrainingConfig
 from torchtitan.config.parallelism import ParallelismConfig
 from torchtitan.experiments.ezpz.optimizer.containers import default_adamw
+from torchtitan.experiments.ezpz.rl.actors.ezpz_generator import xpu_vllm_engine_config
 from torchtitan.experiments.ezpz.rl.alphabet_sort_agpt.few_shot_env import (
     AgptFewShotAlphabetSortEnv,
 )
 from torchtitan.experiments.ezpz.rl.alphabet_sort_agpt.shaped_reward import (
     ShapedRewardAlphabetSort,
 )
-from torchtitan.experiments.ezpz.rl.model_configs import agpt_rl_model_configs
+from torchtitan.experiments.ezpz.rl.model_configs import (
+    agpt_rl_model_configs,
+    AGPT_RL_PRECISION,
+    disable_flex_max_autotune,
+)
 from torchtitan.experiments.ezpz.rl.renderer import ExtraStopTokensRendererConfig
 from torchtitan.models.common.config_utils import decoder_vocab_size
 from torchtitan.rl.controller.controller import (
@@ -62,13 +68,11 @@ from torchtitan.rl.controller.controller import (
 from torchtitan.rl.examples.alphabet_sort.data import AlphabetSortDataset
 from torchtitan.rl.examples.alphabet_sort.env import AlphabetSortEnv
 from torchtitan.rl.examples.alphabet_sort.rubric import RewardAlphabetSort
-from torchtitan.rl.generator.generator import (
-    SamplingConfig,
-    VLLMCudaGraphConfig,
-    VLLMGenerator,
-)
+from torchtitan.rl.generator.generator import Generator
 from torchtitan.rl.generator.parallelism import InferenceParallelismConfig
+from torchtitan.rl.generator.types import SamplingConfig
 from torchtitan.rl.observability.metrics import MetricsProcessor
+from torchtitan.rl.rollout.data import IterableRolloutDataLoader
 from torchtitan.rl.rollout.rollouter import Rollouter, RolloutWorker
 from torchtitan.rl.rollout.rubric import Rubric
 from torchtitan.rl.trainer.losses import GRPOLoss
@@ -98,8 +102,10 @@ def _agpt_rollouter(
         ),
     )
     return Rollouter.Config(
-        train_dataset=AlphabetSortDataset.Config(
-            seed=42, max_turns=max_turns, max_names_per_turn=max_names_per_turn
+        training_dataloader=IterableRolloutDataLoader.Config(
+            dataset=AlphabetSortDataset.Config(
+                seed=42, max_turns=max_turns, max_names_per_turn=max_names_per_turn
+            )
         ),
         validation_dataset=AlphabetSortDataset.Config(
             seed=99, max_turns=max_turns, max_names_per_turn=max_names_per_turn
@@ -120,20 +126,8 @@ def _agpt_grpo_config(
     shaped_reward: bool = False,
 ) -> Controller.Config:
     # Disable FlexInnerAttention max_autotune on XPU (backward autotuning exceeds XPU
-    # register limits -> OUT_OF_RESOURCES). Matches the working fork run. Must run
-    # before the model is compiled; recompile the cached flex kernel.
-    from torch.nn.attention.flex_attention import flex_attention
-
-    from torchtitan.models.common.attention import FlexInnerAttention
-
-    FlexInnerAttention.inductor_configs = {
-        **FlexInnerAttention.inductor_configs,
-        "max_autotune": False,
-        "coordinate_descent_tuning": False,
-    }
-    FlexInnerAttention._compiled_flex_attn = torch.compile(
-        flex_attention, options=FlexInnerAttention.inductor_configs
-    )
+    # register limits -> OUT_OF_RESOURCES). Matches the working fork run.
+    disable_flex_max_autotune()
     trainer_parallelism = ParallelismConfig(
         data_parallel_shard_degree=1, tensor_parallel_degree=1
     )
@@ -150,8 +144,8 @@ def _agpt_grpo_config(
     # while the generator served the flavor's own length; keep both.
     trainer_model.max_context_length = 2048
     return Controller.Config(
-        # fp32 master weights (was training.dtype before #5776).
-        precision=PrecisionConfig(dtype="float32"),
+        # fp32 master weights AND fp32 generation; see AGPT_RL_PRECISION.
+        precision=AGPT_RL_PRECISION,
         # Overridden on the CLI with --hf_assets_path=<staged ckpt-900 dir>.
         hf_assets_path=(
             "outputs/sft/agpt-2b-gs138650-tulu-math-uc-mix-8n-gbs6144/checkpoint-900-hf"
@@ -160,7 +154,9 @@ def _agpt_grpo_config(
             num_training_steps=num_training_steps,
             num_prompts_per_train_step=num_groups_per_train_step,
             num_samples_per_prompt=8,
-            validation=ValidationConfig(num_samples=20),
+            # Validate before and after training, as before the upstream sync
+            # (validate_after_training now defaults to False).
+            validation=ValidationConfig(steps=20, validate_after_training=True),
         ),
         rollouter=_agpt_rollouter(
             max_turns=max_turns,
@@ -174,7 +170,8 @@ def _agpt_grpo_config(
             renderer=from_renderers(DefaultRendererConfig()),
             extra_stop_token_ids=(1, 107),
         ),
-        metrics=MetricsProcessor.Config(enable_wandb=False),
+        # No metric loggers (was enable_wandb=False before #5775).
+        metrics=MetricsProcessor.Config(),
         trainer=Trainer.Config(
             model=trainer_model,
             optim=Optim.Config(
@@ -201,12 +198,13 @@ def _agpt_grpo_config(
                 ),
             ),
         ),
-        generator=VLLMGenerator.Config(
+        generator=Generator.Config(
             model=generator_model,
-            # fp32 generation -- THE fix for coherent agpt-2b output on XPU.
-            model_dtype="float32",
+            # fp32 generation -- THE fix for coherent agpt-2b output on XPU -- now
+            # comes from precision.param_dtype (the generator mirrors it, #5776).
             gpu_memory_limit=0.70,
-            cuda_graph=VLLMCudaGraphConfig(mode="NONE"),
+            # vLLM engine in eager mode (no CUDA-graph capture on XPU).
+            engine=xpu_vllm_engine_config(),
             parallelism=generator_parallelism,
             checkpointer=None,
             sampling=SamplingConfig(temperature=0.8, top_p=0.95, max_tokens=700),
@@ -217,7 +215,7 @@ def _agpt_grpo_config(
 def rl_grpo_lora_agpt_2b() -> Controller.Config:
     """Default agpt-2b GRPO+LoRA smoke (stock task difficulty, short run).
 
-    Also pass ``--async-loop.training-sample-builder.no-drop-zero-std-reward-groups``
+    Also pass ``--async-loop.batcher.training-sample-builder.no-drop-zero-std-reward-groups``
     on the CLI so all-zero-reward cold-start groups still assemble a batch.
     """
     return _agpt_grpo_config(
@@ -255,7 +253,9 @@ def rl_sync_agpt_2b_clean() -> Controller.Config:
         max_names_per_turn=3,
         few_shot=False,
     )
-    config.async_loop.validation = ValidationConfig(num_samples=8)
+    config.async_loop.validation = ValidationConfig(
+        steps=8, validate_after_training=True
+    )
     return config
 
 
@@ -273,7 +273,9 @@ def rl_grpo_agpt_2b_bounded_v3() -> Controller.Config:
         max_names_per_turn=5,
         lr=2e-6,
     )
-    config.async_loop.validation = ValidationConfig(num_samples=8)
+    config.async_loop.validation = ValidationConfig(
+        steps=8, validate_after_training=True
+    )
     assert config.trainer.checkpointer is not None
     config.trainer.checkpointer.interval = 1
     config.generator.sampling.max_tokens = 128
