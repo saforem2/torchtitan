@@ -17,20 +17,20 @@ from torchtitan.distributed.local_compile import LocalCompileConfig
 from torchtitan.experiments.ezpz.logging import logger, warn_once
 
 from torchtitan.models.common.attention import (
+    Attention as _BaseAttention,
     FlexAttentionMetadata,
+    InnerAttention,
     VarlenAttentionMetadata,
 )
 from torchtitan.models.common.decoder import Decoder
-from torchtitan.models.common.linear import maybe_gather_tp_input
+from torchtitan.models.common.linear import Linear, maybe_gather_tp_input
 from torchtitan.models.common.moe import MoE
 from torchtitan.models.common.moe.token_dispatcher import (
     DeepEPTokenDispatcher,
     HybridEPTokenDispatcher,
 )
-from torchtitan.models.deepseek_v3.model import (
-    DeepSeekMLAAttention,
-    DeepSeekV3TransformerBlock,
-)
+from torchtitan.models.deepseek_v3.attention import DeepSeekMLAAttention
+from torchtitan.models.deepseek_v3.model import DeepSeekV3TransformerBlock
 from torchtitan.tools.utils import has_cuda_capability
 
 
@@ -59,15 +59,64 @@ def _maybe_release_device_cache_between_attention_and_moe(x: torch.Tensor) -> No
 class Attention(DeepSeekMLAAttention):
     """Multi-head latent attention (MLA) with the XPU SDPA value-padding fix.
 
-    Upstream's :class:`DeepSeekMLAAttention` is reused for structure, config
-    and sharding. Only ``forward`` differs: the XPU SDPA math backend returns
-    the Q/K head dimension instead of V's when they differ, so V is padded up to
-    the Q/K head dimension and the output sliced back (see the NOTE below).
+    Upstream's :class:`DeepSeekMLAAttention` is reused for its config fields,
+    softmax scale and FLOPs. ``forward`` differs: the XPU SDPA math backend
+    returns the Q/K head dimension instead of V's when they differ, so V is
+    padded up to the Q/K head dimension and the output sliced back (see the
+    NOTE below).
+
+    The KV up-projection stays a direct child, ``attention.wkv_b``, with a
+    plain inner attention (SDPA/flex). Upstream moved ``wkv_b`` into an
+    ``MLAAttention`` inner backend (#4760, FQN
+    ``attention.inner_attention.wkv_b``) so CP backends can gather the compact
+    latent; ezpz MoE runs no MLA context parallelism, and keeping the flat
+    layout keeps existing ezpz MoE checkpoints, the state-dict keys and the
+    parameter-init order unchanged.
     """
 
     @dataclass(kw_only=True, slots=True)
     class Config(DeepSeekMLAAttention.Config):
-        pass
+        wkv_b: Linear.Config
+        """KV up-projection, ``kv_lora_rank -> n_heads * (qk_nope + v)``."""
+
+        inner_attention: InnerAttention.Config  # pyrefly: ignore[bad-override]
+        """Plain inner attention over materialized Q/K/V (not ``MLAAttention``)."""
+
+        def __post_init__(self) -> None:
+            # Skip DeepSeekMLAAttention's MLAAttention-backend check.
+            _BaseAttention.Config.__post_init__(self)
+
+    def __init__(self, config: Config):
+        # Same child order as the pre-#4760 DeepSeekMLAAttention, so parameter
+        # initialization consumes the RNG in the same order.
+        _BaseAttention.__init__(self)
+        self.dim = config.dim
+        self.n_heads = config.n_heads
+        self.q_lora_rank = config.q_lora_rank
+        self.kv_lora_rank = config.kv_lora_rank
+        self.qk_nope_head_dim = config.qk_nope_head_dim
+        self.qk_rope_head_dim = config.qk_rope_head_dim
+        self.qk_head_dim = config.qk_nope_head_dim + config.qk_rope_head_dim
+        self.v_head_dim = config.v_head_dim
+
+        if self.q_lora_rank == 0:
+            assert config.wq is not None, "wq is required when q_lora_rank == 0"
+            self.wq = config.wq.build()
+        else:
+            assert (
+                config.wq_a is not None and config.wq_b is not None
+            ), "wq_a and wq_b are required when q_lora_rank > 0"
+            self.wq_a = config.wq_a.build()
+            self.q_norm = config.q_norm.build()
+            self.wq_b = config.wq_b.build()
+
+        self.wkv_a = config.wkv_a.build()
+        self.kv_norm = config.kv_norm.build()
+        self.wkv_b = config.wkv_b.build()
+        self.wo = config.wo.build()
+        self.softmax_scale = config.softmax_scale
+        self.inner_attention = config.inner_attention.build()
+        self.rope = config.rope.build()
 
     def forward(
         self,
