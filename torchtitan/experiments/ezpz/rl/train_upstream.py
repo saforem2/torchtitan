@@ -114,13 +114,12 @@ __all__ = [
 
 def _spawn_role_mesh(
     host_mesh,
-    role_world_size: int,
+    role_gpus_per_node: int,
     provisioner: EzpzPerHostProvisioner,
     *,
     extra_env: dict[str, str] | None = None,
 ) -> ProcMesh:
-    """Spawn one role's proc mesh, splitting ``role_world_size`` evenly over hosts."""
-    role_gpus_per_node = role_world_size // len(host_mesh)
+    """Spawn one role's proc mesh with ``role_gpus_per_node`` tiles on each host."""
     boot = provisioner.allocate(role_gpus_per_node)
     # `bootstrap_command=` injects env (ZE_AFFINITY_MASK, LOCAL_RANK, PALS_*)
     # into the actor's process BEFORE execve, so the eager `import torch` in
@@ -160,20 +159,27 @@ def spawn_proc_mesh(
     if host_meshes is None:
         # Single-node: partition tiles on this_host() via ZE_AFFINITY_MASK.
         # Sunspot / Aurora compute nodes have 12 tiles per host (6 PVCs x 2).
-        # One mesh object, so the trainer and generators share one provisioner.
         host_mesh = this_host()
-        host_meshes = HostMeshes(
-            trainer=host_mesh,
-            generators=[host_mesh] * num_generators,
-            gpus_per_node=total_gpus,
-        )
+        provisioner = EzpzPerHostProvisioner(total_gpus=total_gpus)
+        trainer_mesh = _spawn_role_mesh(host_mesh, trainer_world_size, provisioner)
+        generator_meshes = [
+            _spawn_role_mesh(
+                host_mesh,
+                per_generator_world_size,
+                provisioner,
+                extra_env=generator_env,
+            )
+            for _ in range(num_generators)
+        ]
+        return trainer_mesh, generator_meshes
 
     assert len(host_meshes.generators) == num_generators, (
         f"expected {num_generators} generator host mesh(es), "
         f"got {len(host_meshes.generators)}"
     )
     _check_gpus_per_host(host_meshes, trainer_world_size, per_generator_world_size)
-    # Keyed by id(mesh) because a HostMesh can't be a dict key.
+    # Roles on the same mesh share one provisioner, which hands out the next
+    # free tiles. Keyed by id(mesh) because a HostMesh can't be a dict key.
     provisioners: dict[int, EzpzPerHostProvisioner] = {}
     for host_mesh in [host_meshes.trainer, *host_meshes.generators]:
         provisioners.setdefault(
@@ -181,13 +187,13 @@ def spawn_proc_mesh(
         )
     trainer_mesh = _spawn_role_mesh(
         host_meshes.trainer,
-        trainer_world_size,
+        trainer_world_size // len(host_meshes.trainer),
         provisioners[id(host_meshes.trainer)],
     )
     generator_meshes = [
         _spawn_role_mesh(
             generator_host_mesh,
-            per_generator_world_size,
+            per_generator_world_size // len(generator_host_mesh),
             provisioners[id(generator_host_mesh)],
             extra_env=generator_env,
         )
