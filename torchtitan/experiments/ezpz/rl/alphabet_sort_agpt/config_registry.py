@@ -207,7 +207,9 @@ def _agpt_grpo_config(
             engine=xpu_vllm_engine_config(),
             parallelism=generator_parallelism,
             checkpointer=None,
-            sampling=SamplingConfig(temperature=0.8, top_p=0.95, max_tokens=700),
+            # top_p was 0.95; SamplingConfig now rejects top_p < 1 because the
+            # trainer computes logprobs over the full vocabulary (upstream #5317).
+            sampling=SamplingConfig(temperature=0.8, max_tokens=700),
         ),
     )
 

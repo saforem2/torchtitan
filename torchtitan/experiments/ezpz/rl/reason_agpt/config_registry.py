@@ -235,7 +235,9 @@ def _agpt_grpo_config(
             checkpointer=None,
             # max_tokens raised well above the alphabet_sort default so a full CoT
             # (<think> reasoning + <answer>) is not truncated to zero reward.
-            sampling=SamplingConfig(temperature=0.8, top_p=0.95, max_tokens=max_tokens),
+            # top_p was 0.95; SamplingConfig now rejects top_p < 1 because the
+            # trainer computes logprobs over the full vocabulary (upstream #5317).
+            sampling=SamplingConfig(temperature=0.8, max_tokens=max_tokens),
         ),
     )
 
