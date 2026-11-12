@@ -141,6 +141,10 @@ if [[ "${ACCEL}" == cuda ]]; then
     # (Sirius job 33436). Same order as submit_agpt_olmo3_polaris.sh, which
     # also puts its libmpi.so.12 shim first.
     export MPICH_GPU_SUPPORT_ENABLED=0
+    # PALS copies the executable to /var/run/palsd on multi-host launches. A
+    # uv-managed interpreter loads $ORIGIN/../lib/libpython3.12.so.1.0, which
+    # the copy cannot find (rank exit 127, Polaris job 7839193). Run it in place.
+    export PALS_TRANSFER=0
     [[ -d "${HOME}/.local/mpi-compat" ]] \
         && export LD_LIBRARY_PATH="${HOME}/.local/mpi-compat:${LD_LIBRARY_PATH:-}"
     # pip's mpi4py 4.x (MPI-ABI build) links the generic libmpi.so.12 soname,
