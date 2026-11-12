@@ -57,14 +57,14 @@ at `3`, resume a copy, compare steps `4`-`6` (`SMOKE_RESUME_TOL`, default
 2 nodes, `agpt_debugmodel` and `moe_debugmodel`, `6` steps, seed `42`,
 deterministic.
 
-| Check | Sunspot `12483333` | Aurora `9077299` | Polaris `7839481` | Sirius |
+| Check | Sunspot `12483333` | Aurora `9077299` | Polaris `7839481` | Sirius `33453` |
 |---|---|---|---|---|
-| agpt TP=1 | `10.881` -> `9.934`, same as `ezpz` | bit-identical to Sunspot | `10.880` -> `10.107` | does not start |
-| agpt TP=2 | known failure | known failure | known failure | |
-| MoE TP=1 | `12.941` -> `10.975`, same as `ezpz` | same as Sunspot | `12.990` -> `11.069` | |
-| resume, FSDP | exact, diff `0` | exact, diff `0` | not run | |
-| resume, ZeRO-1 BF16 all-gather | diff `0.0041` | diff `0.0041` | diff `0.0041` | |
-| same, pre-fix `zero1.py` | diff `0.318` | diff `0.318` | diff `0.278` | |
+| agpt TP=1 | `10.881` -> `9.934`, same as `ezpz` | bit-identical to Sunspot | `10.880` -> `10.107` | `10.854` -> `9.967`, same as `ezpz`* |
+| agpt TP=2 | known failure | known failure | known failure | known failure |
+| MoE TP=1 | `12.941` -> `10.975`, same as `ezpz` | same as Sunspot | `12.990` -> `11.069` | `12.962` -> `11.079`, same as `ezpz`* |
+| resume, FSDP | exact, diff `0` | exact, diff `0` | not run | exact, diff `0`* |
+| resume, ZeRO-1 BF16 all-gather | diff `0.0041` | diff `0.0041` | diff `0.0041` | diff `0.0041` |
+| same, pre-fix `zero1.py` | diff `0.318` | diff `0.318` | diff `0.278` | not run |
 
 `0.0041` is the documented ZeRO-1 limitation: the FP32 master is not
 checkpointed and is rebuilt from the BF16 weights. Aurora's baseline MoE run
@@ -100,9 +100,22 @@ Beyond the smoke (Sunspot, 2026-11-12):
   11-30, same step-1 loss `12.91284`, same `17.56 GiB`. #74's speedups are
   opt-in and were off.
 
-Sirius does not start: after four environment fixes (newer ezpz utils pin,
-GTL flag after module load, mpi-compat shim, `unset PYTHONHOME`) 3 of 8 ranks
-still die with `No module named 'encodings'`.
+\* Sirius compares against `ezpz` plus only #76's optional-import model files
+and #78's smoke scripts, the same baseline as below: plain `ezpz` does not
+import on CUDA systems with `attn_gym` installed.
+
+Sirius (2026-11-12) needed `blendcorpus` in the venv and a third column
+(`books`) in `data-lists/sirius/books.txt` (`3e97da72`); the earlier
+`encodings` failure was `PYTHONHOME`, already fixed. Against that baseline:
+
+- local batch 2: baseline dies with the same `shape '[1024, 1, 8]'` error,
+  candidate trains (`10.851` -> `9.749`);
+- `agpt_2b`, 8 ranks, 4096 tokens: median `994` vs `986` tok/s, same
+  `16.42 GiB`, same step-1 loss `12.91722` (one warm run per tree);
+- unit tests on a compute node (`33455`): no file regresses. #74's
+  `test_zero1.py` and `test_agpt_fsdp_uneven_rows.py` pass (they SIGSEGV on
+  login nodes, an environment artifact); #76's `test_optional_imports.py` goes
+  from 3 failures to 25 passes. 19 files fail identically on both trees.
 
 ### Known failures the next sync inherits
 
