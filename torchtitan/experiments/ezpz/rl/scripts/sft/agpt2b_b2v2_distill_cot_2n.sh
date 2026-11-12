@@ -72,7 +72,7 @@ if [[ ! -d "${BASE_MODEL}" ]]; then
 fi
 
 NUM_EPOCHS="${NUM_EPOCHS:-3}"
-CKPT_DIR="outputs/sft/agpt2b-b2v2-distill-cot-2n-ep${NUM_EPOCHS}"
+CKPT_DIR="${CKPT_DIR:-outputs/sft/agpt2b-b2v2-distill-cot-2n-ep${NUM_EPOCHS}}"
 LOG_DIR="logs/sft-b2v2-distill-cot-${PBS_JOBID%%.*}"
 mkdir -p "${CKPT_DIR}" "${LOG_DIR}"
 
