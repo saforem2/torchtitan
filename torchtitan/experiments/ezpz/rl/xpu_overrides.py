@@ -1173,6 +1173,51 @@ def patch_vllm_pretrained_config_alias() -> None:
     vllm_config.PretrainedConfig = PreTrainedConfig
 
 
+_SP_PASS_FIELDS = ("enable_sp", "sp_min_token_num")
+
+
+def patch_vllm_pass_config_without_sp() -> None:
+    """Accept upstream's SP ``PassConfig`` args on a vLLM without the SP pass.
+
+    ``rl/generator/vllm/config.py`` builds ``PassConfig(enable_sp=...,
+    sp_min_token_num=...)``. vLLM removed torch.compile sequence parallelism
+    and both fields in ``194bd72be`` (#60517); the vLLM-XPU build
+    (``b46907cce``) has neither, so generator setup fails with a pydantic
+    "Unexpected keyword argument" (Aurora 9087154). Rebind ``PassConfig`` in
+    that module only to drop the two fields while SP is off, and raise if SP
+    is requested. vLLM's own class is untouched; a vLLM that still has the
+    fields is left alone.
+    """
+    import importlib.util
+
+    if importlib.util.find_spec("vllm") is None:
+        return
+    try:
+        import torchtitan.rl.generator.vllm.config as tt_vllm_config
+    except Exception:
+        return
+    pass_config_cls = tt_vllm_config.PassConfig
+    if getattr(pass_config_cls, "_ezpz_sp_compat", False):
+        return
+    fields = getattr(pass_config_cls, "__dataclass_fields__", {})
+    if all(name in fields for name in _SP_PASS_FIELDS):
+        return
+
+    def pass_config_without_sp(**kwargs):
+        if kwargs.get("enable_sp"):
+            raise ValueError(
+                "enable_sequence_parallel requires vLLM's sequence-parallel "
+                "pass (PassConfig.enable_sp), which this vLLM build removed "
+                "(vllm 194bd72be)"
+            )
+        for name in _SP_PASS_FIELDS:
+            kwargs.pop(name, None)
+        return pass_config_cls(**kwargs)
+
+    pass_config_without_sp._ezpz_sp_compat = True  # type: ignore[attr-defined]
+    tt_vllm_config.PassConfig = pass_config_without_sp
+
+
 def apply_all_xpu_patches() -> None:
     """Apply every XPU compatibility patch before importing upstream rl/.
 
@@ -1200,6 +1245,7 @@ def apply_all_xpu_patches() -> None:
     patch_vllm_xpu_skip_oneccl_warmup()
     patch_vllm_xpu_attention_backend()
     patch_vllm_pretrained_config_alias()
+    patch_vllm_pass_config_without_sp()
     patch_create_block_mask_separate_full_blocks_for_xpu()
     patch_vllm_xpu_no_alias_current_stream()
     patch_torchstore_network_availability_for_xpu()
