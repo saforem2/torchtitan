@@ -142,6 +142,9 @@ class EzpzPerHostProvisioner:
             from monarch._src.actor.host_mesh import default_bootstrap_cmd
 
         base_cmd = default_bootstrap_cmd()
+        on_cuda = torch.cuda.is_available() and not (
+            hasattr(torch, "xpu") and torch.xpu.is_available()
+        )
 
         def _per_rank(point):
             # Try common Point API attrs to extract per-mesh rank.
@@ -198,6 +201,12 @@ class EzpzPerHostProvisioner:
             ):
                 if k in os.environ:
                     env_overlay[k] = os.environ[k]
+            if on_cuda:
+                # CUDA counterpart of ZE_AFFINITY_MASK: the mesh's GPUs, with
+                # LOCAL_RANK picking one. Actors are not MPI ranks, so keep
+                # ``import ezpz`` from calling MPI_Init (see ezpz/__init__.py).
+                env_overlay["CUDA_VISIBLE_DEVICES"] = ",".join(str(g) for g in gpu_ids)
+                env_overlay["EZPZ_NO_MPI_INIT"] = "1"
             if extra_env:
                 env_overlay.update(extra_env)
             return base_cmd.with_env(env_overlay)
