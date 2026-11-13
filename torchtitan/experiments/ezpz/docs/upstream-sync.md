@@ -51,6 +51,11 @@ fields. This is a deliberate divergence from upstream.
 | local batch 2 | `10.85056` -> `9.74857` | `10.85056` -> `9.74857`, identical | `10.87751` -> `9.86143` | `10.87751` -> `9.86143`, identical |
 | agpt TP=2 | known failure | `redistribute()` rejects `async_op` (`spmd_types` `0.2.0`) | known failure | known failure |
 
+Polaris at the final tip (`0d880d87`, job `7842085`, CUDA graphs on, `spmd_types`
+`0.3.1`) matches pre-sync `7839953` at every step: agpt `10.88036` -> `10.10732`, MoE
+`12.98994` -> `11.06904`, ZeRO-1 resume diff `0.00405`, local batch 2 `10.84177` ->
+`9.79647`; TP=2 reaches the known failure.
+
 Meta-device parameter counts, state-dict keys and shapes are identical pre/post for
 agpt `debugmodel`, `2b`, `2b-rl` and moe `debugmodel`. Of 163 non-RL registry
 factories, 99 build the same config and 20 differ only in an error message's wording;
@@ -62,9 +67,14 @@ RL: all 13 AuroraGPT RL factories build, and trainer and generator model configs
 pre-sync (LoRA rank 8: `1,986,938,880` params, `884,736` trainable). RL unit tests:
 `31` passed, `2` skipped; they failed at collection before the sync. The RL path was
 already broken at `959b851a` (removed `rollout.environment`, moved `Controller`); the
-last passing RL gate is Sunspot `12479177` (2026-09-30). No end-to-end RL run: no venv
-has torch 2.16-dev with `torchmonarch>=0.7`, a TorchStore with `RankRole` and the XPU
-transports, and vLLM-XPU.
+last passing RL gate is Sunspot `12479177` (2026-09-30). A post-sync RL venv now exists on
+Sunspot, `rl-monarch-torch216-sync-20261112`: torch `2.16.0.dev20261015+xpu`,
+`torchmonarch` `0.7.0` (+ `torchx-nightly`), TorchStore songhappy `xpu-all` @ `3edc47f`,
+vLLM `b46907cce` built for XPU, `vllm-xpu-kernels` `v0.1.16.3` built for `pvc` only.
+Monarch GRPO attempts on it (2 nodes, AGPT-2B, GSM8K) found and fixed: torchmonarch 0.7
+dropping `host_mesh_from_store` (`rl/monarch_compat.py`, `StoreJob`), tyro on
+`VllmOtelStatLogger.Config`, the renderer's `vision_processor`, the AGPT adapter's
+quantized-layout kwargs, and vLLM-XPU's missing `PretrainedConfig` re-export.
 
 ### Behaviour changes
 
@@ -82,9 +92,9 @@ transports, and vLLM-XPU.
 
 ### Known failures the next sync inherits
 
-- **TP>1** needs `spmd_types==0.3.1` (venvs have `0.2.0`): `redistribute()` rejects
-  `async_op`. With `0.3.1`, TP=2 reaches the old known failure (token count not a
-  multiple of `max_context_length`).
+- **TP>1** needs `spmd_types==0.3.1`; with `0.2.0`, `redistribute()` rejects `async_op`.
+  The Sunspot, Sirius and Polaris sync venvs were upgraded on 2026-11-12 (Aurora already
+  had it). TP=2 then reaches the old known failure.
 - TP=2 sequence sharding, XPU FSDP hang after step 7, MoE EP and flex attention: still
   open from the entries below.
 - Already broken before this sync and left alone: `lr_finder` trainer attributes,
