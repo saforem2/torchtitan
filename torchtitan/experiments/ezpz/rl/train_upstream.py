@@ -72,6 +72,16 @@ from torchtitan.experiments.ezpz.rl.xpu_overrides import (
 
 apply_all_xpu_patches()
 
+import torch  # noqa: E402
+
+# Every Monarch-spawned actor process (GPU meshes and upstream's CPU procs
+# alike) inherits this process's environment. On CUDA hosts named x3*
+# (Polaris, Sirius) ``import ezpz`` in those non-MPI processes would run
+# MPI_Init and abort or hang (Sirius 33511, 33514); this flag makes
+# torchtitan.experiments.ezpz skip it. This process already imported ezpz.
+if torch.cuda.is_available():
+    os.environ.setdefault("EZPZ_NO_MPI_INIT", "1")
+
 # ----------------------------------------------------------------------
 # Now safe to import upstream rl/. From here on, mirror train.py.
 # ----------------------------------------------------------------------
