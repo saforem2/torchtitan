@@ -1,6 +1,19 @@
 # Development Journal
 
-## 2026-11-13 00:11 UTC: Sirius hedge — 10B 8N FSDP-safe + 5B 2N resume 2900
+## 2026-11-13: Sirius hedge — 10B 8N + 5B 2N survive outage, both restarted
+
+Recovery `15:18 UTC` after Sirius `UAN` outage (`~00:13-15:18`, `sirius-uan-0002 10.140.48.172 Connection timed out` all paths). Polaris `7832130 Q 18N small` stayed `Q` (91 small / 52 medium queued, ALCF reservation/top-job blocked all of Nov 13). Power-of-2 sizing: `5B FFN 8192 %32==0`, `10B FFN 11264 %32==0` both FSDP-safe on `32 GPUs` (8N); per-job `8N` cap (`Insufficient ncpus R:512 A:38`) forced `8N+2N` split. `DCP` ckpts sharding-incompatible across world sizes — `n2-gbs8` (8 GPUs) vs `n8-gbs32` (32 GPUs) need fresh start on size change; `CKPT_DIR=checkpoints/agpt-${MODEL}-n${NNODES}-gbs${GBS}`.
+
+| Job | Model | GPUs | Steps | Loss | Checkpoints | Outcome |
+| --- | --- | --- | --- | --- | --- | --- |
+| `33469` | `10b_olmo3_polaris` | `8N 32` | `1->200` | `12.00 g2.41` -> `step 2 11.86` -> `step 200 6.38 g2.30`, `CUDA graph`, no FSDP uneven | `step-100` (1 ckpt, `106G`) | **`E 143` no spare at 01:24** (4494s, `FAILOVER STOP exhausted`) — resubmitted `33486 R` from `step-200` |
+| `33486` | `10b_olmo3_polaris` | `8N 32` | `200->` | resumes `step-100` ckpt | — | **`R` 15:18+** `6h` |
+| `33471` | `5b_olmo3_polaris` | `2N 8` | `2900->5058` | `6.50 g15.4` -> `step 5058 6.14 g12.1`, `tps 409 MFU 4.2%` | `50` ckpts `step-600..5000` (`2.6T`, every 100) | **`E walltime` 06:10** (21658s > 21600) — resubmitted `33487 R` from `step-5000` |
+| `33487` | `5b_olmo3_polaris` | `2N 8` | `5058->` | resumes `step-5000` | — | **`R` 15:18+** `6h` |
+
+`10B` proof is the value: `FSDP2` on `32 GPUs` ran `200` steps with healthy convergence (`12.00->6.38` in 1h15m, `tps 185 MFU 3.8%`) — confirms Polaris `10B` `n32` will not hit `FSDP uneven sharding`. `5B` is steady real training: `2900->5058` (+2158 steps, `+50` ckpts) through the `13h` gap. Prior note at `00:11` (now superseded) only had `step 1-2` and `step 2901`; this entry replaces it with walltime-verified `200`/`5058`.
+
+## 2026-11-13 00:11 UTC: Sirius hedge — 10B 8N FSDP-safe + 5B 2N resume 2900 _(superseded by entry above)_
 
 **Sirius** `workq` `8N` max per job (scheduler `Insufficient ncpus R:512 A:38` on second `8N`) split while Polaris `7832130..32 Q` (90 small / 51 medium, ALCF reservation/top-job blocked all 13th). Power-of-2 sizing fixed: `5B FFN 8192 %32==0`, `10B FFN 11264 %32==0` both FSDP-safe on 32 GPUs.
 
@@ -10,6 +23,7 @@
 | `33471` | `agpt_5b_olmo3_polaris` | `2N / 8 GPUs` | resume `step-2900` `n2-gbs8` | `step 2901 6.50 g 15.4` | **`R` 00:09-06:00** — 2900->2901, 4.3h gap covered |
 
 `DCP` checkpoints are sharding-incompatible across world sizes: `n2-gbs8` (8 GPUs) cannot load as `n8-gbs32` (32 GPUs) — `33468 8N 5B` fresh was correct vs dupe `33470 Q` killed. `CKPT_DIR=checkpoints/agpt-${MODEL}-n${NNODES}-gbs${GBS}`. Sirius outage `~00:13 UTC` (`sirius-uan-0002 10.140.48.172 Connection timed out`, all paths) blocked commit until now — last good poll `00:11`; jobs expected `R` to `06:00`.
+
 
 
 CPT-FWE 4N (`agpt_2b_mds_mix_owm_edu_6040` 60/40 FWE, `PPN=8 GBS=64 seq=8192`, 100B=190734 steps) now `12483437 R 00:34` `step 34298 loss 1.93 MFU 17.1%` — **17.8% budget**, MFU recovered 13.4%->17.1% since chain start (`12483388 step 26742` -> `12483416 32800->33303` -> `12483437`). Chaining `afterany 12483446 H` every `02:00` (no gap) to 50k then general SFT; latest disk `step-34200`, eval at `step-17000` was `0.000` by design (pure CPT). Narrow SFT-on-CPT scored `0.015` vs B2 `0.165` — format collapse, not CPT evidence.
