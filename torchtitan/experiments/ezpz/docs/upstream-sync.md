@@ -75,6 +75,39 @@ Monarch GRPO attempts on it (2 nodes, AGPT-2B, GSM8K) found and fixed: torchmona
 dropping `host_mesh_from_store` (`rl/monarch_compat.py`, `StoreJob`), tyro on
 `VllmOtelStatLogger.Config`, the renderer's `vision_processor`, the AGPT adapter's
 quantized-layout kwargs, and vLLM-XPU's missing `PretrainedConfig` re-export.
+Aurora `9087154` then reached generator setup and failed on `PassConfig(enable_sp=...)`:
+vLLM removed the SP pass in `194bd72be`, so `xpu_overrides.py` drops those two fields
+on that vLLM. No XPU run has trained yet: Sunspot stopped starting jobs for the
+account and Aurora went into maintenance.
+
+The same Monarch GRPO path trains on CUDA. Sirius `33518`, 2 A100 nodes (trainer on
+host 0, vLLM generator on host 1), AGPT-2B LoRA, GSM8K, 3 steps, exit `0`:
+
+| Step | loss | rollout reward |
+|---|---|---|
+| 1 | `0.0022` | `0.43` |
+| 2 | `-0.037` | `0.54` |
+| 3 | `0.062` | `0.44` |
+
+TorchStore (Gloo) moved the weights each step: trainer push `2.5`-`2.7` s, generator
+fetch `3.9` s and load `0.35` s, policy versions up to `3` (`33515`). Step 1 takes
+about 17 minutes (first compile), steps 2 and 3 about 30 s. The venv is upstream's
+`scripts/install_rl_env.sh --cuda cu132` (torch `2.16.0.dev20261107+cu132`, vLLM
+`1.0.0.dev20261107+cu132`, TorchStore `804ae43`) plus ezpz's own dependencies; it runs
+on driver `580`. Fixes it needed, all under `experiments/ezpz/`:
+
+- `rl/monarch_compat.py`: Polaris and Sirius `*.hsn` names have one A record per NIC.
+  The worker bound one and the client dialed the other ("never connected"). Workers
+  now advertise the lowest bindable IP when the name has several.
+- `ezpz/__init__.py`, `rl/train_upstream.py`, `rl/xpu_overrides.py`: `import ezpz`
+  runs `MPI_Init` on `x3*` hosts. In Monarch-spawned actors that aborted (exit `15`)
+  or hung. On CUDA, actors get `EZPZ_NO_MPI_INIT=1`, which turns off
+  `mpi4py.rc.initialize`, and `CUDA_VISIBLE_DEVICES` from the provisioner.
+- `rl/scripts/grpo/multihost_train_upstream.py`: rank 1 exits through `os._exit` like
+  rank 0; its `MPI_Finalize` against the departed peer turned success into exit `143`.
+
+Job environment, not code: `CC=/usr/bin/gcc` (the PrgEnv `nvc` cannot build Triton's
+driver stub), `TORCHTITAN_TORCHSTORE_TRANSPORT=gloo`, `unset HOSTNAME`.
 
 ### Behaviour changes
 
