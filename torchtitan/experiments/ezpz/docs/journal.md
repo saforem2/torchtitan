@@ -1,5 +1,45 @@
 # Development Journal
 
+## 2026-11-13 00:11 UTC: Sirius hedge — 10B 8N FSDP-safe + 5B 2N resume 2900
+
+**Sirius** `workq` `8N` max per job (scheduler `Insufficient ncpus R:512 A:38` on second `8N`) split while Polaris `7832130..32 Q` (90 small / 51 medium, ALCF reservation/top-job blocked all 13th). Power-of-2 sizing fixed: `5B FFN 8192 %32==0`, `10B FFN 11264 %32==0` both FSDP-safe on 32 GPUs.
+
+| Job | Model | Nodes/GPUs | Start | Loss | Status |
+| --- | --- | --- | --- | --- | --- |
+| `33469` | `agpt_10b_olmo3_polaris` | `8N / 32 GPUs` | fresh `step 1` `6h` | `step 1 12.00 g 2.41` -> `step 2 11.86` `CUDA graph recorded`, no FSDP uneven | **`R` 00:09-06:00** — proves Polaris 10B 32-GPU sizing |
+| `33471` | `agpt_5b_olmo3_polaris` | `2N / 8 GPUs` | resume `step-2900` `n2-gbs8` | `step 2901 6.50 g 15.4` | **`R` 00:09-06:00** — 2900->2901, 4.3h gap covered |
+
+`DCP` checkpoints are sharding-incompatible across world sizes: `n2-gbs8` (8 GPUs) cannot load as `n8-gbs32` (32 GPUs) — `33468 8N 5B` fresh was correct vs dupe `33470 Q` killed. `CKPT_DIR=checkpoints/agpt-${MODEL}-n${NNODES}-gbs${GBS}`. Sirius outage `~00:13 UTC` (`sirius-uan-0002 10.140.48.172 Connection timed out`, all paths) blocked commit until now — last good poll `00:11`; jobs expected `R` to `06:00`.
+
+
+CPT-FWE 4N (`agpt_2b_mds_mix_owm_edu_6040` 60/40 FWE, `PPN=8 GBS=64 seq=8192`, 100B=190734 steps) now `12483437 R 00:34` `step 34298 loss 1.93 MFU 17.1%` — **17.8% budget**, MFU recovered 13.4%->17.1% since chain start (`12483388 step 26742` -> `12483416 32800->33303` -> `12483437`). Chaining `afterany 12483446 H` every `02:00` (no gap) to 50k then general SFT; latest disk `step-34200`, eval at `step-17000` was `0.000` by design (pure CPT). Narrow SFT-on-CPT scored `0.015` vs B2 `0.165` — format collapse, not CPT evidence.
+
+Pretok **landed** `12483443`: `_pretokenize_distill_cot_mix_1n.sh` (NPROC=1, `rl-monarch-torch214-locality-20261001`, bypass `ezpz_setup_job`) — `91,481 rows -> 36,934 packed @8192` (3.4G, `dataset_info.json` + 8x `data-*.arrow`) via mix-cache `cba5c64` hit in 5.8s to `/tegu/datasets/agpt2b-distill-cot-mix-len8192`. 6 prior segfaults `3553055` (`12483441` etc.) fixed by VENV `rl-monarch` path. Broad SFT `sft_distill_cot_4n.sh --pretokenized_dataset` ready but **parked to CPT 50k** per `POST-TRAINING-PLAN.md` phase 2.
+
+## 2026-11-11: Sunspot CPT-FWE 4N resumes (step 10k) + pretok & GRPO launch — _provisional, jobs live_
+
+> **Provisional:** three Sunspot `workq` jobs are still running at time of writing.
+> Numbers below are the last-observed logs, not exit-verified. Finalize when
+> `12483245/252/253` exit: confirm `dataset_info.json` + `[decontam]` counts for
+> pretok, and GSM8K-CoT delta vs `B2=0.205` for CPT/GRPO. Marked `R --` = staged,
+> `R host` = training.
+
+**Lane 1 — CPT-FWE 4N 60/40 kind-shift** (`agpt_2b_mds_mix_owm_edu_6040`, 40% open-web-math / 60% FineWeb-Edu via Grain local parquets `140 shards`, `GrainPacking`, `PPN=8`, `GBS=64`, `seq=8192`, 100B budget => `190734` steps, base `gs138650/step-0` MDS v2, VENV `xpu-torch216-sync-5a7a622f16`):
+
+| Job | Steps | Tip loss | MFU | Outcome |
+| --- | --- | --- | --- | --- |
+| `12483048` | `0->4091` | 2.068 | 19.3% | walltime `02:00` (`E -29`) |
+| `12483075` | `4091->7869` | 2.463 | 18.35% | walltime `02:00` (`E -29`) |
+| `12483245` | `7800->10143+` | **1.856** (new low at 10108) | 18.16% | **`R 01:14` live** |
+
+Chain: each job resumes from `outputs/checkpoints/agpt-2b-cpt-fineweb-edu-n4-gbs64` (`step-7800` at restart, ckpt every 200, `50` ckpts `step-200..10000` verified; live at `10143` past last ckpt). Script `torchtitan/experiments/ezpz/scripts/cpt_fineweb_edu_4n.sh` auto-resumes via `FaultTolerantTrainer` fault-tolerance restart. `qsub -l select=4 walltime=02:00` chained; total `~10143/190734 ~= 5.3%` of 100B budget. Next re-queue at walltime.
+
+**Lane 2 — pretok 1N** (`torchtitan/experiments/ezpz/rl/scripts/sft/_pretokenize_distill_cot_mix_1n.sh`, `select=1 12h`): job `12483253 R --` building `50% OpenThoughts-114k-decontam + 50% gsm8k-r1cot` => `/tegu/datasets/datasets/agpt2b-distill-cot-mix-len8192` (`train_sft.py --pretokenize_to`, `num_proc=4` post `15f3e19/3665e3a`). Unblocks lane 3's stage-2 SFT; gate is `dataset_info.json` + per-file `[decontam]` drop counts.
+
+**Lane 3 — RL-GRPO 2N on B2** (`torchtitan/experiments/ezpz/scripts/rl_grpo_b2_2n.sh`, `select=3 auto=2+1 spare 06:00`): job `12483252 R --` on `checkpoint-93-hf` (B2 `0.205 GSM8K-CoT`) with `gs=8 lr=5e-6 100 steps ckpt/25`, Monarch TorchStore + XPU vLLM `float32` [monarch.md](production/rl/monarch.md). SFT narrow lane: `12483074 10/10 11.02->10.72 Training completed` (1N `agpt_debugmodel_gsm8k_r1cot`, lane done).
+
+**Eval gate:** first meaningful CPT/GRPO GSM8K-CoT delta vs `B2=0.205` at ~15k CPT steps (~8h); MMLU letter-prior gating in [mmlu-letter-prior-gating.md](evals/mmlu-letter-prior-gating.md).
+
 ## 2026-11-11: 2088N umbrella `9053470` killed by one node; per-seat resubmit
 
 Placeholder `9053470` (`select=2088`, `large`) held four seats: 20B-512,
