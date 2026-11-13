@@ -105,7 +105,12 @@ def main() -> None:
 
     if rank != 0:
         store.get("multihost_rl_done")
-        return
+        # Rank 0 leaves through os._exit below, so a normal exit here would run
+        # mpi4py's MPI_Finalize against a peer that is gone; on Slingshot that
+        # aborts with PTLTE_NOT_FOUND and exit 143 (Sirius 33515).
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(0)
 
     assert hosts is not None
     hosts.initialized.get()
