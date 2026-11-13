@@ -1147,6 +1147,32 @@ def patch_torchstore_network_availability_for_xpu() -> None:
     )
 
 
+def patch_vllm_pretrained_config_alias() -> None:
+    """Re-export ``PretrainedConfig`` from ``vllm.transformers_utils.config``.
+
+    Upstream ``rl/generator/vllm/registry.py`` imports ``PretrainedConfig``
+    through vLLM's re-export. The vLLM-XPU build (``b46907cce``, transformers
+    5.x) imports only the renamed ``PreTrainedConfig`` there, so the generator
+    actor fails with ImportError (Sunspot 12483522). Alias the old name when it
+    is missing; a vLLM that already exports it is left alone.
+    """
+    import importlib.util
+
+    if importlib.util.find_spec("vllm") is None:
+        return
+    try:
+        import vllm.transformers_utils.config as vllm_config
+    except Exception:
+        return
+    if hasattr(vllm_config, "PretrainedConfig"):
+        return
+    try:
+        from transformers import PreTrainedConfig
+    except ImportError:
+        from transformers import PretrainedConfig as PreTrainedConfig
+    vllm_config.PretrainedConfig = PreTrainedConfig
+
+
 def apply_all_xpu_patches() -> None:
     """Apply every XPU compatibility patch before importing upstream rl/.
 
@@ -1173,6 +1199,7 @@ def apply_all_xpu_patches() -> None:
     patch_dtensor_make_replicate_for_xpu()
     patch_vllm_xpu_skip_oneccl_warmup()
     patch_vllm_xpu_attention_backend()
+    patch_vllm_pretrained_config_alias()
     patch_create_block_mask_separate_full_blocks_for_xpu()
     patch_vllm_xpu_no_alias_current_stream()
     patch_torchstore_network_availability_for_xpu()
