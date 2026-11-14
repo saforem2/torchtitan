@@ -1,16 +1,22 @@
 # AuroraGPT-2B post-training: complete status
 
-**Last updated: 2026-11-12.** Every number is quoted from a run doc — links go to the source. Most recent first.
+**Last updated: 2026-11-14.** Every number is quoted from a run doc — links go to the source. Most recent first.
 
-> **One-line status:** B2 (`checkpoint-93`, 0.205 GSM8K-CoT) still the best CoT model. CPT-FWE 4N at 34.3k/190k (17.8% budget, `12483437 R` MFU 17.1% healthy) via `afterany 12483446 H` to 50k. Pretok **landed** `12483443`: `91,481 -> 36,934 packed @8192` (3.4G, `/tegu/datasets/agpt2b-distill-cot-mix-len8192`, mix-cache `cba5c64` hit) — broad SFT unblocked but **parked to CPT 50k** per `POST-TRAINING-PLAN.md` phase 2.
+> **One-line status:** CPT-FWE 4N at **75k/190k (39.4% budget, `12483799 R` MFU ~18% healthy, step-75000 `22.4G`) — chain fixed to `12h` walltime (was `2h` churn, `99e918b342`), HF converts at `74000/74200` `3.7G` verified. SFT on fresh HF (`cpt74k-b3-1n`) blocked on `XCCL→ezpz launch` fix (raw `mpiexec` broke `CCL` on `PVC/FLAT`). Raw CPT CoT `0/200` on `73k/74k` is expected degenerate `pre-SFT` signal — meaningful CoT gates on SFT `final/` only. B2 `0.205` remains best CoT.
 
 ---
 
+## 2026-11-14 — CPT 75k + SFT labels + CoT baseline (in-flight)
+
+**CPT-FWE 4N** (`agpt_2b_mds_mix_owm_edu_6040` `60/40 FWE`, `PPN=8 GBS=64 seq=8192`, `100B=190734` steps): `12483799 R` `step-75000` `~22.4G` `375` ckpt dirs, `~39.4%` of `100B` budget, `MFU ~18%` `~2k steps/hr` healthy. Chain was `600s`-poll auto-requeue on `2h` walltime (`12483735→12483799` verified); this hop still `02:00` (`E ~19:13`), next hop already `12h` (`99e918b342` synced) = `~24k steps/hop` vs `4k` churn. `HFs 74000/74200` `3.7G` `9/9` files verified (patched `config/tokenizer` omission).
+
+**SFT labels bottleneck** — `12483770` froze `22m` building `labels` on `2.7M×8192` `add_column` `22B` Python loop (`Modify 16:36:00` frozen, `E 143`). Fixed `d351f8c204`/`36cfd634a5`/`746d98ded9`: `np.where`-batched via `add_column` not `datasets.map Manager` (`EOFError` on `PVC/FLAT`). `SFT 1N` on fresh `74000 HF` (`12483807` `ezpz launch --nproc 12 --nproc_per_node 12` after `mpiexec` `xcclCommInitRank 11` + `ImageMagick Wand 0.7.2` failures from `~/.local/bin/ezpz` not pinned `xpu-torch216`).
+
+**CoT baseline** — raw `CPT` `73k/74k` both `0/200` `0.0 fmt` degenerate loops (`n_unclosed=200`) — expected `pre-SFT` (`CPT` never trains `\boxed{}`), not a regression. `cpt34k-gsm8k-3ep` `0.025 acc / 0.505 fmt` vs `cpt34k-distill-broad-4n` `0.000` shows format-vs-reasoning gap. Meaningful `CoT` gates on `SFT final/` (`submit_cot_eval.sh`).
+
+**Eval infra** — `MMLU vLLM` `level_zero 40` `63G OOM` (`compute_topk_scores`) unfixable on `Sunspot XPU` — `Aurora`-only, documented. `CoT GSM8K` `vLLM fp32` works (`73k/74k` `200/200` processed).
+
 ## 2026-11-12 — CPT 34.3k/190k healthy + pretok landed (broad SFT parked to 50k)
-
-CPT-FWE 4N (`agpt_2b_mds_mix_owm_edu_6040` 60/40 FWE, `PPN=8 GBS=64 seq=8192`, 100B=190734 steps) now `12483437 R 00:34` `step 34298 loss 1.93 MFU 17.1%` `tps 4,571` — **17.8% of 100B budget**, healthy (MFU recovered 13.4%->17.1% across chain `12483388 step 26742` -> `12483416 32800->33303` -> `12483437`). Chaining every `02:00` via `afterany 12483446 H` to 50k then general SFT; latest on disk `step-34200`. Eval at `step-17000` was `0.000` GSM8K-CoT by design (pure CPT, no `chat_template`) vs B2 `0.205` which required stage-1 SFT first — not a regression. Narrow SFT-on-CPT (`agpt2b_b2v2_distill_cot_2n.sh` on CPT-17000 HF, LR 2e-5 3ep GBS 384) scored **0.015** vs B2 `0.165` — format collapse on FWE-shifted manifold, hparams not CPT evidence.
-
-Pretok **landed**: `_pretokenize_distill_cot_mix_1n.sh` job `12483443` `Exit` (NPROC=1, `rl-monarch-torch214-locality-20261001`, bypass `ezpz_setup_job` MPI wrapping, `LOG_DIR=logs/pretokenize-distill-cot-mix-<id>`) — `91,481 rows -> 36,934 packed seqs @8192` (3.4G, `dataset_info.json` + 8x `data-*.arrow`), mix-cache **hit** `cba5c64` in 5.8s (6 prior jobs e.g. `12483441` segfaulted at NPROC=1 via `3553055 Segmentation fault` until VENV-path fix). Broad SFT via `sft_distill_cot_4n.sh --pretokenized_dataset /tegu/datasets/agpt2b-distill-cot-mix-len8192` now **ready but parked** to CPT 50k per `POST-TRAINING-PLAN.md` phase ordering — no training until 50k checkpoint converts to HF.
 
 
 ---

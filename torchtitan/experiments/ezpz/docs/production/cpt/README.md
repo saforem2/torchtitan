@@ -1,6 +1,6 @@
 # Continued Pre-Training (CPT) — 2B olmo x dolmino mixing-ratio sweep
 
-> **Update 2026-11-11:** a **live** kind-shift CPT `60/40 FineWeb-Edu` is running on Sunspot (`agpt_2b_mds_mix_owm_edu_6040`, `12483245 R` step 10k+; chain `12483048→12483075→12483245`) — see [journal](../../journal.md) and [production/README post-training table](../README.md#post-training-stages-cptsft-rl). Everything else on this page is historical.
+> **Update 2026-11-14:** live kind-shift CPT `60/40 FineWeb-Edu` at `75k/190k` (`12483799 R` `step-75000` `39.4%` budget, `MFU ~18%`, `12h` walltime `99e918b342`, HFs `74000/74200` `3.7G`) — see `POST-TRAINING-2B.md` `2026-11-14`.
 >
 > Last updated: 2026-08-31
 >
