@@ -605,28 +605,40 @@ def main() -> None:
                 else "completion_mask"
             )
 
-            def _build_pretokenized_labels(example):
-                mask = example[mask_column]
-                return {
-                    "labels": [
-                        token_id if keep else -100
-                        for token_id, keep in zip(
-                            example["input_ids"], mask, strict=True
-                        )
-                    ]
-                }
-
             mask_columns = [
                 column
                 for column in ("assistant_masks", "completion_mask")
                 if column in dataset.column_names
             ]
-            dataset = dataset.map(
-                _build_pretokenized_labels,
-                remove_columns=mask_columns,
-                num_proc=1,
-                desc="Building trainer-ready labels",
-            )
+            # Vectorized numpy path: Python loop over 2.7M*8192 is 22B iters
+            # and never flushes (spool frozen at 16:36). Use Arrow→numpy.
+            try:
+                import numpy as np
+
+                def _batch_labels(batch):
+                    ids = batch["input_ids"]  # list[list[int]]
+                    masks = batch[mask_column]
+                    # operate row-wise but via numpy per row (still faster than Python zip)
+                    labels = []
+                    for r_ids, r_mask in zip(ids, masks):
+                        arr_ids = np.array(r_ids, dtype=np.int64)
+                        arr_mask = np.array(r_mask, dtype=np.bool_)
+                        arr_ids[~arr_mask] = -100
+                        labels.append(arr_ids.tolist())
+                    return {"labels": labels}
+
+                dataset = dataset.map(
+                    _batch_labels, batched=True, batch_size=4096, num_proc=1
+                )
+                # Verify _build_pretokenized_labels dead-code removed — this is the active path
+            except ImportError:
+                labels_col = [
+                    [tid if keep else -100 for tid, keep in zip(ex["input_ids"], ex[mask_column], strict=True)]
+                    for ex in dataset
+                ]
+                dataset = dataset.add_column("labels", labels_col)
+            for col in mask_columns:
+                dataset = dataset.remove_columns(col)
             log.info(
                 f"[rank {rank}] built labels from {mask_column} for "
                 f"{len(dataset)} pre-tokenized samples"
