@@ -37,7 +37,7 @@ from torch.distributed.fsdp import (
 )
 from torch.distributed.tensor import DTensor, Shard
 
-from torchtitan.config import TORCH_DTYPE_MAP, TrainingConfig
+from torchtitan.config import PrecisionConfig, TORCH_DTYPE_MAP
 from torchtitan.config.parallelism import ParallelismConfig
 
 from torchtitan.distributed import ParallelismContext
@@ -47,7 +47,7 @@ from torchtitan.distributed.fsdp import (
     get_fsdp_reshard_after_forward_policy,
     linear_param_shard_placements,
 )
-from torchtitan.distributed.local_compile import apply_local_compile
+from torchtitan.distributed.local_compile import LocalCompileConfig
 from torchtitan.experiments.ezpz.fsdp_compat import resolve_fsdp_mesh
 from torchtitan.experiments.ezpz.logging import logger
 
@@ -83,9 +83,9 @@ def parallelize_llama(
     model: Llama3Model,
     *,
     parallelism_context: ParallelismContext,
-    training: TrainingConfig,
+    precision: PrecisionConfig,
     parallelism: ParallelismConfig,
-    local_compile_regions: list[str],
+    local_compile: LocalCompileConfig,
     activation_remat: ActivationRematConfig | None,
     dump_folder: str,
     skip_dp: bool = False,
@@ -97,12 +97,12 @@ def parallelize_llama(
     """
     # Bind the @local_compile regions before any module runs (process-wide);
     # BaseModel.parallelize does the same first.
-    apply_local_compile(local_compile_regions)
+    local_compile.apply()
     parallel_dims = parallelism_context
     assert (
-        training.max_context_length % parallel_dims.seq_len_divisor == 0
+        model.config.max_context_length % parallel_dims.seq_len_divisor == 0
     ), f"""
-        Sequence length {training.max_context_length} must be divisible by the product of TP degree
+        Sequence length {model.config.max_context_length} must be divisible by the product of TP degree
         ({parallel_dims.tp}) and 2 * CP degree ({parallel_dims.cp}).
         """
 
@@ -163,7 +163,7 @@ def parallelize_llama(
     dp_mesh, dp_mesh_dims = resolve_fsdp_mesh(parallel_dims)
 
     # [ezpz] Ablation arm B ("norms-only fp32 master"), opt-in via
-    # EZPZ_FP32_NORMS=1. Only meaningful with training.dtype=bfloat16 (bf16
+    # EZPZ_FP32_NORMS=1. Only meaningful with precision.dtype=bfloat16 (bf16
     # master everywhere): promote the affine norm weights to an fp32 master
     # while the bulk stays bf16. FSDP2 rejects mixed dtypes inside one
     # fully_shard group, so the promoted norms must also be sharded
@@ -173,11 +173,11 @@ def parallelize_llama(
     if os.environ.get("EZPZ_FP32_NORMS", "0").strip() not in ("", "0", "false"):
         from torchtitan.experiments.ezpz.agpt.fp32_norms import promote_norms_to_fp32
 
-        if training.dtype != "bfloat16":
+        if precision.dtype != "bfloat16":
             logger.warning(
-                "EZPZ_FP32_NORMS=1 with training.dtype=%s: the master copy is "
+                "EZPZ_FP32_NORMS=1 with precision.dtype=%s: the master copy is "
                 "already float32, so promoting norms is a no-op.",
-                training.dtype,
+                precision.dtype,
             )
         fp32_norm_modules = promote_norms_to_fp32(model)
 
@@ -185,10 +185,10 @@ def parallelize_llama(
         model,
         dp_mesh,
         dp_mesh_dims=dp_mesh_dims,
-        param_dtype=TORCH_DTYPE_MAP[training.mixed_precision_param],
-        reduce_dtype=TORCH_DTYPE_MAP[training.mixed_precision_reduce],
+        param_dtype=TORCH_DTYPE_MAP[precision.param_dtype],
+        reduce_dtype=TORCH_DTYPE_MAP[precision.reduce_dtype],
         pp_enabled=parallel_dims.pp_enabled,
-        cpu_offload=training.enable_cpu_offload,
+        cpu_offload=parallelism.fsdp_enable_cpu_offloading,
         reshard_after_forward_policy=parallelism.fsdp_reshard_after_forward,
         separate_fsdp_modules=fp32_norm_modules,
     )
@@ -198,7 +198,7 @@ def parallelize_llama(
     else:
         logger.info("Applied FSDP to the model")
 
-    if training.enable_cpu_offload:
+    if parallelism.fsdp_enable_cpu_offloading:
         logger.info("Applied CPU Offloading to the model")
 
     return model

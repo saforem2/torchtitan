@@ -31,20 +31,28 @@ Polaris job `7839433`, 2 nodes, 8 ranks, torch `2.15.0+cu132`, tree `ezpz` +
 
 ## Fix
 
-`trainer.py` `maybe_disable_cuda_graphs`, called from
-`_initialize_forward_backward`. On CUDA with graphs enabled it sets
-`training.disable_cuda_graphs=True` and logs
+Upstream #5353 (2026-11-12 sync) made capture backend-agnostic and renamed the
+fields: `training.disable_cuda_graphs` -> `training.disable_accelerator_graphs`,
+`optim.enable_cuda_graph` -> `optim.enable_accelerator_graph`,
+`training.cuda_graph_per_accumulation_group` ->
+`training.accelerator_graph_per_microbatch_group`. The guard was renamed with
+them; the jobs below ran the CUDA-named version.
+
+`trainer.py` `maybe_disable_accelerator_graphs`, called from
+`_initialize_forward_backward`. With graphs enabled it sets
+`training.disable_accelerator_graphs=True` and logs
 
 ```
-Disabling CUDA graphs: <reason> cannot run under capture. Pass --training.disable-cuda-graphs to silence this.
+Disabling accelerator graphs: <reasons>. Pass --training.disable-accelerator-graphs to silence this.
 ```
 
-when native DDP is on or any MoE layer uses an expert backend other than
+when native DDP is on, any MoE layer uses an expert backend other than
 `grouped_mm` (`for_loop` is the automatic fallback below SM90, so every ezpz
-MoE run on Polaris A100s). It raises instead if the config explicitly asks
-for `optim.enable_cuda_graph` or `training.cuda_graph_per_accumulation_group`.
-Dense FSDP and `grouped_mm` MoE keep capture. Unit tests:
-`tests/test_cuda_graph_guard.py`.
+MoE run on Polaris A100s), or the device is XPU (ezpz XPU graphs stay opt-in
+through `EZPZ_XPU_GRAPHS=1`). It raises instead if the config explicitly asks
+for `optim.enable_accelerator_graph` or
+`training.accelerator_graph_per_microbatch_group`. Dense FSDP and `grouped_mm`
+MoE keep capture. Unit tests: `tests/test_accelerator_graph_guard.py`.
 
 Polaris job `7839729`, same tree plus the fix, CUDA graphs left on
 (`SMOKE_CUDA_GRAPHS=1`):
@@ -57,4 +65,4 @@ Polaris job `7839729`, same tree plus the fix, CUDA graphs left on
 
 Losses match the eager run `7839481`.
 
-`--training.disable-cuda-graphs` still forces eager everywhere.
+`--training.disable-accelerator-graphs` still forces eager everywhere.

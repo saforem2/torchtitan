@@ -129,9 +129,9 @@ def test_ezpz_engine_installs_xpu_graph_wrapper(monkeypatch):
         sdc_replayer=None,
         dist_moe_runtime=None,
         training=SimpleNamespace(
-            disable_cuda_graphs=True,
+            disable_accelerator_graphs=True,
             preprocess_microbatch_groups_lazily=False,
-            cuda_graph_per_accumulation_group=False,
+            accelerator_graph_per_microbatch_group=False,
         ),
         debug=SimpleNamespace(spmd_typechecking=False),
         parallelism=SimpleNamespace(
@@ -164,9 +164,9 @@ def test_ezpz_engine_composes_native_ddp_with_post_modelspec_context(monkeypatch
         sdc_replayer=None,
         dist_moe_runtime=None,
         training=SimpleNamespace(
-            disable_cuda_graphs=True,
+            disable_accelerator_graphs=True,
             preprocess_microbatch_groups_lazily=False,
-            cuda_graph_per_accumulation_group=False,
+            accelerator_graph_per_microbatch_group=False,
         ),
         debug=SimpleNamespace(spmd_typechecking=False),
         parallelism=SimpleNamespace(

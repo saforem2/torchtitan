@@ -247,7 +247,7 @@ def _trajectory_fingerprint(trainer: FaultTolerantTrainer) -> str:
         "dataloader_config": _stable_config_value(config.dataloader),
         "microbatch_tokens": config.training.num_tokens_per_microbatch_per_dp_rank,
         "train_step_tokens": config.training.num_tokens_per_train_step,
-        "context_length": config.training.max_context_length,
+        "context_length": config.model.max_context_length,
         "parallelism": _stable_config_value(config.parallelism),
     }
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
@@ -533,7 +533,7 @@ def run_lr_finder(trainer: FaultTolerantTrainer) -> None:
         hostname = os.environ.get("HOSTNAME", "unknown")
         world_size = int(os.environ.get("WORLD_SIZE", "1"))
         global_batch_size = trainer.config.training.num_tokens_per_train_step
-        seq_len = trainer.config.training.max_context_length
+        seq_len = trainer.config.model.max_context_length
 
         # Publish a complete per-run CSV atomically. A retry after interruption
         # replaces this logical run instead of appending duplicate rows.

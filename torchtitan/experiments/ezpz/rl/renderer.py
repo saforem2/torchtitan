@@ -27,6 +27,8 @@ from typing import cast
 
 from renderers import create_renderer, Renderer
 
+from torchtitan.components.data.multimodal.vision_processor import VisionProcessor
+
 from torchtitan.components.renderer import (
     from_renderers,
     RendererConfig,
@@ -74,7 +76,9 @@ class HFTemplateTokenizerWrapper(RendererTokenizerWrapper):
 
 
 def _build_renderer(
-    config: RendererConfig, tokenizer: HuggingFaceTokenizer
+    config: RendererConfig,
+    tokenizer: HuggingFaceTokenizer,
+    vision_processor: VisionProcessor | None = None,
 ) -> Renderer:
     """Build ``config``, allowing the Hugging Face default renderer."""
     if (
@@ -85,7 +89,7 @@ def _build_renderer(
             tokenizer=HFTemplateTokenizerWrapper(tokenizer),
             config=config.renderers_config,
         )
-    return config.build(tokenizer=tokenizer)
+    return config.build(tokenizer=tokenizer, vision_processor=vision_processor)
 
 
 class _RendererWithExtraStopTokens:
@@ -116,12 +120,18 @@ class ExtraStopTokensRendererConfig(RendererConfig):
     renderer: RendererConfig
     extra_stop_token_ids: tuple[int, ...]
 
-    def build(self, *, tokenizer: HuggingFaceTokenizer) -> Renderer:
+    def build(
+        self,
+        *,
+        tokenizer: HuggingFaceTokenizer,
+        vision_processor: VisionProcessor | None = None,
+    ) -> Renderer:
         # The wrapper delegates the renderer protocol through __getattr__.
         return cast(
             Renderer,
             _RendererWithExtraStopTokens(
-                _build_renderer(self.renderer, tokenizer), self.extra_stop_token_ids
+                _build_renderer(self.renderer, tokenizer, vision_processor),
+                self.extra_stop_token_ids,
             ),
         )
 

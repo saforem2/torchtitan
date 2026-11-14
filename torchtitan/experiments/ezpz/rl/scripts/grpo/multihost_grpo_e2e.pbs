@@ -1,0 +1,164 @@
+#!/bin/bash --login
+#PBS -N rl-grpo-e2e
+#PBS -l select=2
+#PBS -l walltime=00:50:00
+#PBS -j oe
+# Two-host Monarch GRPO end to end on the upstream RL stack: trainer on host 0,
+# vLLM generator on host 1, TorchStore weight sync every step. AGPT-2B LoRA on
+# GSM8K, 3 steps by default. Runs on Aurora and Sunspot (XPU) and on Sirius
+# and Polaris (CUDA); the host prefix picks the device settings.
+#
+# Submit from the torchtitan checkout. Account, queue and filesystems differ
+# per machine, so they go on the qsub line:
+#
+#   qsub -A AuroraGPT -q debug-scaling -l filesystems=flare:home \
+#     -v V=/path/to/rl-venv,CKPT=/path/to/agpt2b-hf-checkpoint \
+#     torchtitan/experiments/ezpz/rl/scripts/grpo/multihost_grpo_e2e.pbs
+#
+# Required: V (RL venv), CKPT (HF checkpoint dir).
+# Optional: OUT (default $WT/outputs/rl-grpo-e2e-<jobid>), STEPS (3),
+#   EXPECTED_COMMIT (fail unless HEAD matches), RUN_UNIT_TESTS=1 (gate on
+#   UNIT_TESTS_GATE, default test_xpu_compat.py, then log all RL CPU tests), TORCHTITAN_TORCHSTORE_TRANSPORT (default: auto on
+#   XPU, gloo on CUDA), LAUNCH_TIMEOUT (seconds, 2400).
+#
+# Venvs: XPU needs vllm-xpu-kernels built for PVC without the Xe2-only kernels
+# (build_vllm_xpu_kernels_pvc.pbs) and torchvision (vLLM's warmup imports it;
+# docs/upstream-sync.md, 2026-11-12 entry). CUDA uses upstream's
+# scripts/install_rl_env.sh. After an actor fails, the controller can hang
+# until LAUNCH_TIMEOUT; read the first traceback, not the exit code.
+set -uo pipefail
+
+WT="${PBS_O_WORKDIR:-$(pwd)}"
+: "${V:?submit with -v V=/path/to/rl-venv}"
+: "${CKPT:?submit with -v CKPT=/path/to/hf-checkpoint}"
+JOB="${PBS_JOBID%%.*}"
+OUT="${OUT:-$WT/outputs/rl-grpo-e2e-$JOB}"
+STEPS="${STEPS:-3}"
+LAUNCH_TIMEOUT="${LAUNCH_TIMEOUT:-2400}"
+
+cd "$WT" || exit 11
+[[ -d torchtitan ]] || { echo "FATAL: $WT is not a torchtitan checkout"; exit 11; }
+commit=$(git rev-parse HEAD)
+dirty=$(git status --porcelain --untracked-files=no | wc -l)
+echo "COMMIT $commit dirty=$dirty"
+if [[ -n "${EXPECTED_COMMIT:-}" && "$commit" != "$EXPECTED_COMMIT" ]]; then
+  echo "FATAL: commit mismatch expected=$EXPECTED_COMMIT actual=$commit"
+  exit 15
+fi
+
+# shellcheck source=torchtitan/experiments/ezpz/scripts/load_pinned_ezpz_utils.sh
+source "$WT/torchtitan/experiments/ezpz/scripts/load_pinned_ezpz_utils.sh"
+{ load_pinned_ezpz_utils && ezpz_setup_job && ezpz_load_modules; } >/dev/null 2>&1 \
+  || { echo "SETUP_FAILED"; exit 13; }
+cd "$WT" || exit 11
+
+head_node=$(head -1 "$PBS_NODEFILE")
+case "$(hostname -s)" in
+  x1* | x4*) DEVICE=xpu ;;
+  x3*) DEVICE=cuda ;;
+  *) echo "FATAL: unknown host $(hostname -s)"; exit 16 ;;
+esac
+echo "DEVICE $DEVICE head=$head_node"
+
+mkdir -p "$OUT"
+unset PYTHONHOME
+export VIRTUAL_ENV="$V" PATH="$V/bin:/opt/pbs/bin:$PATH"
+export PYTHONPATH="$WT${PYTHONPATH:+:$PYTHONPATH}"
+export WANDB_MODE=disabled HF_DATASETS_OFFLINE=1 HF_HUB_OFFLINE=1
+export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
+export TORCHINDUCTOR_CACHE_DIR="/tmp/${USER}-rl-e2e-inductor"
+export TRITON_CACHE_DIR="/tmp/${USER}-rl-e2e-triton"
+export HYPERACTOR_MESH_ATTACH_CONFIG_TIMEOUT="${HYPERACTOR_MESH_ATTACH_CONFIG_TIMEOUT:-300s}"
+export HYPERACTOR_MESH_ENABLE_LOG_FORWARDING=1 HYPERACTOR_MESH_TAIL_LOG_LINES=200
+# TorchStore treats a host as local when HOSTNAME matches; PBS exports the
+# head node's name to every host.
+unset HOSTNAME
+
+if [[ "$DEVICE" == xpu ]]; then
+  # The venv's SYCL/UR libraries must win over the module's before torch
+  # loads (urGraphGetIdExp otherwise). Shared FS: host 1 needs the same path.
+  ldf="$OUT/ld-first"
+  mkdir -p "$ldf"
+  for lib in "$V"/lib/libur_* "$V"/lib/libsycl.so* "$V"/lib/libumf* "$V"/lib/libtcm*; do
+    [[ -e "$lib" ]] && ln -sf "$lib" "$ldf/"
+  done
+  export LD_LIBRARY_PATH="$ldf:${LD_LIBRARY_PATH:-}"
+  export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+  export TORCHINDUCTOR_MAX_AUTOTUNE=0 VLLM_ENABLE_V1_MULTIPROCESSING=1
+  unset CCL_OP_SYNC CCL_OFI_PROVIDER
+  export CCL_PROCESS_LAUNCHER=none CCL_ATL_TRANSPORT=ofi FI_PROVIDER=tcp
+  export CCL_KVS_IP_PORT="${head_node}_$((29500 + JOB % 1000))"
+  [[ -n "${TORCHTITAN_TORCHSTORE_TRANSPORT:-}" ]] || unset TORCHTITAN_TORCHSTORE_TRANSPORT
+else
+  export MPICH_GPU_SUPPORT_ENABLED=0 PALS_TRANSFER=0
+  # mpi4py wheels link libmpi.so.12; Cray MPICH ships libmpi.so.
+  if [[ -n "${CRAY_MPICH_DIR:-}" && -e "$CRAY_MPICH_DIR/lib/libmpi.so" ]]; then
+    mkdir -p "$OUT/mpi-abi"
+    ln -sfn "$CRAY_MPICH_DIR/lib/libmpi.so" "$OUT/mpi-abi/libmpi.so.12"
+    export LD_LIBRARY_PATH="$OUT/mpi-abi:${LD_LIBRARY_PATH:-}"
+  fi
+  # The PrgEnv module sets CC to nvc, which cannot build Triton's driver stub.
+  export CC=/usr/bin/gcc CXX=/usr/bin/g++
+  export TORCHTITAN_TORCHSTORE_TRANSPORT="${TORCHTITAN_TORCHSTORE_TRANSPORT:-gloo}"
+fi
+
+# vLLM falls back to UnspecifiedPlatform when its device extension fails to
+# import, and only fails much later in DeviceConfig. Check both hosts first.
+mpiexec -n 2 -ppn 1 --cpu-bind none "$V/bin/python" -c '
+import socket, torch
+from vllm.platforms import current_platform
+dev = getattr(torch, "xpu", None)
+n = dev.device_count() if dev is not None and dev.is_available() else torch.cuda.device_count()
+print("PROBE", socket.gethostname(), "devices", n, "vllm_platform",
+      type(current_platform).__name__, repr(current_platform.device_type), flush=True)
+' > "$OUT/probe.log" 2>&1
+grep -E "PROBE|Error" "$OUT/probe.log"
+if [[ $(grep "^PROBE" "$OUT/probe.log" | grep -vc "vllm_platform UnspecifiedPlatform") -ne 2 ]]; then
+  echo "FATAL: vLLM found no accelerator on one or both hosts (see $OUT/probe.log)"
+  exit 17
+fi
+
+if [[ "${RUN_UNIT_TESTS:-0}" == 1 ]]; then
+  "$V/bin/python" -c "import pytest" 2>/dev/null \
+    || { echo "FATAL: RUN_UNIT_TESTS=1 but pytest is not installed in $V"; exit 18; }
+  # Gate on the ezpz XPU/vLLM compatibility tests. Some upstream RL tests do
+  # not import against the XPU vLLM build, so the full directory runs after,
+  # for the log only.
+  "$V/bin/python" -m pytest -q -p no:cacheprovider --basetemp="$OUT/pytest" \
+    "${UNIT_TESTS_GATE:-tests/rl/unit_tests/cpu/test_xpu_compat.py}" \
+    >"$OUT/unit-tests-gate.log" 2>&1
+  ut_rc=$?
+  echo "UNIT_TESTS gate rc=$ut_rc $(tail -1 "$OUT/unit-tests-gate.log")"
+  [[ "$ut_rc" -eq 0 ]] || { tail -30 "$OUT/unit-tests-gate.log"; exit 18; }
+  "$V/bin/python" -m pytest -q -p no:cacheprovider --basetemp="$OUT/pytest-all" \
+    --continue-on-collection-errors tests/rl/unit_tests/cpu \
+    >"$OUT/unit-tests-all.log" 2>&1
+  echo "UNIT_TESTS all rc=$? $(tail -1 "$OUT/unit-tests-all.log") (log: $OUT/unit-tests-all.log)"
+fi
+
+store="$OUT/multihost.store"
+rm -f "$store"
+port=$((35000 + JOB % 20000))
+echo "E2E_START $(date -Is)"
+"$V/bin/python" -c "from ezpz.cli import main; main()" launch -n 2 -ppn 1 \
+  --cpu-bind none --timeout "$LAUNCH_TIMEOUT" -- \
+  python -u torchtitan/experiments/ezpz/rl/scripts/grpo/multihost_train_upstream.py \
+  --multihost-store "$store" --multihost-port "$port" --multihost-world-size 2 \
+  --module torchtitan.experiments.ezpz.rl.reason_agpt \
+  --config rl_grpo_lora_agpt_2b_gsm8k_b2smoke \
+  --hf_assets_path="$CKPT" --dump_folder="$OUT/run" \
+  --async-loop.num-training-steps="$STEPS" \
+  --async-loop.num-prompts-per-train-step=4 \
+  --async-loop.num-samples-per-prompt=4 \
+  --async-loop.target-offpolicy-steps=0 \
+  --async-loop.validation.steps=8 \
+  --async-loop.batcher.training-sample-builder.no-drop-zero-std-reward-groups \
+  --generator.sampling.max-tokens=700 \
+  --generator.parallelism.data-parallel-degree=1 \
+  --generator.parallelism.tensor-parallel-degree=1 \
+  --trainer.parallelism.data-parallel-shard-degree=1 \
+  --trainer.parallelism.tensor-parallel-degree=1 \
+  --trainer.checkpointer.interval=1
+rc=$?
+echo "E2E_DONE rc=$rc $(date -Is)"
+exit "$rc"

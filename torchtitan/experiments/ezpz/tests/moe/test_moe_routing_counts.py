@@ -125,16 +125,12 @@ class TestMoERoutingCounts(unittest.TestCase):
         expert_ids = torch.tensor([[0, 4], [1, 4], [1, 3], [4, 0]])
         scores = torch.ones(4, 2)
 
-        # dispatch() no longer derives the per-expert counts: sync 84 made
-        # num_local_tokens_per_expert_E a required argument (both core's and
-        # ezpz's signatures match). Compute it here, which is what the caller
-        # does in production, and keep asserting on what dispatch returns.
-        num_local_tokens_per_expert_E = torch.bincount(
-            expert_ids.flatten(), minlength=5
+        # #5516: dispatch() takes the router's one-hot (T, E) routing map and
+        # derives the per-expert counts itself; assert on what it returns.
+        routing_map_TE = torch.zeros(4, 5, dtype=torch.bool).scatter_(
+            1, expert_ids, True
         )
-        _, counts, _ = dispatcher.dispatch(
-            x, scores, expert_ids, num_local_tokens_per_expert_E
-        )
+        _, counts, _ = dispatcher.dispatch(x, scores, expert_ids, routing_map_TE)
 
         self.assertEqual(counts.dtype, torch.int64)
         torch.testing.assert_close(counts, torch.tensor([2, 2, 0, 1, 3]))

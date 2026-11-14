@@ -39,7 +39,7 @@ timeout "${WALLTIME_SEC:-14400}" "$PY" -u -m torchtitan.experiments.ezpz.rl.trai
     --config "$CONFIG" \
     --hf_assets_path="$CKPT" \
     --dump_folder="$DUMP" \
-    --async-loop.training-sample-builder.no-drop-zero-std-reward-groups \
+    --async-loop.batcher.training-sample-builder.no-drop-zero-std-reward-groups \
     --trainer.parallelism.data-parallel-shard-degree=1 \
     --generator.parallelism.data-parallel-degree=1 \
     --generator.parallelism.tensor-parallel-degree=1 \

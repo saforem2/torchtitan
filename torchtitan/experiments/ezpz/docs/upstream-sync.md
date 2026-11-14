@@ -1,5 +1,200 @@
 # Upstream Sync Log
 
+## 2026-11-12: upstream `8e63247c`, 282 commits
+
+Merge of `pytorch/torchtitan` `main` at `8e63247c` into `ezpz` `959b851a` (all fork
+PRs from the pre-sync gate below landed first). Merge base `5a7a622f16`.
+
+### Conflicts
+
+8 files. `models/common/attn_gym.py` and `test_optional_imports.py` take upstream
+(#76's copies were a stopgap for the same fix). `models/base/state_dict_adapter.py`,
+`test_state_dict_adapter.py`, `rl/generator/vllm/worker.py` and
+`torchft/tests/test_torchft_trainer.py` keep both sides. `rl/train.py` and
+`rl/controller/controller.py` take upstream, which moved provisioning and TorchStore
+setup into `rl/actors/monarch/`; the ezpz `repair_hostname_env()` call and TorchStore
+transport override moved to `provisioning.py` and `system.py`.
+
+### Ported upstream changes
+
+| Upstream (PR) | ezpz port |
+|---|---|
+| `cuda_graph.py` -> `accelerator_graph.py`, capture on any `torch.accelerator.Graph` device (#5353) | guard uses the new names; upstream capture stays off on XPU, where ezpz's opt-in `EZPZ_XPU_GRAPHS=1` wrapper owns capture |
+| dtypes -> root `PrecisionConfig`, CPU offload -> `parallelism` (#5776) | `parallelize_*`, native DDP validation and registries read `precision.*` |
+| `training.max_context_length` -> `model.max_context_length` (#5779) | `set_max_context_length()` resizes model and RoPE; MoE factories that swap the model template keep the length |
+| `local_compile_regions` -> `LocalCompileConfig` (#5463) | `parallelize_*` take `local_compile` |
+| metric exporters -> `MetricsProcessor.Config.loggers` (#5775) | registries set `loggers=[WandBLogger.Config()]` |
+| `BaseLoss` -> `Loss` (#4582) | z-loss on `Loss[Tensor]` |
+| per-batch FLOPs estimator (#4819) | MoE FLOPs override removed; trainer passes `num_flops` |
+| MLA `wkv_b` moved into `MLAAttention` (#4760) | ezpz MoE keeps a flat `attention.wkv_b`, so keys and checkpoints are unchanged |
+| routing map replaces counts (#5516); DeepEP combine drops router scores (#5543) | `EzpzRoutedExperts` takes the map; ezpz backends apply scores |
+| RL rebuilt: `Generator` + engine config, `ActorSystem`, `rollout.message_env` (#5277, #5316, ...) | both AuroraGPT RL registries, `train_upstream.py`, multihost launcher, GRPO launchers |
+
+ezpz cannot take `--model.*` on the CLI (`config_manager.py` keeps the model config
+opaque), and ~50 launchers, PBS seats and JSON configs pass the old names. So
+`EzpzTrainingConfig` and `EzpzMetricsConfig` keep `--training.dtype`,
+`--training.mixed-precision-{param,reduce}`, `--training.max-context-length`,
+`training.enable_cpu_offload` and `--metrics.[no-]enable-{wandb,tensorboard}` as
+one-way aliases: `None` by default, copied to the upstream field in
+`FaultTolerantTrainer.Config.__post_init__`, then reset. Python code uses the upstream
+fields. This is a deliberate divergence from upstream.
+
+### Results
+
+2 nodes, seed `42`, deterministic, `6` steps, against the pre-sync tree.
+
+| Check | Sirius pre `33453` | Sirius post `33466` | Sunspot pre `12483333` | Sunspot post `12483457` |
+|---|---|---|---|---|
+| agpt TP=1 | `10.85438` -> `9.96705` | identical | `10.88101` -> `9.93350` | identical |
+| MoE TP=1 | `12.96243` -> `11.07915` | identical | `12.94051` -> `10.97520` | identical |
+| resume, ZeRO-1 BF16 | diff `0.00412` | diff `0.00412` | diff `0.00406` | diff `0.00406` |
+| local batch 2 | `10.85056` -> `9.74857` | `10.85056` -> `9.74857`, identical | `10.87751` -> `9.86143` | `10.87751` -> `9.86143`, identical |
+| agpt TP=2 | known failure | `redistribute()` rejects `async_op` (`spmd_types` `0.2.0`) | known failure | known failure |
+
+Polaris at the final tip (`0d880d87`, job `7842085`, CUDA graphs on, `spmd_types`
+`0.3.1`) matches pre-sync `7839953` at every step: agpt `10.88036` -> `10.10732`, MoE
+`12.98994` -> `11.06904`, ZeRO-1 resume diff `0.00405`, local batch 2 `10.84177` ->
+`9.79647`; TP=2 reaches the known failure.
+
+Meta-device parameter counts, state-dict keys and shapes are identical pre/post for
+agpt `debugmodel`, `2b`, `2b-rl` and moe `debugmodel`. Of 163 non-RL registry
+factories, 99 build the same config and 20 differ only in an error message's wording;
+44 fail on both trees for missing data or checkpoints on Sirius (25), a
+`TT_CONFIG_JSON` requirement (13) or older code gaps (6). Every ezpz unit-test file
+has the same pass/fail as pre-sync (Sirius `33466`; new upstream test files `test_decoder_loss_kwargs`, `test_mla_remat` and `test_varlen_cp` fail at collection, unchecked).
+
+RL: all 13 AuroraGPT RL factories build, and trainer and generator model configs match
+pre-sync (LoRA rank 8: `1,986,938,880` params, `884,736` trainable). RL unit tests:
+`31` passed, `2` skipped; they failed at collection before the sync. The RL path was
+already broken at `959b851a` (removed `rollout.environment`, moved `Controller`); the
+last passing RL gate is Sunspot `12479177` (2026-09-30). A post-sync RL venv now exists on
+Sunspot, `rl-monarch-torch216-sync-20261112`: torch `2.16.0.dev20261015+xpu`,
+`torchmonarch` `0.7.0` (+ `torchx-nightly`), TorchStore songhappy `xpu-all` @ `3edc47f`,
+vLLM `b46907cce` built for XPU, `vllm-xpu-kernels` `4e38707` (`0.1.16.4.dev0`).
+Monarch GRPO attempts on it (2 nodes, AGPT-2B, GSM8K) found and fixed: torchmonarch 0.7
+dropping `host_mesh_from_store` (`rl/monarch_compat.py`, `StoreJob`), tyro on
+`VllmOtelStatLogger.Config`, the renderer's `vision_processor`, the AGPT adapter's
+quantized-layout kwargs, and vLLM-XPU's missing `PretrainedConfig` re-export.
+Aurora `9087154` then reached generator setup and failed on `PassConfig(enable_sp=...)`:
+vLLM removed the SP pass in `194bd72be`, so `xpu_overrides.py` drops those two fields
+on that vLLM.
+
+Aurora `9087211` and `9088919` got past that and failed in `DeviceConfig`:
+`Device string must not be empty`. vLLM picked `UnspecifiedPlatform` on both hosts,
+outside Monarch too, while `torch.xpu` saw 12 tiles. `vllm/platforms/xpu.py` imports
+`vllm_xpu_kernels._xpu_C`, and that import failed (`9088933`) on
+`undefined symbol: mhc_fused_post_pre`; vLLM treats the failed import as no XPU.
+`vllm-xpu-kernels` `4e38707` adds `-DVLLM_MHC_ENABLED`, `-DVLLM_MQA_LOGITS_ENABLED`
+and `-DVLLM_GDN_ENABLED` whenever those kernel options are on (the default), but
+compiles those kernels only under `VLLM_XPU_ENABLE_XE2`. A PVC build has Xe2 off, so
+`_xpu_C` binds three functions that were never built. The Sunspot wheel had the same
+hole. Rebuilt wheel, `0.1.16.4.dev0+g4e38707.pvconly`, on an Aurora compute node:
+
+```bash
+MHC_KERNELS_ENABLED=0 MQA_LOGITS_KERNELS_ENABLED=0 GDN_KERNELS_ENABLED=0 \
+VLLM_XPU_ENABLE_XE2=0 VLLM_XPU_ENABLE_XE3P=0 VLLM_XPU_ENABLE_XE_DEFAULT=1 \
+VLLM_XPU_AOT_DEVICES=pvc VLLM_XPU_XE2_AOT_DEVICES=pvc MAX_JOBS=96 \
+python setup.py bdist_wheel
+```
+
+AGPT uses none of the three kernels. `VLLM_XPU_AOT_DEVICES=pvc` is needed too: the
+default list includes `bmg-g31-a0`, which the compute-node `ocloc` rejects
+(`9088980`). Build-time pitfalls: the venv's SYCL/UR libs must be first on
+`LD_LIBRARY_PATH` before `import torch` (`urGraphGetIdExp`), and a source tree copied
+from another machine must drop `.deps/*-subbuild` and `.deps/*-build`, whose CMake
+caches keep the old absolute paths. With the rebuilt wheel all five extensions import
+and vLLM reports `XPUPlatform` (`9089010`). It is installed in the Aurora and Sunspot
+`rl-monarch-torch216-sync-20261112` venvs; the old wheel is kept beside each.
+`rl/scripts/build_vllm_xpu_kernels_pvc.pbs` is that build as a job.
+
+The next blocker was upstream's own vLLM floor: `rl/generator/vllm/attention/mla.py`
+imports `vllm.utils.torch_utils.is_quantized_kv_cache`, which `b46907cce` predates, and
+`model_wrapper.py` imports that module for every model (Sunspot `12483730`, Aurora
+`9089026`). `xpu_overrides.py` adds the pinned vLLM's definition when it is missing.
+A static check of all 102 `vllm` imports under `torchtitan/rl` and
+`experiments/ezpz/rl` against `b46907cce` found no other gaps.
+
+Last, vLLM's kernel warmup imports its Qwen3-VL module for every model, and that needs
+`torchvision` (Sunspot `12483737`). Upstream's CUDA installer brings it in; the XPU venvs
+lacked it. The XPU nightly index has no `torchvision` for torch `20261015`, so both venvs
+have `torchvision==0.30.0.dev20261007+xpu` installed with `--no-deps`. On an Aurora
+compute node it imports, runs `ops.nms`, and serves vLLM's `qwen3_vl` import
+(`9089110`).
+
+`rl/scripts/grpo/multihost_grpo_e2e.pbs` is the two-host GRPO smoke for all four
+machines. It checks that vLLM picks an accelerator on both hosts before launching.
+
+Monarch GRPO trains on XPU, both machines, `3f34e7143`, same recipe as Sirius, exit `0`:
+
+| Step | Sunspot `12483743` loss | reward | Aurora `9089138` loss | reward |
+|---|---|---|---|---|
+| 1 | `0.024` | `0.47` | `0.017` | `0.47` |
+| 2 | `0.054` | `0.52` | `0.082` | `0.46` |
+| 3 | `0.093` | `0.42` | `0.11` | `0.48` |
+
+Wall time `851` s (Sunspot) and `1150` s (Aurora). Validation response length `117.9`
+at steps 0 and 3 on both, the same as Sirius; checkpoints step-1..3. Grad norm
+`0.37`-`0.48`; max trainer/generator logprob difference `0.0077`-`0.011`. The XPU compat
+tests pass on both machines (`8`/`8`). TorchStore (automatic policy: Gloo across hosts)
+moved weights at setup and after each step: trainer push `4.5` s then `0.07`-`0.14` s,
+generator fetch `72`-`75` s, load `0.2` s, identical on both machines. The fetch never
+blocked a step (`blocking_generator_pull` ratio ~`0`), but it is ~19x the CUDA Gloo
+fetch (`3.9` s).
+
+The same Monarch GRPO path trains on CUDA. Sirius `33518`, 2 A100 nodes (trainer on
+host 0, vLLM generator on host 1), AGPT-2B LoRA, GSM8K, 3 steps, exit `0`:
+
+| Step | loss | rollout reward |
+|---|---|---|
+| 1 | `0.0022` | `0.43` |
+| 2 | `-0.037` | `0.54` |
+| 3 | `0.062` | `0.44` |
+
+TorchStore (Gloo) moved the weights each step: trainer push `2.5`-`2.7` s, generator
+fetch `3.9` s and load `0.35` s, policy versions up to `3` (`33515`). Step 1 takes
+about 17 minutes (first compile), steps 2 and 3 about 30 s. The venv is upstream's
+`scripts/install_rl_env.sh --cuda cu132` (torch `2.16.0.dev20261107+cu132`, vLLM
+`1.0.0.dev20261107+cu132`, TorchStore `804ae43`) plus ezpz's own dependencies; it runs
+on driver `580`. Fixes it needed, all under `experiments/ezpz/`:
+
+- `rl/monarch_compat.py`: Polaris and Sirius `*.hsn` names have one A record per NIC.
+  The worker bound one and the client dialed the other ("never connected"). Workers
+  now advertise the lowest bindable IP when the name has several.
+- `ezpz/__init__.py`, `rl/train_upstream.py`, `rl/xpu_overrides.py`: `import ezpz`
+  runs `MPI_Init` on `x3*` hosts. In Monarch-spawned actors that aborted (exit `15`)
+  or hung. On CUDA, actors get `EZPZ_NO_MPI_INIT=1`, which turns off
+  `mpi4py.rc.initialize`, and `CUDA_VISIBLE_DEVICES` from the provisioner.
+- `rl/scripts/grpo/multihost_train_upstream.py`: rank 1 exits through `os._exit` like
+  rank 0; its `MPI_Finalize` against the departed peer turned success into exit `143`.
+
+Job environment, not code: `CC=/usr/bin/gcc` (the PrgEnv `nvc` cannot build Triton's
+driver stub), `TORCHTITAN_TORCHSTORE_TRANSPORT=gloo`, `unset HOSTNAME`.
+
+### Behaviour changes
+
+- RL precision is `PrecisionConfig(dtype="float32", param_dtype="float32")`: the
+  generator now runs in `param_dtype`, and keeping fp32 generation moves the trainer
+  forward from bf16 to fp32. `top_p` is `1.0`; upstream rejects `< 1`. The next RL run
+  is a new baseline.
+- W&B: upstream makes logger start-up failures fatal and stops passing `step=`
+  (#5903). `EzpzWandBLogger` (`ezpz/wandb_logger.py`) keeps the pre-sync behaviour: a
+  failed `wandb.init` logs one warning and training continues, and `_step` is the
+  training step, which `utils/wandb_fetch.py` and the production plots key on. Sirius
+  `33467`: pre-sync and post-sync runs log the same 6 rows, losses and keys (plus
+  `trainer/step`); with W&B forced to fail the run finishes with the same losses.
+- MoE MFU uses upstream's FLOPs accounting.
+
+### Known failures the next sync inherits
+
+- **TP>1** needs `spmd_types==0.3.1`; with `0.2.0`, `redistribute()` rejects `async_op`.
+  The Sunspot, Sirius and Polaris sync venvs were upgraded on 2026-11-12 (Aurora already
+  had it). TP=2 then reaches the old known failure.
+- TP=2 sequence sharding, XPU FSDP hang after step 7, MoE EP and flex attention: still
+  open from the entries below.
+- Already broken before this sync and left alone: `lr_finder` trainer attributes,
+  `EzpzValidator`'s PP branch, `moe/agpt_hf_state_dict_adapter.py`'s
+  `torchtitan.models.utils` import, `rl/xpu_trial/`.
+
 ## 2026-11-11: pre-sync gate, `ezpz` `b9dd4eb7`, 274 commits behind upstream
 
 No merge yet. `origin/ezpz` at `b9dd4eb7` is 274 commits behind

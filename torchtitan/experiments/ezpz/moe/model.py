@@ -11,30 +11,26 @@ import spmd_types as spmd
 import torch
 import torch.nn.functional as F
 import torch_remat as remat
-from torch import nn
+
+from torchtitan.distributed.local_compile import LocalCompileConfig
 
 from torchtitan.experiments.ezpz.logging import logger, warn_once
 
 from torchtitan.models.common.attention import (
+    Attention as _BaseAttention,
     FlexAttentionMetadata,
-    GQAttention,
+    InnerAttention,
     VarlenAttentionMetadata,
 )
 from torchtitan.models.common.decoder import Decoder
-from torchtitan.models.common.flops import (
-    get_nparams_and_active_nparams,
-    quadratic_attention_flops_per_token,
-)
-from torchtitan.models.common.linear import maybe_gather_tp_input
+from torchtitan.models.common.linear import Linear, maybe_gather_tp_input
 from torchtitan.models.common.moe import MoE
 from torchtitan.models.common.moe.token_dispatcher import (
     DeepEPTokenDispatcher,
     HybridEPTokenDispatcher,
 )
-from torchtitan.models.deepseek_v3.model import (
-    DeepSeekMLAAttention,
-    DeepSeekV3TransformerBlock,
-)
+from torchtitan.models.deepseek_v3.attention import DeepSeekMLAAttention
+from torchtitan.models.deepseek_v3.model import DeepSeekV3TransformerBlock
 from torchtitan.tools.utils import has_cuda_capability
 
 
@@ -63,15 +59,64 @@ def _maybe_release_device_cache_between_attention_and_moe(x: torch.Tensor) -> No
 class Attention(DeepSeekMLAAttention):
     """Multi-head latent attention (MLA) with the XPU SDPA value-padding fix.
 
-    Upstream's :class:`DeepSeekMLAAttention` is reused for structure, config
-    and sharding. Only ``forward`` differs: the XPU SDPA math backend returns
-    the Q/K head dimension instead of V's when they differ, so V is padded up to
-    the Q/K head dimension and the output sliced back (see the NOTE below).
+    Upstream's :class:`DeepSeekMLAAttention` is reused for its config fields,
+    softmax scale and FLOPs. ``forward`` differs: the XPU SDPA math backend
+    returns the Q/K head dimension instead of V's when they differ, so V is
+    padded up to the Q/K head dimension and the output sliced back (see the
+    NOTE below).
+
+    The KV up-projection stays a direct child, ``attention.wkv_b``, with a
+    plain inner attention (SDPA/flex). Upstream moved ``wkv_b`` into an
+    ``MLAAttention`` inner backend (#4760, FQN
+    ``attention.inner_attention.wkv_b``) so CP backends can gather the compact
+    latent; ezpz MoE runs no MLA context parallelism, and keeping the flat
+    layout keeps existing ezpz MoE checkpoints, the state-dict keys and the
+    parameter-init order unchanged.
     """
 
     @dataclass(kw_only=True, slots=True)
     class Config(DeepSeekMLAAttention.Config):
-        pass
+        wkv_b: Linear.Config
+        """KV up-projection, ``kv_lora_rank -> n_heads * (qk_nope + v)``."""
+
+        inner_attention: InnerAttention.Config  # pyrefly: ignore[bad-override]
+        """Plain inner attention over materialized Q/K/V (not ``MLAAttention``)."""
+
+        def __post_init__(self) -> None:
+            # Skip DeepSeekMLAAttention's MLAAttention-backend check.
+            _BaseAttention.Config.__post_init__(self)
+
+    def __init__(self, config: Config):
+        # Same child order as the pre-#4760 DeepSeekMLAAttention, so parameter
+        # initialization consumes the RNG in the same order.
+        _BaseAttention.__init__(self)
+        self.dim = config.dim
+        self.n_heads = config.n_heads
+        self.q_lora_rank = config.q_lora_rank
+        self.kv_lora_rank = config.kv_lora_rank
+        self.qk_nope_head_dim = config.qk_nope_head_dim
+        self.qk_rope_head_dim = config.qk_rope_head_dim
+        self.qk_head_dim = config.qk_nope_head_dim + config.qk_rope_head_dim
+        self.v_head_dim = config.v_head_dim
+
+        if self.q_lora_rank == 0:
+            assert config.wq is not None, "wq is required when q_lora_rank == 0"
+            self.wq = config.wq.build()
+        else:
+            assert (
+                config.wq_a is not None and config.wq_b is not None
+            ), "wq_a and wq_b are required when q_lora_rank > 0"
+            self.wq_a = config.wq_a.build()
+            self.q_norm = config.q_norm.build()
+            self.wq_b = config.wq_b.build()
+
+        self.wkv_a = config.wkv_a.build()
+        self.kv_norm = config.kv_norm.build()
+        self.wkv_b = config.wkv_b.build()
+        self.wo = config.wo.build()
+        self.softmax_scale = config.softmax_scale
+        self.inner_attention = config.inner_attention.build()
+        self.rope = config.rope.build()
 
     def forward(
         self,
@@ -218,13 +263,15 @@ class moeModel(Decoder):  # noqa: N801
     class Config(Decoder.Config):
         dim: int = 2048
         vocab_size: int = 102400
-        local_compile_regions: list[str] = field(
-            default_factory=lambda: [
-                "loss",
-                "fused_binary_activation",
-                "fp32_to_bf16_split",
-                "moe_aux_loss",
-            ]
+        local_compile: LocalCompileConfig = field(
+            default_factory=lambda: LocalCompileConfig(
+                regions=[
+                    "loss",
+                    "fused_binary_activation",
+                    "fp32_to_bf16_split",
+                    "moe_aux_loss",
+                ]
+            )
         )
 
         def __post_init__(self) -> None:
@@ -304,49 +351,6 @@ class moeModel(Decoder):  # noqa: N801
                 enable_sp=parallelism.enable_sequence_parallel,
                 enable_ep=parallelism.expert_parallel_degree > 1,
             )
-
-        def get_nparams_and_flops(
-            self, model: nn.Module, seq_len: int
-        ) -> tuple[int, int]:
-            # Upstream #4300 removed get_moe_model_nparams_and_flops. Its
-            # replacement returns (nparams, ACTIVE nparams) and no longer
-            # computes flops, so the attention term is summed here and the
-            # 6*N matmul term applied explicitly. Mirrors
-            # models/deepseek_v3/model.py:get_deepseek_v3_nparams_and_flops,
-            # minus its MTP lm_head term -- this decoder has no mtp_layers.
-            #
-            # Per-layer rather than layers[0] x depth: the old helper took a
-            # single head count for the whole model, which is only correct
-            # when every layer's attention is identical. Summing per layer
-            # costs nothing and does not silently mismeasure a mixed stack.
-            nparams, active_nparams = get_nparams_and_active_nparams(model)
-
-            attention_op_flops = 0
-            for layer in self.layers:
-                attention = layer.attention
-                if isinstance(attention, Attention.Config):
-                    qk_head_dim = (
-                        attention.qk_nope_head_dim + attention.qk_rope_head_dim
-                    )
-                    v_head_dim = attention.v_head_dim
-                elif isinstance(attention, GQAttention.Config):
-                    qk_head_dim = attention.head_dim or (
-                        attention.dim // attention.n_heads
-                    )
-                    v_head_dim = qk_head_dim
-                else:
-                    raise TypeError(
-                        "MoE FLOP accounting requires MLA Attention.Config or "
-                        f"GQAttention.Config; got {type(attention).__name__}"
-                    )
-                attention_op_flops += quadratic_attention_flops_per_token(
-                    num_heads=attention.n_heads,
-                    qk_head_dim=qk_head_dim,
-                    v_head_dim=v_head_dim,
-                    seq_len=seq_len,
-                )
-
-            return nparams, 6 * active_nparams + attention_op_flops
 
 
 # Imported after moeModel is defined because the adapter annotates its config.

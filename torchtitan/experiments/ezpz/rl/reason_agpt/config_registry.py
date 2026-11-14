@@ -22,9 +22,10 @@ Invoke via the arbitrary-dotted-path ``--module`` branch of the ConfigManager:
 
 Validated knobs baked in (from the alphabet_sort_agpt 3-way study + the CoT plan's
 "copy the XPU knobs verbatim" list):
-  - fp32 generation (``generator.model_dtype="float32"``): THE fix -- agpt-2b
-    through vLLM in bf16 emits gibberish (large vocab/ffn -> rounding flips greedy
-    argmax).
+  - fp32 generation: THE fix -- agpt-2b through vLLM in bf16 emits gibberish
+    (large vocab/ffn -> rounding flips greedy argmax). Was
+    ``generator.model_dtype="float32"``; the generator now mirrors
+    ``precision.param_dtype`` (#5776), so ``AGPT_RL_PRECISION`` sets it to float32.
   - LoRA (``target_modules=["wqkv","wo"]``, ``alpha=2*rank``) + ``LMHeadCastConverter``
     fp32 head (RL logprob/KL math needs fp32 logits).
   - the ``2b-rl`` fused-QKV flavor (vocab 256000).
@@ -46,13 +47,12 @@ classified as truncated with zero reward. ``enable_thinking`` remains off (the
 gemma/"auto" renderer has no reasoning channel -- reasoning is prompt-driven
 and regex-scored, per the CoT plan).
 
-Also pass ``--async-loop.training-sample-builder.no-drop-zero-std-reward-groups``
+Also pass ``--async-loop.batcher.training-sample-builder.no-drop-zero-std-reward-groups``
 on the CLI so all-zero-reward cold-start groups still assemble a batch.
 """
 
 from __future__ import annotations
 
-import torch
 from renderers import DefaultRendererConfig
 
 from torchtitan.components.checkpointer import CheckpointManager
@@ -63,7 +63,12 @@ from torchtitan.components.renderer import from_renderers
 from torchtitan.config import TrainingConfig
 from torchtitan.config.parallelism import ParallelismConfig
 from torchtitan.experiments.ezpz.optimizer.containers import default_adamw
-from torchtitan.experiments.ezpz.rl.model_configs import agpt_rl_model_configs
+from torchtitan.experiments.ezpz.rl.actors.ezpz_generator import xpu_vllm_engine_config
+from torchtitan.experiments.ezpz.rl.model_configs import (
+    agpt_rl_model_configs,
+    AGPT_RL_PRECISION,
+    disable_flex_max_autotune,
+)
 from torchtitan.experiments.ezpz.rl.reason_agpt.data import GSM8KReasonDataset
 from torchtitan.experiments.ezpz.rl.reason_agpt.env import GSM8KReasonEnv
 from torchtitan.experiments.ezpz.rl.reason_agpt.reward import (
@@ -83,16 +88,15 @@ from torchtitan.rl.controller.controller import (
     Controller,
     ValidationConfig,
 )
-from torchtitan.rl.generator.generator import (
-    SamplingConfig,
-    VLLMCudaGraphConfig,
-    VLLMGenerator,
-)
+from torchtitan.rl.generator.generator import Generator
 from torchtitan.rl.generator.parallelism import InferenceParallelismConfig
+from torchtitan.rl.generator.types import SamplingConfig
 from torchtitan.rl.observability.metrics import MetricsProcessor
 from torchtitan.rl.rollout.advantage import AdvantageEstimator
+from torchtitan.rl.rollout.data import IterableRolloutDataLoader
 from torchtitan.rl.rollout.rubric import Rubric
 from torchtitan.rl.rollout.token_env import TokenEnv
+from torchtitan.rl.trainer.batcher import Batcher
 from torchtitan.rl.trainer.losses import GRPOLoss
 from torchtitan.rl.trainer.trainer import Trainer
 from torchtitan.rl.trainer.training_sample_builder import TrainingSampleBuilder
@@ -104,8 +108,10 @@ def _gsm8k_rollouter(
     """Upstream-style rollouter with: our one-shot CoT env, the four-component
     dense reward, GRPO std-normalized advantage, and the given difficulty band."""
     return GSM8KReasonRollouter.Config(
-        train_dataset=GSM8KReasonDataset.Config(
-            seed=42, split="train", max_steps=max_steps, num_samples=num_samples
+        training_dataloader=IterableRolloutDataLoader.Config(
+            dataset=GSM8KReasonDataset.Config(
+                seed=42, split="train", max_steps=max_steps, num_samples=num_samples
+            )
         ),
         validation_dataset=GSM8KReasonDataset.Config(
             seed=99, split="test", max_steps=0, shuffle=False
@@ -141,20 +147,8 @@ def _agpt_grpo_config(
     num_samples: int = 0,
 ) -> Controller.Config:
     # Disable FlexInnerAttention max_autotune on XPU (backward autotuning exceeds XPU
-    # register limits -> OUT_OF_RESOURCES). Matches the working alphabet_sort_agpt
-    # run. Must run before the model is compiled; recompile the cached flex kernel.
-    from torch.nn.attention.flex_attention import flex_attention
-
-    from torchtitan.models.common.attention import FlexInnerAttention
-
-    FlexInnerAttention.inductor_configs = {
-        **FlexInnerAttention.inductor_configs,
-        "max_autotune": False,
-        "coordinate_descent_tuning": False,
-    }
-    FlexInnerAttention._compiled_flex_attn = torch.compile(
-        flex_attention, options=FlexInnerAttention.inductor_configs
-    )
+    # register limits -> OUT_OF_RESOURCES). Matches the working alphabet_sort_agpt run.
+    disable_flex_max_autotune()
     trainer_parallelism = ParallelismConfig(
         data_parallel_shard_degree=1, tensor_parallel_degree=1
     )
@@ -167,7 +161,12 @@ def _agpt_grpo_config(
         lora_rank=lora_rank,
         lora_alpha=2.0 * lora_rank,
     )
+    # Before #5779 the RL trainer packed at training.max_context_length=2048
+    # while the generator served the flavor's own length; keep both.
+    trainer_model.max_context_length = 2048
     return Controller.Config(
+        # fp32 master weights AND fp32 generation; see AGPT_RL_PRECISION.
+        precision=AGPT_RL_PRECISION,
         # Overridden on the CLI with --hf_assets_path=<staged Stage-1 ckpt dir>.
         # Default points at the Stage-1 cold-start CoT-SFT checkpoint (cot.md).
         hf_assets_path="outputs/sft/agpt2b-gsm8k-r1cot-8n/checkpoint-16-hf",
@@ -175,9 +174,14 @@ def _agpt_grpo_config(
             num_training_steps=num_training_steps,
             num_prompts_per_train_step=num_groups_per_train_step,
             num_samples_per_prompt=group_size,
-            validation=ValidationConfig(num_samples=20),
-            training_sample_builder=TrainingSampleBuilder.Config(
-                drop_zero_std_reward_groups=False
+            # Validate before and after training, as before the upstream sync
+            # (validate_after_training now defaults to False).
+            validation=ValidationConfig(steps=20, validate_after_training=True),
+            # Moved under async_loop.batcher upstream.
+            batcher=Batcher.Config(
+                training_sample_builder=TrainingSampleBuilder.Config(
+                    drop_zero_std_reward_groups=False
+                ),
             ),
         ),
         rollouter=_gsm8k_rollouter(max_steps=max_steps, num_samples=num_samples),
@@ -192,7 +196,8 @@ def _agpt_grpo_config(
             renderer=from_renderers(DefaultRendererConfig()),
             extra_stop_token_ids=(1, 107),
         ),
-        metrics=MetricsProcessor.Config(enable_wandb=False),
+        # No metric loggers (was enable_wandb=False before #5775).
+        metrics=MetricsProcessor.Config(),
         trainer=Trainer.Config(
             model=trainer_model,
             optim=Optim.Config(
@@ -202,10 +207,8 @@ def _agpt_grpo_config(
                 ),
             ),
             training=TrainingConfig(
-                dtype="float32",
-                disable_cuda_graphs=True,
+                disable_accelerator_graphs=True,
                 num_tokens_per_microbatch_per_dp_rank=2 * 2048,
-                max_context_length=2048,
             ),
             parallelism=trainer_parallelism,
             checkpointer=CheckpointManager.Config(
@@ -221,17 +224,20 @@ def _agpt_grpo_config(
                 ),
             ),
         ),
-        generator=VLLMGenerator.Config(
+        generator=Generator.Config(
             model=generator_model,
-            # fp32 generation -- THE fix for coherent agpt-2b output on XPU.
-            model_dtype="float32",
+            # fp32 generation -- THE fix for coherent agpt-2b output on XPU -- now
+            # comes from precision.param_dtype (the generator mirrors it, #5776).
             gpu_memory_limit=0.70,
-            cuda_graph=VLLMCudaGraphConfig(mode="NONE"),
+            # vLLM engine in eager mode (no CUDA-graph capture on XPU).
+            engine=xpu_vllm_engine_config(),
             parallelism=generator_parallelism,
             checkpointer=None,
             # max_tokens raised well above the alphabet_sort default so a full CoT
             # (<think> reasoning + <answer>) is not truncated to zero reward.
-            sampling=SamplingConfig(temperature=0.8, top_p=0.95, max_tokens=max_tokens),
+            # top_p was 0.95; SamplingConfig now rejects top_p < 1 because the
+            # trainer computes logprobs over the full vocabulary (upstream #5317).
+            sampling=SamplingConfig(temperature=0.8, max_tokens=max_tokens),
         ),
     )
 
@@ -239,7 +245,7 @@ def _agpt_grpo_config(
 def rl_grpo_lora_agpt_2b_gsm8k() -> Controller.Config:
     """Default agpt-2b GSM8K CoT GRPO+LoRA smoke (short run, full difficulty).
 
-    Also pass ``--async-loop.training-sample-builder.no-drop-zero-std-reward-groups``
+    Also pass ``--async-loop.batcher.training-sample-builder.no-drop-zero-std-reward-groups``
     on the CLI so all-zero-reward cold-start groups still assemble a batch.
     """
     return _agpt_grpo_config(

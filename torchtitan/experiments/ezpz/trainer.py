@@ -29,14 +29,20 @@ from torchtitan.components.data.types import TrainingMicrobatch
 from torchtitan.components.loss import IGNORE_INDEX
 from torchtitan.config import apply_overrides
 from torchtitan.distributed import ParallelismContext, utils as dist_utils
-from torchtitan.distributed.cuda_graph import cuda_graphs_supported
+from torchtitan.distributed.accelerator_graph import accelerator_graphs_supported
+from torchtitan.distributed.local_compile import LocalCompileConfig
 from torchtitan.experiments.ezpz import signal_stop
 from torchtitan.experiments.ezpz.ckpt_key_compat import (
     maybe_install_flat_attention_compat,
 )
 from torchtitan.experiments.ezpz.ckpt_owner_claim import check_and_claim
 from torchtitan.experiments.ezpz.compile import CompileConfig, local_compile_regions
-from torchtitan.experiments.ezpz.config import EzpzParallelismConfig
+from torchtitan.experiments.ezpz.config import (
+    apply_legacy_metrics_fields,
+    EzpzMetricsConfig,
+    EzpzParallelismConfig,
+    EzpzTrainingConfig,
+)
 from torchtitan.experiments.ezpz.logging import logger
 from torchtitan.experiments.ezpz.lr_finder import LRFinderConfig
 from torchtitan.experiments.ezpz.native_ddp import (
@@ -260,7 +266,7 @@ class EzpzTrainingEngine(TorchFTTrainingEngine):
             validate_native_ddp(
                 model_name=self._model_name(),
                 parallel_dims=self.parallelism_context,
-                training=config.training,
+                precision=config.precision,
                 parallelism=config.parallelism,
                 loss_fn=self.loss_fn,
                 gradient_accumulation_steps=getattr(
@@ -332,7 +338,7 @@ class EzpzTrainingEngine(TorchFTTrainingEngine):
         states[MODEL] = ModelWrapper(unwrapped_parts)
 
     def _initialize_forward_backward(self) -> None:
-        maybe_disable_cuda_graphs(self.config)
+        maybe_disable_accelerator_graphs(self.config)
         super()._initialize_forward_backward()
         if not self.parallelism_context.pp_enabled:
             self._run_forward_backward = maybe_wrap_with_xpu_graph(
@@ -598,19 +604,35 @@ class EzpzTrainingEngine(TorchFTTrainingEngine):
         xpu_graph_teardown()
 
 
-def cuda_graph_blockers(config: Any) -> list[str]:
-    """Reasons the configured model cannot run under CUDA graph capture.
+def set_max_context_length(config: Any, seq_len: int) -> None:
+    """Set the run's sequence length on the model config and its RoPE caches.
+
+    For registry functions that change the length after building a config;
+    ``--training.max-context-length`` does the same through
+    ``EzpzTrainingConfig``.
+    """
+    config.model.max_context_length = seq_len
+    config._sync_model_context_length()
+
+
+def accelerator_graph_blockers(config: Any, device_type: str) -> list[str]:
+    """Reasons the configured run cannot use upstream accelerator graph capture.
 
     Upstream captures forward/backward by default
-    (``training.disable_cuda_graphs=False``). Two ezpz paths sync with the
-    host and fail during capture (Polaris job ``7839433``):
+    (``training.disable_accelerator_graphs=False``) on any device whose
+    ``torch.accelerator.Graph`` works (#5353). Three ezpz cases opt out:
 
+    - XPU: capture stays opt-in through ezpz's own wrapper
+      (``EZPZ_XPU_GRAPHS=1``, ``xpu_graph.py``), as before the sync; upstream
+      capture is never stacked on top of it;
     - native DDP: ``DistributedDataParallel._pre_forward`` raises "operation
-      not permitted when stream is capturing";
+      not permitted when stream is capturing" (Polaris job ``7839433``);
     - any expert backend other than ``grouped_mm``: ``for_loop`` (the SM<90
-      fallback) copies per-expert token counts to the host.
+      and XPU fallback) copies per-expert token counts to the host.
     """
     reasons: list[str] = []
+    if device_type == "xpu":
+        reasons.append("XPU (ezpz XPU graphs are opt-in via EZPZ_XPU_GRAPHS=1)")
     if getattr(config.parallelism, "enable_data_parallel_native_ddp", False):
         reasons.append("native DDP")
     model = getattr(config, "model", None)
@@ -625,30 +647,40 @@ def cuda_graph_blockers(config: Any) -> list[str]:
     return reasons
 
 
-def maybe_disable_cuda_graphs(config: Any) -> None:
-    """Run eagerly instead of capturing when the model cannot be captured.
+def maybe_disable_accelerator_graphs(config: Any) -> None:
+    """Run eagerly instead of capturing when the run cannot be captured.
 
     Raises if the config explicitly asks for a graph feature that needs
     capture, since silently dropping it would change what the user asked for.
     """
     training = config.training
-    if training.disable_cuda_graphs or not cuda_graphs_supported():
+    if training.disable_accelerator_graphs or not accelerator_graphs_supported():
         return
-    reasons = cuda_graph_blockers(config)
+    reasons = accelerator_graph_blockers(config, dist_utils_device_type())
     if not reasons:
         return
-    if config.optim.enable_cuda_graph or training.cuda_graph_per_accumulation_group:
+    if (
+        config.optim.enable_accelerator_graph
+        or training.accelerator_graph_per_microbatch_group
+    ):
         raise ValueError(
-            f"CUDA graphs cannot capture {', '.join(reasons)}; unset "
-            "optim.enable_cuda_graph / training.cuda_graph_per_accumulation_group "
-            "or change the model config."
+            f"Accelerator graphs cannot capture {', '.join(reasons)}; unset "
+            "optim.enable_accelerator_graph / "
+            "training.accelerator_graph_per_microbatch_group or change the config."
         )
     logger.warning(
-        "Disabling CUDA graphs: %s cannot run under capture. Pass "
-        "--training.disable-cuda-graphs to silence this.",
-        ", ".join(reasons),
+        "Disabling accelerator graphs: %s. Pass "
+        "--training.disable-accelerator-graphs to silence this.",
+        "; ".join(reasons),
     )
-    training.disable_cuda_graphs = True
+    training.disable_accelerator_graphs = True
+
+
+def dist_utils_device_type() -> str:
+    """The device type upstream's graph code checks (``tools.utils``)."""
+    from torchtitan.tools import utils
+
+    return utils.device_type
 
 
 class FaultTolerantTrainer(TorchFTTrainer):
@@ -659,6 +691,10 @@ class FaultTolerantTrainer(TorchFTTrainer):
         parallelism: EzpzParallelismConfig = field(
             default_factory=EzpzParallelismConfig
         )
+        training: EzpzTrainingConfig = field(default_factory=EzpzTrainingConfig)
+        """Upstream ``TrainingConfig`` plus the legacy ezpz CLI aliases."""
+        metrics: EzpzMetricsConfig = field(default_factory=EzpzMetricsConfig)
+        """Upstream ``MetricsProcessor.Config`` plus the legacy exporter switches."""
         checkpoint: CheckpointManager.Config | None = None
         compile: CompileConfig | None = None
         """Selects ``local_compile`` regions; see ``ezpz/compile.py``."""
@@ -678,28 +714,55 @@ class FaultTolerantTrainer(TorchFTTrainer):
         history_bridge: bool = False
         wandb_watch: bool = False
 
-        def _sync_model_context_length(self) -> None:
-            """Align the model (and RoPE caches) with ``training.max_context_length``.
+        def _apply_legacy_training_fields(self) -> None:
+            """Copy the legacy ``training.*`` aliases to their upstream homes.
 
-            Upstream requires ``training.max_context_length`` to equal the
-            model's, chosen when the model config is built
-            (``validate_model_training_config``). ezpz flavors are prebuilt
-            templates (``max_context_length=131072``) and launchers set the
-            sequence length on the CLI afterwards, so the trainer config owns
-            the single source of truth and propagates it here, before the
-            upstream validation runs.
+            See ``EzpzTrainingConfig``. Each alias is ``None`` unless a
+            launcher, JSON config or registry set it, and is consumed (reset to
+            ``None``) once copied, so a later ``__post_init__`` cannot overwrite
+            a value set directly on ``model``/``precision`` afterwards.
+            """
+            training = self.training
+            legacy = {
+                "dtype": (self.precision, "dtype"),
+                "mixed_precision_param": (self.precision, "param_dtype"),
+                "mixed_precision_reduce": (self.precision, "reduce_dtype"),
+                "enable_cpu_offload": (
+                    self.parallelism,
+                    "fsdp_enable_cpu_offloading",
+                ),
+            }
+            for name, (target, attr) in legacy.items():
+                value = getattr(training, name, None)
+                if value is not None:
+                    setattr(target, attr, value)
+                    setattr(training, name, None)
+            seq_len = getattr(training, "max_context_length", None)
+            if seq_len is not None and self.model is not None:
+                self.model.max_context_length = seq_len
+                training.max_context_length = None
+
+        def _sync_model_context_length(self) -> None:
+            """Size the model's RoPE caches to ``model.max_context_length``.
+
+            ezpz flavors are prebuilt templates (``max_context_length=131072``)
+            whose length is set afterwards, by a registry function or
+            ``--training.max-context-length``, so the RoPE caches are resized
+            to match here.
             """
             from torchtitan.models.common.rope import RoPE
 
-            seq_len = self.training.max_context_length
             model = self.model
-            if getattr(model, "max_context_length", seq_len) != seq_len:
-                model.max_context_length = seq_len
+            if model is None:
+                return
+            seq_len = model.max_context_length
             for _, rope, _, _ in model.traverse(RoPE.Config):
                 if rope.max_context_length != seq_len:
                     rope.max_context_length = seq_len
 
         def __post_init__(self):
+            self._apply_legacy_training_fields()
+            apply_legacy_metrics_fields(self.metrics)
             self._sync_model_context_length()
             # ``@dataclass(slots=True)`` returns a replacement class object;
             # call the parent explicitly so Python 3.12 does not use the stale
@@ -722,7 +785,9 @@ class FaultTolerantTrainer(TorchFTTrainer):
         # but ezpz flavors are prebuilt templates and the CLI fixes
         # parallelism afterwards, so the model config re-applies its sharding
         # (and the legacy ``compile`` mapping) here.
-        model_config.local_compile_regions = local_compile_regions(config.compile)
+        model_config.local_compile = LocalCompileConfig(
+            regions=local_compile_regions(config.compile)
+        )
         update_from_config = getattr(model_config, "update_from_config", None)
         if update_from_config is not None:
             update_from_config(config=config)
@@ -733,6 +798,7 @@ class FaultTolerantTrainer(TorchFTTrainer):
         self.engine = self.engine_cls(
             config,
             model_config=model_config,
+            precision=config.precision,
             max_num_documents=config.dataloader.max_num_documents,
             output_dir=config.dump_folder,
             fault_tolerance=config.fault_tolerance,
@@ -781,7 +847,7 @@ class FaultTolerantTrainer(TorchFTTrainer):
             dp_degree=dp_degree,
             dp_rank=dp_rank,
             tokenizer=self.tokenizer,
-            max_context_length=config.training.max_context_length,
+            max_context_length=config.model.max_context_length,
             num_tokens_per_microbatch=num_tokens_per_microbatch,
             training_steps=config.training.steps * self.num_pp_microbatches,
             parallelism_context=parallelism_context,
@@ -790,7 +856,7 @@ class FaultTolerantTrainer(TorchFTTrainer):
 
         from torchtitan.experiments.ezpz.agpt import set_ezpz_max_context_length
 
-        set_ezpz_max_context_length(config.training.max_context_length)
+        set_ezpz_max_context_length(config.model.max_context_length)
 
         self.metrics_processor = config.metrics.build(
             parallelism_context=parallelism_context,
@@ -802,6 +868,11 @@ class FaultTolerantTrainer(TorchFTTrainer):
             config_dict=config.to_dict(),
             has_quantization=engine.has_quantization,
         )
+        # Logical FLOPs of the steps in the metrics window (#4819: the engine
+        # counts them per microbatch; MetricsProcessor no longer multiplies a
+        # per-token constant). See ``_num_flops_in_window``.
+        self._local_num_flops_since_last_log = 0
+        self._flops_window_start: float | None = None
         color = self.metrics_processor.color
 
         engine.initialize(
@@ -818,14 +889,14 @@ class FaultTolerantTrainer(TorchFTTrainer):
                 pp_schedule=config.parallelism.pipeline_parallel_schedule,
                 color=color,
             )
-        self.metrics_processor.num_flops_per_token = engine.num_flops_per_token
         self.metrics_processor.optimizers = engine.optim.optimizers
         self.metrics_processor.model_parts = engine.model_parts
 
-        logger.info(
-            "Peak FLOPS used for computing MFU: "
-            f"{self.metrics_processor.gpu_peak_flops:.3e}"
-        )
+        if self.metrics_processor.gpu_peak_flops is not None:
+            logger.info(
+                "Peak FLOPS used for computing MFU: "
+                f"{self.metrics_processor.gpu_peak_flops:.3e}"
+            )
         logger.info(
             f"{engine.device.type.upper()} memory usage for model: "
             f"{engine.model_device_mem_stats.max_reserved_gib:.2f}GiB"
@@ -855,7 +926,7 @@ class FaultTolerantTrainer(TorchFTTrainer):
                 parallelism_context=parallelism_context,
                 loss_fn=engine.loss_fn,
                 metrics_processor=self.metrics_processor,
-                seq_len=config.training.max_context_length,
+                seq_len=config.model.max_context_length,
                 num_tokens_per_microbatch=num_tokens_per_microbatch,
                 pp_schedule=pp_schedule,
                 pp_has_first_stage=pp_has_first_stage,
@@ -882,7 +953,7 @@ class FaultTolerantTrainer(TorchFTTrainer):
             f"tokens/microbatch/dp-rank {num_tokens_per_microbatch}, "
             f"tokens/train-step {num_tokens_per_train_step}, "
             f"gradient accumulation steps {self.gradient_accumulation_steps}, "
-            f"sequence length {config.training.max_context_length}, "
+            f"sequence length {config.model.max_context_length}, "
             f"total steps {config.training.steps} "
             f"(warmup {config.optim.lr_scheduler.warmup_steps})"
         )
@@ -963,6 +1034,22 @@ class FaultTolerantTrainer(TorchFTTrainer):
         gas = round(start + (full - start) * frac)
         return max(start, min(full, gas))
 
+    def _num_flops_in_window(self, step_num_flops: int) -> int:
+        """Add this step's FLOPs to the metrics window and return the window total.
+
+        The window is the one ``MetricsProcessor`` measures tokens and time
+        over: it restarts whenever ``MetricsProcessor.reset()`` moves
+        ``time_last_log`` (validators call it). The ezpz loop does not call
+        ``reset()`` after a log, so, as before #4819, throughput, TFLOPs and MFU
+        cover the steps since the start or the last validation.
+        """
+        window_start = self.metrics_processor.time_last_log
+        if window_start != self._flops_window_start:
+            self._flops_window_start = window_start
+            self._local_num_flops_since_last_log = 0
+        self._local_num_flops_since_last_log += step_num_flops
+        return self._local_num_flops_since_last_log
+
     def train_step(self, data_iterator: Iterator[TrainingMicrobatch]) -> float | None:
         original_gas = self.gradient_accumulation_steps
         self.gradient_accumulation_steps = self._effective_gas()
@@ -1031,6 +1118,7 @@ class FaultTolerantTrainer(TorchFTTrainer):
 
         lr_metrics = engine.optim.lr_schedulers.get_metrics() if should_log else {}
         grad_norm = engine.optim_step()
+        mean_num_flops = self._num_flops_in_window(forward_backward_result.num_flops)
 
         if not should_log:
             return float(accumulated_loss.detach().item())
@@ -1054,8 +1142,20 @@ class FaultTolerantTrainer(TorchFTTrainer):
                     ft_pg,
                 ),
             )
+            dp_mesh = parallelism_context.get_optional_mesh("dp")
+            if dp_mesh is not None or ft_pg is not None:
+                mean_num_flops = dist_utils.dist_sum(
+                    torch.tensor(
+                        mean_num_flops, dtype=torch.float64, device=engine.device
+                    ),
+                    dp_mesh,
+                    ft_pg,
+                )
+                if dp_mesh is not None:
+                    mean_num_flops /= dp_mesh.size()
             if ft_pg is not None:
                 global_avg_loss /= ft_pg.size()
+                mean_num_flops /= ft_pg.size()
         else:
             global_avg_loss = global_max_loss = float(accumulated_loss.item())
             global_ntokens_seen = engine.ntokens_seen
@@ -1081,6 +1181,7 @@ class FaultTolerantTrainer(TorchFTTrainer):
             global_max_loss,
             float(grad_norm.item()),
             extra_metrics=extra_metrics,
+            num_flops=mean_num_flops,
         )
 
         if isinstance(global_avg_loss, torch.Tensor):
@@ -1235,7 +1336,12 @@ class FaultTolerantTrainer(TorchFTTrainer):
                 finally:
                     if numerics_capture is not None:
                         numerics_capture.__exit__(None, None, None)
-        finally:
+        except BaseException as e:
+            # Upstream passes the failure so an OOM writes the exit memory
+            # snapshot.
+            engine.close_profiler(e)
+            raise
+        else:
             engine.close_profiler()
 
         if torch.distributed.get_rank() == 0:

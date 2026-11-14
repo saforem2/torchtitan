@@ -12,12 +12,14 @@ local expert-compute portion when a non-default backend is selected.
 
 from dataclasses import dataclass
 
+import torch
 import torch_remat as remat
 from torch.distributed.tensor import DTensor
 from torch.utils.checkpoint import checkpoint
 
 from torchtitan.distributed.spmd_types import maybe_set_sparse_mesh, spmd_sparse_mesh
 from torchtitan.models.common.moe import RoutedExperts
+from torchtitan.models.common.moe.token_dispatcher import DeepEPDispatchMetadata
 
 from .experts import (
     _env_flag_enabled,
@@ -70,16 +72,18 @@ class EzpzRoutedExperts(RoutedExperts):
         x_TD,
         topk_scores_TK,
         topk_expert_ids_TK,
-        num_local_tokens_per_expert_E,
+        routing_map_TE,
         *,
         padding_mask_T=None,
     ):
+        # #5516: the router hands over the one-hot (T, E) routing map instead of
+        # the per-expert token counts; dispatchers that need counts sum it.
         if self.compute_backend == "grouped_mm":
             return super().forward(
                 x_TD,
                 topk_scores_TK,
                 topk_expert_ids_TK,
-                num_local_tokens_per_expert_E,
+                routing_map_TE,
                 padding_mask_T=padding_mask_T,
             )
         del padding_mask_T  # padding rows are routed like real tokens
@@ -94,7 +98,7 @@ class EzpzRoutedExperts(RoutedExperts):
         if self._wants_routing():
             return self._run_backend(
                 x_TD,
-                num_local_tokens_per_expert_E,
+                routing_map_TE.sum(dim=0),
                 topk_scores=topk_scores_TK,
                 topk_indices=topk_expert_ids_TK,
                 ep_mesh=self._resolve_ep_mesh(),
@@ -104,7 +108,7 @@ class EzpzRoutedExperts(RoutedExperts):
             x_TD,
             topk_scores_TK,
             topk_expert_ids_TK,
-            num_local_tokens_per_expert_E,
+            routing_map_TE,
         )
         with maybe_set_sparse_mesh():
             # The portable expert kernels below read the dispatched tokens and
@@ -113,6 +117,14 @@ class EzpzRoutedExperts(RoutedExperts):
             routed_output_RD = self._run_backend(routed_input_RD, counts_e)
             if self.output_postprocess is not None:
                 routed_output_RD = self.output_postprocess(routed_output_RD)
+            if isinstance(metadata, DeepEPDispatchMetadata):
+                # #5543: DeepEP's combine no longer applies the router scores;
+                # upstream folds them into w2, these backends apply them here.
+                remat.recompute_needs_tensor(routed_output_RD, metadata.scores_R)
+                routed_output_RD = (
+                    routed_output_RD
+                    * metadata.scores_R.reshape(-1, 1).to(torch.float32)
+                ).to(routed_output_RD.dtype)
         remat.recompute_needs_tensor(routed_output_RD)
         return self.token_dispatcher.combine(routed_output_RD, metadata, x_TD)
 

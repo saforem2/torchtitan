@@ -16,7 +16,7 @@ from torchtitan.components.checkpointer import CheckpointManager
 from torchtitan.components.loss import CrossEntropyLoss
 
 from torchtitan.components.optim import LRSchedulersContainer, Optim
-from torchtitan.config import CommConfig, TrainingConfig
+from torchtitan.config import CommConfig
 from torchtitan.distributed.activation_remat import (
     DefaultActivationRematConfig,
     FullActivationRematConfig,
@@ -26,12 +26,16 @@ from torchtitan.experiments.ezpz.blendcorpus.blendcorpus_builder import (
 )
 from torchtitan.experiments.ezpz.blendcorpus.build_tokenizer import EZPZTokenizer
 from torchtitan.experiments.ezpz.compile import CompileConfig
+from torchtitan.experiments.ezpz.config import EzpzMetricsConfig, EzpzTrainingConfig
 from torchtitan.experiments.ezpz.logging import logger
 from torchtitan.experiments.ezpz.optimizer.containers import default_adamw
-from torchtitan.experiments.ezpz.trainer import FaultTolerantTrainer
+from torchtitan.experiments.ezpz.trainer import (
+    FaultTolerantTrainer,
+    set_max_context_length,
+)
+from torchtitan.experiments.ezpz.wandb_logger import EzpzWandBLogger
 from torchtitan.experiments.torchft.config.job_config import FaultTolerance
 from torchtitan.models.common.moe import MoE
-from torchtitan.observability.metrics import MetricsProcessor
 
 from . import model_registry
 
@@ -150,6 +154,18 @@ def _config_from_json(base_fn) -> FaultTolerantTrainer.Config:
     return cfg
 
 
+def _replace_model(cfg: FaultTolerantTrainer.Config, model) -> None:
+    """Swap in another model template and keep the run's sequence length.
+
+    Before #5779 the length lived on ``training.max_context_length`` and
+    survived a model swap; it is now the model config's own field, and the
+    templates carry 16384, so carry the configured length over.
+    """
+    seq_len = cfg.model.max_context_length
+    cfg.model = model
+    set_max_context_length(cfg, seq_len)
+
+
 def _base_config(flavor: str) -> FaultTolerantTrainer.Config:
     return FaultTolerantTrainer.Config(
         hf_assets_path="./assets/hf/gemma-7b",
@@ -165,14 +181,14 @@ def _base_config(flavor: str) -> FaultTolerantTrainer.Config:
                 min_lr_factor=0.0,
             ),
         ),
-        training=TrainingConfig(
+        training=EzpzTrainingConfig(
             # #4121: tokens, not sequences. 8 seqs x 8192 = 65536.
             num_tokens_per_microbatch_per_dp_rank=8 * 8192,
             max_context_length=8192,
             steps=10000,
         ),
         dataloader=BlendCorpusDataLoader.Config(dataset="c4_test"),
-        metrics=MetricsProcessor.Config(log_freq=10),
+        metrics=EzpzMetricsConfig(log_freq=10),
         checkpointer=CheckpointManager.Config(
             interval=500,
             last_save_model_only=False,
@@ -264,14 +280,14 @@ def moe(
         cfg.activation_remat = FullActivationRematConfig()
     else:
         cfg.activation_remat = DefaultActivationRematConfig()
-    cfg.training.max_context_length = seq_len
-    cfg.training.dtype = dtype
+    set_max_context_length(cfg, seq_len)
+    cfg.precision.dtype = dtype
     cfg.dataloader.dataset = "blendcorpus"
     if dataset_path is None:
         dataset_path = f"torchtitan/experiments/ezpz/data-lists/{ezpz.distributed.get_machine().lower()}/books.txt"
     cfg.dataloader.dataset_path = dataset_path
     cfg.metrics.log_freq = 1
-    cfg.metrics.enable_wandb = True
+    cfg.metrics.loggers = [EzpzWandBLogger.Config()]
     if compile:
         cfg.compile = CompileConfig()
     assert cfg.checkpointer is not None
@@ -315,14 +331,14 @@ def moe_debugmodel_ep() -> FaultTolerantTrainer.Config:
     (see docs/experiments/moe/sunspot/20260520-smoke-n2-pr3386-ep-followup.md).
     """
     cfg = moe("debugmodel", local_batch_size=2)
-    cfg.model = model_registry("debugmodel", moe_comm_backend="standard")
+    _replace_model(cfg, model_registry("debugmodel", moe_comm_backend="standard"))
     cfg.parallelism.expert_parallel_degree = 2
     return cfg
 
 
 def moe_debugmodel_flex_attn() -> FaultTolerantTrainer.Config:
     cfg = moe_debugmodel()
-    cfg.model = model_registry("debugmodel_flex_attn")
+    _replace_model(cfg, model_registry("debugmodel_flex_attn"))
     # Flex builds its BlockMask only when the batch carries ``positions``;
     # blendcorpus emits them only on opt-in. Without this the model gets
     # attention_masks=None and asserts "must be instance of BlockMask".
@@ -332,7 +348,7 @@ def moe_debugmodel_flex_attn() -> FaultTolerantTrainer.Config:
 
 def moe_debugmodel_flex_attn_hf() -> FaultTolerantTrainer.Config:
     cfg = moe_debugmodel_hf()
-    cfg.model = model_registry("debugmodel_flex_attn_hf")
+    _replace_model(cfg, model_registry("debugmodel_flex_attn_hf"))
     return cfg
 
 
@@ -430,20 +446,20 @@ def moe_671b() -> FaultTolerantTrainer.Config:
         "moe_671b: Float8 converters were removed upstream; building the 671B "
         "model without quantization."
     )
-    cfg.model = model_registry("671B")
+    _replace_model(cfg, model_registry("671B"))
     return cfg
 
 
 def moe_7b_ep() -> FaultTolerantTrainer.Config:
     cfg = moe_7b()
-    cfg.model = model_registry("7B", moe_comm_backend="standard")
+    _replace_model(cfg, model_registry("7B", moe_comm_backend="standard"))
     cfg.parallelism.expert_parallel_degree = 2
     return cfg
 
 
 def moe_10b_2b_sdpa_ep() -> FaultTolerantTrainer.Config:
     cfg = moe_10b_2b_sdpa()
-    cfg.model = model_registry("10B_2B_sdpa", moe_comm_backend="standard")
+    _replace_model(cfg, model_registry("10B_2B_sdpa", moe_comm_backend="standard"))
     cfg.parallelism.expert_parallel_degree = 2
     return cfg
 
@@ -467,7 +483,7 @@ def _intermediate_ep(flavor: str, backend: str, ep: int) -> FaultTolerantTrainer
     vocab-projection memory pressure.
     """
     cfg = moe(flavor, local_batch_size=1, activation_checkpoint_mode="none")
-    cfg.model = model_registry(flavor, moe_comm_backend="standard")
+    _replace_model(cfg, model_registry(flavor, moe_comm_backend="standard"))
     _set_moe_compute_backend(cfg.model, backend)
     cfg.parallelism.expert_parallel_degree = ep
     return cfg
@@ -510,7 +526,7 @@ def moe_10b_2b_sdpa_bmm() -> FaultTolerantTrainer.Config:
     # batched-bmm expert compute (padded (E, cap, D) -> 3 torch.bmm) instead
     # of the serial for_loop that grouped_mm auto-falls-back to on XPU.
     cfg = moe_10b_2b_sdpa()
-    cfg.model = model_registry("10B_2B_sdpa", moe_comm_backend="standard")
+    _replace_model(cfg, model_registry("10B_2B_sdpa", moe_comm_backend="standard"))
     _set_moe_compute_backend(cfg.model, "bmm")
     return cfg
 
@@ -521,7 +537,7 @@ def moe_10b_2b_sdpa_bmm() -> FaultTolerantTrainer.Config:
 def moe_10b_2b_sdpa_hybridep() -> FaultTolerantTrainer.Config:
     # for_loop experts + hybridep comm backend (dispatch/compute overlap) at EP=12.
     cfg = moe_10b_2b_sdpa()
-    cfg.model = model_registry("10B_2B_sdpa", moe_comm_backend="hybridep")
+    _replace_model(cfg, model_registry("10B_2B_sdpa", moe_comm_backend="hybridep"))
     cfg.parallelism.expert_parallel_degree = 12
     return cfg
 
@@ -529,7 +545,7 @@ def moe_10b_2b_sdpa_hybridep() -> FaultTolerantTrainer.Config:
 def _bmm_ep_cf(cf: float) -> FaultTolerantTrainer.Config:
     # bmm EP=12 with an explicit capacity_factor, for the throughput sweep.
     cfg = moe_10b_2b_sdpa()
-    cfg.model = model_registry("10B_2B_sdpa", moe_comm_backend="standard")
+    _replace_model(cfg, model_registry("10B_2B_sdpa", moe_comm_backend="standard"))
     for _, moe_cfg, _, _ in cfg.model.traverse(MoE.Config):
         ie = moe_cfg.routed_experts
         ie.compute_backend = "bmm"
@@ -600,7 +616,7 @@ def moe_10b_2b_sdpa_bmm_ep() -> FaultTolerantTrainer.Config:
     # `activation-checkpoint:none` on the CLI, since EP>1 selective-AC
     # recompute of the expert all_to_all aborts on the frameworks RC torch.
     cfg = moe_10b_2b_sdpa()
-    cfg.model = model_registry("10B_2B_sdpa", moe_comm_backend="standard")
+    _replace_model(cfg, model_registry("10B_2B_sdpa", moe_comm_backend="standard"))
     _set_moe_compute_backend(cfg.model, "bmm")
     cfg.parallelism.expert_parallel_degree = 12
     return cfg
@@ -620,7 +636,7 @@ def moe_2b_ep() -> FaultTolerantTrainer.Config:
     keeping the global batch reasonable.
     """
     cfg = moe("2B", local_batch_size=2)
-    cfg.model = model_registry("2B", moe_comm_backend="standard")
+    _replace_model(cfg, model_registry("2B", moe_comm_backend="standard"))
     cfg.parallelism.expert_parallel_degree = 2
     return cfg
 

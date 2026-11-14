@@ -32,9 +32,140 @@ in our port reads them.
 from dataclasses import dataclass
 from typing import Literal
 
+from torchtitan.config import TrainingConfig
 from torchtitan.config.parallelism import ParallelismConfig
+from torchtitan.experiments.ezpz.wandb_logger import EzpzWandBLogger
+from torchtitan.observability.metrics import (
+    BaseLogger,
+    MetricsProcessor,
+    TensorBoardLogger,
+    WandBLogger,
+)
 
-__all__ = ["EzpzParallelismConfig"]
+__all__ = [
+    "EzpzMetricsConfig",
+    "EzpzParallelismConfig",
+    "EzpzTrainingConfig",
+    "apply_legacy_metrics_fields",
+    "set_metrics_logger",
+]
+
+
+@dataclass(kw_only=True)
+class EzpzTrainingConfig(TrainingConfig):
+    """``TrainingConfig`` plus the ezpz CLI fields upstream moved elsewhere.
+
+    Upstream moved the model dtypes to ``precision`` and FSDP CPU offload to
+    ``parallelism`` (#5776), and dropped ``max_context_length`` in favour of the
+    model config's own field (#5779). ezpz launchers, PBS seats and JSON configs
+    still pass ``--training.max-context-length`` / ``--training.dtype`` /
+    ``--training.mixed-precision-*``, and ezpz cannot take
+    ``--model.max-context-length``: the model config is opaque to the CLI
+    (``config_manager.py``). These fields keep that surface.
+
+    They are one-way inputs, ``None`` unless set. ``FaultTolerantTrainer.Config``
+    copies each set field to its upstream home in ``__post_init__``; no code
+    reads them back. Code reads ``model.max_context_length``, ``precision.*`` and
+    ``parallelism.fsdp_enable_cpu_offloading``.
+    """
+
+    max_context_length: int | None = None
+    """Legacy alias for ``model.max_context_length`` (also resizes RoPE caches)."""
+
+    dtype: Literal["bfloat16", "float32"] | None = None
+    """Legacy alias for ``precision.dtype``."""
+
+    mixed_precision_param: Literal["bfloat16", "float32"] | None = None
+    """Legacy alias for ``precision.param_dtype``."""
+
+    mixed_precision_reduce: Literal["bfloat16", "float32"] | None = None
+    """Legacy alias for ``precision.reduce_dtype``."""
+
+    enable_cpu_offload: bool | None = None
+    """Legacy alias for ``parallelism.fsdp_enable_cpu_offloading``."""
+
+
+@dataclass(kw_only=True, slots=True)
+class EzpzMetricsConfig(MetricsProcessor.Config):
+    """``MetricsProcessor.Config`` plus the legacy exporter switches.
+
+    Upstream replaced ``enable_wandb`` / ``enable_tensorboard`` with
+    ``loggers: list[BaseLogger.Config]`` (#5775). ezpz launchers and PBS seats
+    still pass ``--metrics.enable-wandb`` / ``--metrics.no-enable-wandb`` /
+    ``--metrics.enable-tensorboard`` and JSON launch configs still set
+    ``metrics.enable_wandb``; these fields keep that surface.
+
+    They are one-way inputs, ``None`` unless set, like ``EzpzTrainingConfig``:
+    ``FaultTolerantTrainer.Config.__post_init__`` applies each set field to
+    ``loggers`` with :func:`apply_legacy_metrics_fields` and resets it to
+    ``None``. ``True`` adds the exporter unless one of that type is already
+    listed; ``False`` removes every exporter of that type (what
+    ``--metrics.no-enable-wandb`` did to a registry that enabled W&B). Code
+    reads ``loggers`` only. ``build()`` still constructs ``MetricsProcessor``:
+    the owner is inherited from ``MetricsProcessor.Config``.
+    """
+
+    enable_wandb: bool | None = None
+    """Legacy switch for a ``WandBLogger.Config`` entry in ``loggers``."""
+
+    enable_tensorboard: bool | None = None
+    """Legacy switch for a ``TensorBoardLogger.Config`` entry in ``loggers``."""
+
+
+# Legacy field -> (exporter config type it controls, type it adds). Pre-sync
+# core built W&B before TensorBoard; this order keeps that when both switches
+# are set. W&B is added as EzpzWandBLogger (see wandb_logger.py).
+_LEGACY_METRICS_LOGGERS: dict[
+    str, tuple[type[BaseLogger.Config], type[BaseLogger.Config]]
+] = {
+    "enable_wandb": (WandBLogger.Config, EzpzWandBLogger.Config),
+    "enable_tensorboard": (TensorBoardLogger.Config, TensorBoardLogger.Config),
+}
+
+
+def set_metrics_logger(
+    metrics: MetricsProcessor.Config,
+    logger_config_cls: type[BaseLogger.Config],
+    enabled: bool,
+    *,
+    new_config_cls: type[BaseLogger.Config] | None = None,
+) -> None:
+    """Enable or disable one exporter type in ``metrics.loggers``.
+
+    Enabling appends ``new_config_cls()`` (default ``logger_config_cls()``)
+    unless an exporter of type ``logger_config_cls`` (or a subclass) is
+    already listed, so a registry entry with settings is kept as is.
+    Disabling removes every entry of that type.
+    """
+    present = any(isinstance(c, logger_config_cls) for c in metrics.loggers)
+    if enabled and not present:
+        metrics.loggers = [*metrics.loggers, (new_config_cls or logger_config_cls)()]
+    elif not enabled and present:
+        metrics.loggers = [
+            c for c in metrics.loggers if not isinstance(c, logger_config_cls)
+        ]
+
+
+def apply_legacy_metrics_fields(metrics: MetricsProcessor.Config) -> None:
+    """Copy set legacy exporter switches into ``loggers``, then reset them.
+
+    Also replaces a plain upstream ``WandBLogger.Config`` with
+    ``EzpzWandBLogger.Config`` (no extra fields), so every ezpz run gets the
+    failure-tolerant W&B exporter however the entry was added.
+    """
+    for name, (logger_config_cls, new_config_cls) in _LEGACY_METRICS_LOGGERS.items():
+        value = getattr(metrics, name, None)
+        if value is None:
+            continue
+        set_metrics_logger(
+            metrics, logger_config_cls, bool(value), new_config_cls=new_config_cls
+        )
+        setattr(metrics, name, None)
+    if any(type(c) is WandBLogger.Config for c in metrics.loggers):
+        metrics.loggers = [
+            EzpzWandBLogger.Config() if type(c) is WandBLogger.Config else c
+            for c in metrics.loggers
+        ]
 
 
 @dataclass(kw_only=True)
