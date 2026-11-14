@@ -1,6 +1,14 @@
-## 2026-11-14: Sirius hedge — 5B to 7091, 10B allocation exhausted
+## 2026-11-14: Sirius restored via datascience — 5B 7281 + 10B 121
 
-`33487` `5B 2N` `R` `4900->7091` steady `loss 6.05->5.90 g6.3`, `tps 416 MFU 4.27%`, `71` ckpts (`step-600..7092`, `3.6T`) — +2191 steps since `15:18 UTC` Nov 13 restart, ~1h walltime left on `6h` slice. `33488` `10B 8N` `32 GPUs` `FSDP` proof done (`12.00->6.19` over `200` steps, `tps 182`), `Gloo` node crash `x3200c0s13b0` at `step 200` (`FAILOVER exhausted`), `ckpt step-100 106G` intact; resubmit rejected `No active allocation found for project AuroraGPT and resource sirius` — allocation spent. Polaris `7832130 Q 18N small` still `Q` `13:03 UTC` (`83 small / 43 medium` queued, down from `91/52` but `Not enough free nodes`). `5B` remains only forward mover until Polaris drains or allocation renewed.
+`datascience` unlimited (`backfill`) confirmed — prior `AuroraGPT` `allocation exhausted` was project-specific; switching `-A datascience` cleared `No active allocation`. Wrong-script `cudnn/9.26.0` abort (`submit_agpt_olmo3_polaris.sh` says `Unknown machine: sirius`) fixed by using `submit_agpt_olmo3_sirius.sh`. `Sirius workq Tot=4` hard cap briefly `Q`'d `33527 8N` (`Insufficient ncpus R:512 A:25`) then both `R`:
+
+| Job | Model | GPUs | Steps | Loss | Ckpts | Status |
+| --- | --- | --- | --- | --- | --- | --- |
+| `33525` | `5b_olmo3_polaris` | `2N 8` | `7000->7281` (`+281` since `14:31 UTC` restart) | `5.97 g30.5` -> `5.71 g19.4`, `tps 412 MFU 4.23%` | `step-7200`, `3.7T` total | `R` `00:46/06:00` |
+| `33527` | `10b_olmo3_polaris` | `8N 32` | fresh `1->121` (corrupt `step-100 .metadata` cleaned, `step-3 + step-100` prior) | `12.03 g2.37` -> `6.90 g3.68`, `tps 186 MFU 3.81%` | `step-100` (`81G`) | `R` `00:44/06:00` |
+
+`10B` was `Gloo` node crash `x3200c0s13b0` at `step 200` with `ckpt step-100 106G` intact, then fresh-restarted (walltime-killed `step-100` had no `.metadata`, `32` shard files but incomplete). `5B` resumed from `step-7000` (`7091->7092` ckpt exists, but `walltime 21667>21600` killed before `step-7000` became resume point). Polaris `7832130 Q 18N small` (`Not enough free nodes`) unchanged since Nov 9 (`80/43` queued `Nov 14 15:16 UTC`, `32 small` running), `Sirius` remains only mover. `LR-finder` `Nov 11-12` `150` steps `GBS128` `1e-8->1e-1`: `5B AdamW 2.48e-04 / Mano 1.81e-04`, `10B AdamW 1.28e-04 / Mano 2.25e-04` (inversion at `10B`) — ready for `Polaris` when `queue` drains.
+
 
 
 ## 2026-11-13: Sirius hedge — 10B 8N + 5B 2N survive outage, both restarted
