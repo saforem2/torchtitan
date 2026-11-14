@@ -72,6 +72,6 @@ since Nov 9 with `Not enough free nodes`.
 
 - [Umbrella `9053470` and per-seat resubmission](../../2026-11-11-umbrella-2088n.md)
 - [Sirius hedge report](../sirius-olmo3-5b-10b.md)
-- [LR finder, 5B](../../../experiments/lr-finder/agpt/4b/README.md)
+- [LR finder, 5B](../../../experiments/lr-finder/agpt/5b/README.md)
 - [`submit_agpt_olmo3_polaris.sh`](../../../../scripts/submit_agpt_olmo3_polaris.sh),
   [`seat-autoretry-20261111.pbs`](../../../../submit/aurora/seat-autoretry-20261111.pbs)
