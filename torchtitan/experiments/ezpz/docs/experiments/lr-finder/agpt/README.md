@@ -4,12 +4,12 @@ Learning-rate-finder results for the dense **agpt** (AuroraGPT) models. This
 page is the cross-model index (master recommended-LR table + findings that
 span model sizes / machines). Per-model detail lives in its own page:
 
-- **[agpt 2B](2b/README.md)** -- small-batch finders + production-batch trend (never cliffs)
-- **[agpt 5B OLMo-tokenizer](5b/README.md)** -- GBS=6144 AdamW/SophiaG sweeps + live fixed-LR validation
-- **[agpt 10B OLMo-tokenizer](10b/README.md)** -- GBS=6144 AdamW/SophiaG evidence; recommendations open
+- **[agpt 5B OLMo-tokenizer](5b/README.md)** -- GBS=128 Sirius + GBS=6144 campaign; fixed-LR validation
+- **[agpt 10B OLMo-tokenizer](10b/README.md)** -- GBS=128 Sirius + GBS=6144 campaign
 - **[agpt 20B](20b/README.md)** -- small-batch finders (no trend yet)
 - **[agpt 30B OLMo-tokenizer](30b/README.md)** -- incomplete LR curves + FSDP2/XCCL runtime diagnosis
 - **[agpt 80B](80b/README.md)** -- GBS=192 finder, GBS=6144 production batch, LR-ceiling-vs-GBS trend
+
 
 For how the finder works, its knobs, and usage, see the
 [methodology README](../README.md). Index-level cross-model figures
@@ -20,8 +20,20 @@ figures live under each model page's `figures/`.
 
 **Calibrate at your production batch size, not a small one.** The optimal LR
 is batch-dependent, and for large models the small-batch number is actively
-misleading -- the 80B small-batch finder said "AdamW 1.1e-5" but at the real
-production batch (GBS=6144) AdamW's usable LR collapses to ~7e-7 and 1e-6
+### 5B/10B at GBS=128 on Sirius — OLMo-3-1K (Nov 11-12, direct Polaris input)
+
+Sirius H100, 8N 32 GPUs, GBS=128 (524k tok), sweep `1e-08 -> 1e-01` 150 steps, `mult=1.114243`, FSDP2 `tp=1`.
+All four arms 150/150 exit 0, finite throughout. Full report: [2026-11-12 OLMo-3 GBS128 Sirius](../2026-11-12-olmo3-gbs128-sirius.md).
+
+| model | AdamW suggested (blow-up) | Mano suggested (blow-up) | note |
+|---|---:|---:|---|
+| **5B** | **2.48e-04** (`2.48e-03`) | **1.81e-04** (`1.81e-03`) | Mano 27% lower than AdamW |
+| **10B** | **1.28e-04** (`1.28e-03`) | **2.25e-04** (`2.25e-03`) | **Mano 76% higher — inversion vs 5B** |
+
+![5B/10B OLMo-3-1K GBS128 all four](5b/figures/sirius-33429-33430-33450-all4-gbs128.png)
+
+Polaris chain (`7832130` 18N, same GBS=128) should use AdamW `2.48e-04/1.28e-04` or Mano `1.81e-04/2.25e-04` (already blow-up/10). Do not extrapolate 5B ordering to 10B+. Detail: [5B](5b/README.md) / [10B](10b/README.md).
+
 sits on a NaN cliff. Prefer the production-batch results below; treat the
 small-batch table as a rough starting point for *small* runs only.
 
@@ -180,4 +192,4 @@ report preserves the cross-model chronology.
 | 2026-08-23 | [30B GBS=960, three optimizers](2026-08-23-30b-gbs960-three-optimizers.md) | AdamW 3.05e-05, Mano 5.61e-05, SophiaG 3.55e-05 (Sunspot, 16N) |
 | 2026-08-23 | [30B Mano on Sunspot](2026-08-23-30b-mano-sunspot.md) | Mano arm detail |
 | 2026-08-30 | [30B GBS=960, Muon](2026-08-30-30b-gbs960-muon.md) | Muon arm |
-| 2026-09-18 / updated 2026-09-27 | [OLMo-3 ladder GBS=6144](2026-09-18-olmo2tok-ladder-gbs6144-nexteval.md) | 4.64B / 9.48B / 26.2B across Aurora + Sunspot; recommendations remain open pending fixed-LR/runtime validation |
+| 2026-11-12 | [OLMo-3-1K GBS=128 on Sirius -- 5B/10B AdamW+Mano](2026-11-12-olmo3-gbs128-sirius.md) | Sirius H100 8N 32 GPUs, GBS=128; 4 arms 150/150 exit 0; 5B AdamW 2.48e-04 / Mano 1.81e-04, 10B AdamW 1.28e-04 / Mano 2.25e-04 (inversion); direct Polaris input |
