@@ -6,7 +6,7 @@
 The agpt-v2 9.48B model: `10b_olmo2tok` geometry (dim 4096, 48 layers, 32 heads,
 8 KV heads, vocab 100352), OLMo-3 tokenizer (byte-identical to OLMo-2-1124-7B),
 4096-token sequences, text tokenized on the fly by Grain. Its 4.64B twin is
-[agpt 5B](../5b/README.md).
+[agpt 4B](../4b/README.md).
 
 ## Status
 

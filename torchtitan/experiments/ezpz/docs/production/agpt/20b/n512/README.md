@@ -4,8 +4,9 @@
 >
 > **This is the canonical 20B production chain.**
 >
-> **Current status (2026-11-14): queued, resumable head `step-10800` on the
-> fixedpos fork.** `9076330` (520 nodes, `small`, 12h) waits to resume it.
+> **Current status (2026-11-14): `9076330` (520 nodes, `small`, 12h) started
+> resuming `step-10800` on the fixedpos fork** (W&B `g4fgz2rv`); no step logged
+> at the time of writing.
 >
 > - **Oct 18-19, umbrella `8938159`:** the constant-LR chain went NaN on every
 >   step from 11,101 through 11,148 (`loss=nan grad_norm=nan`, ~20% MFU), with

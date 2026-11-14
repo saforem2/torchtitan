@@ -27,7 +27,7 @@ The 10B ran `200` steps on `32` GPUs without the FSDP uneven-sharding error. Job
 losses and failures: [sirius-olmo3-5b-10b.md](sirius-olmo3-5b-10b.md).
 
 Per-model pages for these OLMo-3 tokenizer, 4K runs on every machine (Aurora
-olmo-mix seats, Sirius and Polaris Dolma runs): [agpt 5B](5b/README.md),
+olmo-mix seats, Sirius and Polaris Dolma runs): [agpt 4B](4b/README.md),
 [agpt 10B](10b/README.md).
 
 ## Headline (2026-08-31): production is idle

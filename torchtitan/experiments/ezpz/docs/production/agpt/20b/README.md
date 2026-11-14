@@ -2,13 +2,13 @@
 
 > Last updated: 2026-11-14
 >
-> **Both chains are queued, neither is training.** Disk-checked on Aurora
-> 2026-11-14:
+> **20B-512 restarted on 2026-11-14 (`9076330`); 20B-256 is queued.** Disk-checked
+> on Aurora 2026-11-14:
 >
 > | Chain | Resumable head | Tokens | Queued job |
 > |---|---|---|---|
 > | [20B 256N](n256/README.md) | `step-21100` (fixedpos) | 1,062.0B (22.7%) | `9076346`, 260 nodes |
-> | [20B 512N](n512/README.md) | `step-10800` (fixedpos) | 1,087.2B (23.3%) | `9076330`, 520 nodes |
+> | [20B 512N](n512/README.md) | `step-10800` (fixedpos) | 1,087.2B (23.3%) | `9076330`, 520 nodes, running |
 >
 > Since the September snapshot: umbrella `8938159` (Oct 18-19) took the 256N to
 > `step-20900` and sent the 512N NaN from step 11,101. Both chains moved to
