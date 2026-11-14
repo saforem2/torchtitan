@@ -19,6 +19,13 @@ via `scripts/update_all_charts.sh`. Per-model overlays:
 included (no overlay until production ckpts land — see
 [80b/](80b/README.md#all-80b-chains-overlaid)).
 
+## 2026-11-14: Sirius hedge, 5B and 10B on the OLMo-3 tokenizer
+
+While Polaris `7832130` waits for nodes, Sirius trains `5b_olmo3_polaris` (`2N`, step
+`7454` at `15:44 UTC` Nov 14) and `10b_olmo3_polaris` (`8N`, `32` GPUs, fresh restart).
+The 10B ran `200` steps on `32` GPUs without the FSDP uneven-sharding error. Jobs,
+losses and failures: [sirius-olmo3-5b-10b.md](sirius-olmo3-5b-10b.md).
+
 ## Headline (2026-08-31): production is idle
 
 **Nothing has trained on Aurora since 2026-08-26**, and the blocker is the
