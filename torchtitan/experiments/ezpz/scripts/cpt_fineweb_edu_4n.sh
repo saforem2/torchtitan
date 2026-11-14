@@ -1,15 +1,15 @@
 #!/bin/bash --login
 #PBS -A datascience
 #PBS -N cpt-fwe-4n
-#PBS -l walltime=02:00:00
+#PBS -l walltime=12:00:00
 #PBS -l filesystems=tegu:home
 #PBS -l select=4
 #PBS -q workq
 #PBS -j oe
 # PPN=8 proven at 12483025 (F0): 2N=16 ranks, hidden_dim 11008 % 32 == 0 but
-# 11008 % 12/24 != 0, so PPN=12 (48r @4N) and PPN=12 (60r @5N) FSDP-fail on
-# [2,11008,2048] dim 1. Use 4N x PPN=8 = 32r (walltime 02:00:00, workq).
-# Submit: qsub -l select=4 -l walltime=02:00:00 -v NHOSTS_TRAIN=4,NGPU_PER_HOST=8 torchtitan/experiments/ezpz/scripts/cpt_fineweb_edu_4n.sh
+# Use 4N x PPN=8 = 32r (walltime 12:00:00, workq up to 23h — was 02:00 backfill
+# churn, now 12h = ~24k steps/hop vs 4k; chain watcher remains as safety net).
+# Submit: qsub -l select=4 -l walltime=12:00:00 -v NHOSTS_TRAIN=4,NGPU_PER_HOST=8 torchtitan/experiments/ezpz/scripts/cpt_fineweb_edu_4n.sh
 # pack: 4N(FWE)+4N(mix)+4N(SFT)+2N(GRPO)+2N(test) = 16N active on workq (max 128N)
 #
 # CPT 4N: MDS gs138650 step-0 (2B-mds, 11008) -> 60/40 owm/FineWeb-Edu blend on Sunspot.
