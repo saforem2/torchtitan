@@ -1,0 +1,102 @@
+#!/bin/bash --login
+#PBS -N build-vllm-xpu-kernels
+#PBS -l select=1
+#PBS -l walltime=01:00:00
+#PBS -j oe
+# Build a vllm-xpu-kernels wheel for Aurora/Sunspot PVC and check that vLLM
+# picks the XPU platform with it. Submit from the torchtitan checkout:
+#
+#   qsub -A AuroraGPT -q debug -l filesystems=flare:home \
+#     -v V=/path/to/rl-venv,SRC=/path/to/vllm-xpu-kernels \
+#     torchtitan/experiments/ezpz/rl/scripts/build_vllm_xpu_kernels_pvc.pbs
+#
+# Required: V (venv with the target torch), SRC (vllm-xpu-kernels checkout).
+# Optional: DIST (default $SRC/dist-pvc), INSTALL=1 (install the wheel into V),
+#   MAX_JOBS (96), VERSION_SUFFIX (pvconly).
+#
+# Why the flags: vllm-xpu-kernels 4e38707 adds -DVLLM_{MHC,MQA_LOGITS,GDN}_ENABLED
+# whenever those options are on (the default) but compiles the kernels only
+# under VLLM_XPU_ENABLE_XE2. A PVC build has Xe2 off, so _xpu_C ends up with
+# undefined symbols, vllm/platforms/xpu.py fails to import it, and vLLM falls
+# back to UnspecifiedPlatform ("Device string must not be empty"). The default
+# AOT list also names bmg-g31-a0, which the compute-node ocloc rejects.
+set -euo pipefail
+
+WT="${PBS_O_WORKDIR:-$(pwd)}"
+: "${V:?submit with -v V=/path/to/venv}"
+: "${SRC:?submit with -v SRC=/path/to/vllm-xpu-kernels}"
+DIST="${DIST:-$SRC/dist-pvc}"
+JOB="${PBS_JOBID%%.*}"
+
+cd "$WT"
+set +u
+# shellcheck source=torchtitan/experiments/ezpz/scripts/load_pinned_ezpz_utils.sh
+source "$WT/torchtitan/experiments/ezpz/scripts/load_pinned_ezpz_utils.sh"
+{ load_pinned_ezpz_utils && ezpz_setup_job && ezpz_load_modules; } >/dev/null 2>&1 \
+  || { echo "SETUP_FAILED"; exit 13; }
+set -u
+unset PYTHONHOME
+export VIRTUAL_ENV="$V" PATH="$V/bin:/opt/pbs/bin:$PATH"
+
+# The venv's SYCL/UR libraries must come before the module's, or
+# `import torch` fails on urGraphGetIdExp.
+ldf="$DIST/ld-first"
+mkdir -p "$ldf"
+for lib in "$V"/lib/libur_* "$V"/lib/libsycl.so* "$V"/lib/libumf* "$V"/lib/libtcm*; do
+  [[ -e "$lib" ]] && ln -sf "$lib" "$ldf/"
+done
+export LD_LIBRARY_PATH="$ldf:${LD_LIBRARY_PATH:-}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export http_proxy="${http_proxy:-http://proxy.alcf.anl.gov:3128}"
+export https_proxy="${https_proxy:-http://proxy.alcf.anl.gov:3128}"
+
+export VLLM_XPU_ENABLE_XE_DEFAULT=1 VLLM_XPU_ENABLE_XE2=0 VLLM_XPU_ENABLE_XE3P=0
+export MHC_KERNELS_ENABLED=0 MQA_LOGITS_KERNELS_ENABLED=0 GDN_KERNELS_ENABLED=0
+export VLLM_XPU_AOT_DEVICES=pvc VLLM_XPU_XE2_AOT_DEVICES=pvc
+export MAX_JOBS="${MAX_JOBS:-96}"
+
+cd "$SRC"
+rev=$(git rev-parse --short HEAD)
+base_version=$(python -c "import setuptools_scm; print(setuptools_scm.get_version().split('+')[0])")
+export VLLM_VERSION_OVERRIDE="${base_version}+g${rev}.${VERSION_SUFFIX:-pvconly}"
+echo "SRC $SRC rev=$rev version=$VLLM_VERSION_OVERRIDE torch=$(python -c 'import torch; print(torch.__version__)')"
+
+# CMake caches under .deps keep absolute paths. A tree copied from another
+# machine must not reuse them.
+for d in .deps/*-subbuild .deps/*-build; do
+  [[ -f "$d/CMakeCache.txt" ]] || continue
+  grep -q "CMAKE_CACHEFILE_DIR:INTERNAL=$SRC/" "$d/CMakeCache.txt" && continue
+  echo "FATAL: $d was configured in another tree; move it aside and resubmit"
+  exit 19
+done
+
+mkdir -p "$DIST"
+log="$DIST/build-$JOB.log"
+echo "BUILD_START $(date -Is) log=$log"
+python setup.py bdist_wheel --dist-dir "$DIST" >"$log" 2>&1 || { tail -80 "$log"; exit 21; }
+echo "BUILD_DONE $(date -Is)"
+wheel="$DIST/vllm_xpu_kernels-${VLLM_VERSION_OVERRIDE}-cp312-cp312-linux_x86_64.whl"
+[[ -f "$wheel" ]] || { echo "FATAL: expected $wheel"; ls "$DIST"; exit 22; }
+echo "WHEEL $wheel"
+
+if [[ "${INSTALL:-0}" == 1 ]]; then
+  uv pip install --python "$V/bin/python" --no-deps --force-reinstall "$wheel"
+  cd "$WT"
+  python - <<'PY'
+import importlib
+
+failed = []
+for m in ("vllm_xpu_kernels._C", "vllm_xpu_kernels._moe_C",
+          "vllm_xpu_kernels._xpu_C", "vllm_xpu_kernels._vllm_fa2_C",
+          "vllm.platforms.xpu"):
+    try:
+        importlib.import_module(m)
+        print("OK", m)
+    except Exception as e:
+        print("FAIL", m, e)
+        failed.append(m)
+from vllm.platforms import current_platform
+print("vllm_platform", type(current_platform).__name__, repr(current_platform.device_type))
+raise SystemExit(1 if failed or current_platform.device_type != "xpu" else 0)
+PY
+fi
