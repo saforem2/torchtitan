@@ -15,69 +15,69 @@ date: 2026-03-15
 
 ## Recently Updated
 
-The 25 most-recently-changed docs by git commit date (across all 308
+The 25 most-recently-changed docs by git commit date (across all 330
 docs, not just the curated tables below). Auto-generated -- do not edit
 by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 
 <!-- BEGIN recently-updated (auto-generated) -->
 | Modified | Doc |
 |---------:|-----|
-| 2026-09-30 | [Upstream Sync Log](./upstream-sync.md) |
-| 2026-09-30 | [Summaries](./summaries/README.md) |
-| 2026-09-30 | [INCITE Quarterly Report — Q3 2026 (Jul 1 – Sep 30)](./summaries/2026-Q3-incite.md) |
-| 2026-09-30 | [AuroraGPT-80B Scaling & Benchmarks](./scaling/agpt-80b.md) |
-| 2026-09-30 | [Production RL with Monarch, TorchStore, and vLLM on XPU](./production/rl/monarch.md) |
-| 2026-09-30 | [Production dispatch log](./production/dispatch-log.md) |
-| 2026-09-30 | [Production Training — agpt 80B](./production/agpt/80b/README.md) |
-| 2026-09-30 | [Production Training — agpt 2B @ 512 nodes](./production/agpt/2b/n512/README.md) |
-| 2026-09-30 | [Production Training — agpt 2B @ 256 nodes](./production/agpt/2b/n256/README.md) |
-| 2026-09-30 | [Production Training — agpt 2B](./production/agpt/2b/README.md) |
-| 2026-09-30 | [Production Training — agpt 20B @ 512 nodes](./production/agpt/20b/n512/README.md) |
-| 2026-09-30 | [Production Training — agpt 20B @ 256 nodes](./production/agpt/20b/n256/README.md) |
-| 2026-09-30 | [Development Journal](./journal.md) |
-| 2026-09-30 | [Training agpt_80b on Aurora](./guides/training/agpt_80b.md) |
-| 2026-09-30 | [Running with newer PyTorch on Aurora prod (oneAPI 2026.1)](./guides/running-with-newer-pytorch.md) |
-| 2026-09-30 | [Upstream f359667 merge readiness](./experiments/upstream-f359667-merge-readiness.md) |
-| 2026-09-30 | [30B SophiaG bounded LR canary — 2026-09-30](./experiments/lr-finder/agpt/data/2026-09-30-30b-sophiag-canary/README.md) |
-| 2026-09-30 | [30B AdamW bounded canary evidence](./experiments/lr-finder/agpt/data/2026-09-30-30b-adamw-canary/README.md) |
-| 2026-09-30 | [LR Finder — agpt 30B OLMo-tokenizer](./experiments/lr-finder/agpt/30b/README.md) |
-| 2026-09-30 | [Aurora production checkpoint migration matrix](./experiments/agpt/aurora/2026-09-30-production-checkpoint-migration-matrix.md) |
-| 2026-09-30 | [ConfigLoader production migration gate — Aurora seat-4](./experiments/agpt/aurora/2026-09-30-configloader-candidate-gate.md) |
-| 2026-09-30 | [agpt (Dense AuroraGPT) Benchmarks](./experiments/agpt/README.md) |
-| 2026-09-30 | [AuroraGPT evaluation strategy: modern-suite review (2026-07)](./evals/eval-landscape-2026-07.md) |
-| 2026-09-30 | [Evaluation Results — agpt 20B](./evals/agpt/20b/README.md) |
-| 2026-09-30 | [Evaluation Results](./evals/README.md) |
+| 2026-11-14 | [Upstream Sync Log](./upstream-sync.md) |
+| 2026-11-14 | [Continued Pre-Training (CPT) — 2B olmo x dolmino mixing-ratio sweep](./production/cpt/README.md) |
+| 2026-11-14 | [Production Training Runs — Aurora](./production/README.md) |
+| 2026-11-14 | [AuroraGPT-2B post-training: complete status](./production/POST-TRAINING-2B.md) |
+| 2026-11-14 | [Development Journal](./journal.md) |
+| 2026-11-12 | [FineWeb-Edu 60/40 kind-shift: the next pre-training lever for agpt-2B](./production/sft/fineweb-edu-60-40-kind-shift.md) |
+| 2026-11-12 | [Production SFT](./production/sft/README.md) |
+| 2026-11-12 | [Production RL with Monarch, TorchStore, and vLLM on XPU](./production/rl/monarch.md) |
+| 2026-11-12 | [Aurora 2088N umbrella 9053470 and per-seat resubmission — 2026-11-09 to 2026-11-11](./production/2026-11-11-umbrella-2088n.md) |
+| 2026-11-12 | [XPU: intermittent FSDP all-gather hang after step 7 (2026-11-11)](./guides/known-bugs/xpu-fsdp-allgather-hang-after-step-7.md) |
+| 2026-11-12 | [MoE at TP>1: wo gets Shard(0) where row-parallel wants Partial(sum)](./guides/known-bugs/moe-tp2-wo-placement.md) |
+| 2026-11-12 | [CUDA: default CUDA graph capture breaks ezpz MoE and native DDP (2026-11-12)](./guides/known-bugs/cuda-graphs-moe-native-ddp.md) |
+| 2026-11-12 | [AuroraGPT-2B: XPU throughput recovery on Sunspot](./experiments/agpt/sunspot/2026-11-02-throughput-recovery.md) |
+| 2026-11-12 | [MMLU letter-prior gating note: constant-D beats every agpt-2B model](./evals/mmlu-letter-prior-gating.md) |
+| 2026-11-12 | [AuroraGPT MMLU sits at chance because the models answer with a letter prior](./evals/mmlu-letter-prior-at-chance.md) |
+| 2026-11-12 | [Evaluation Results](./evals/README.md) |
+| 2026-11-05 | [SFT recipe: agpt-2b-v2-256n-step92859 x tulu_math_uc_mix](./production/sft/agpt/2b-v2-256n/tulu_math_uc_mix/README.md) |
+| 2026-11-02 | [AuroraGPT-2B: recovered Sunspot MDS/TT comparison](./experiments/agpt/sunspot/2026-11-02-recovery-comparison.md) |
+| 2026-11-02 | [agpt (Dense AuroraGPT) Benchmarks](./experiments/agpt/README.md) |
+| 2026-11-01 | [Sunspot startup isolation: MDS/TT continuation](./experiments/agpt/sunspot/2026-11-01-startup-incident.md) |
+| 2026-11-01 | [AuroraGPT-2B: same-allocation MDS and TorchTitan comparison](./experiments/agpt/sunspot/2026-11-01-paired-performance.md) |
+| 2026-11-01 | [AuroraGPT-2B MDS/TT: recovered comparison and handoff audit](./experiments/agpt/sunspot/2026-11-01-handoff-audit.md) |
+| 2026-11-01 | [AuroraGPT-2B: replicated TT versus MDS ZeRO-0](./experiments/agpt/sunspot/2026-10-31-replicated-comparison.md) |
+| 2026-10-31 | [Production Training Runs -- Polaris (A100)](./production/polaris/README.md) |
+| 2026-10-31 | [Sunspot AuroraGPT-2B: Megatron-DeepSpeed versus TorchTitan](./experiments/agpt/sunspot/2026-10-29-native-checkpoint-closure.md) |
 
 <details>
 <summary>Next 25 (#26-50)</summary>
 
 | Modified | Doc |
 |---------:|-----|
-| 2026-09-30 | [docs/ tree map](./TREE.md) |
-| 2026-09-30 | [Pre-Training AuroraGPT with TorchTitan + 🍋 ezpz](./README.md) |
-| 2026-09-29 | [LR Finder — agpt 5B OLMo-tokenizer](./experiments/lr-finder/agpt/5b/README.md) |
-| 2026-09-29 | [Experiment Benchmark Reports](./experiments/README.md) |
-| 2026-09-29 | [Sunspot multi-host Monarch, TorchStore, and vLLM validation](./experiments/2026-09-25-sunspot-multihost-rl-validation.md) |
-| 2026-09-27 | [Ten days ending 2026-09-26](./summaries/2026-09-26.md) |
-| 2026-09-27 | [Verified OLMo-3-vocab GBS=6144 evidence](./experiments/lr-finder/agpt/data/2026-09-24-olmo2tok-gbs6144-verified/README.md) |
-| 2026-09-27 | [LR Finder -- agpt (Dense) -- index](./experiments/lr-finder/agpt/README.md) |
-| 2026-09-27 | [OLMo-3-vocab LR finder: 5B / 10B / 30B at GBS=6144](./experiments/lr-finder/agpt/2026-09-18-olmo2tok-ladder-gbs6144-nexteval.md) |
-| 2026-09-27 | [LR Finder — agpt 10B OLMo-tokenizer](./experiments/lr-finder/agpt/10b/README.md) |
-| 2026-09-27 | [Learning Rate Finder](./experiments/lr-finder/README.md) |
-| 2026-09-26 | [Torch 2.14 Monarch GRPO: AGPT-2B rollout diagnosis](./production/rl/grpo/torch214-reproduction.md) |
-| 2026-09-26 | [AGPT-2B Stage-4 MetaMath distillation and model interpolation](./experiments/2026-09-26-agpt2b-stage4-metamath.md) |
-| 2026-09-25 | [GRPO on Intel XPU: TRL GRPOTrainer](./production/rl/trl.md) |
-| 2026-09-25 | [Wiring vLLM-XPU into ezpz/rl — architecture + sequencing plan](./production/rl/history/vllm-xpu-wiring-plan.md) |
-| 2026-09-25 | [vLLM-XPU on torch 2.13 — investigation findings](./production/rl/history/vllm-xpu-investigation.md) |
-| 2026-09-25 | [vLLM-XPU + Monarch RL infra status (as of 2026-06-13 PM)](./production/rl/history/vllm-xpu-current-status.md) |
-| 2026-09-25 | [Upstream torchtitan.experiments.rl.train port status (2026-06-13)](./production/rl/history/upstream-rl-port-status.md) |
-| 2026-09-25 | [GRPO+LoRA on Intel XPU: Sunspot reproduction (Monarch + TorchStore + vLLM)](./production/rl/history/grpo-lora-xpu-repro.md) |
-| 2026-09-25 | [GRPO+LoRA on XPU: agpt-2b (Llama) port for SFT checkpoint-900](./production/rl/history/grpo-lora-agpt2b-repro.md) |
-| 2026-09-25 | [RL bring-up history](./production/rl/history/README.md) |
-| 2026-09-25 | [GRPO+LoRA on XPU: Monarch + TorchStore + vLLM](./production/rl/history/2026-07-19_monarch-single-host-grpo.md) |
-| 2026-09-25 | [Monarch + torch 2.13 deep-dive (2026-06-14)](./production/rl/history/2026-06-14_monarch-torch213-deep-dive.md) |
-| 2026-09-25 | [RL bring-up + 2026-07-01 multi-node investigation (historical narrative)](./production/rl/history/2026-06-13-bringup-and-2026-07-01-desync.md) |
-| 2026-09-25 | [Production GRPO](./production/rl/grpo/README.md) |
+| 2026-10-31 | [Why the MDS ZeRO1 run outperformed TorchTitan HSDP](./experiments/agpt/sunspot/2026-10-24-zero1-hsdp-diagnosis.md) |
+| 2026-10-31 | [Sunspot FLAT runs: timing complete, checkpoint weights differ](./experiments/agpt/sunspot/2026-10-24-matched-flat-execution.md) |
+| 2026-10-31 | [AuroraGPT-2B: TorchTitan and Megatron-DeepSpeed on Sunspot](./experiments/agpt/sunspot/2026-10-23-compile-sharding.md) |
+| 2026-10-29 | [AuroraGPT-80B Scaling & Benchmarks](./scaling/agpt-80b.md) |
+| 2026-10-29 | [RL (GRPO) on Intel XPU](./production/rl/README.md) |
+| 2026-10-29 | [Production Training — agpt 80B](./production/agpt/80b/README.md) |
+| 2026-10-29 | [Aurora 20B production restart — 2026-10-29](./production/2026-10-29-20b-restart.md) |
+| 2026-10-29 | [Training agpt_80b on Aurora](./guides/training/agpt_80b.md) |
+| 2026-10-29 | [Dead CLI flags in archived historical PBS scripts](./guides/known-bugs/dead-cli-flags-in-repo-root-pbs.md) |
+| 2026-10-29 | [AGPT MoE Hugging Face export](./guides/agpt-moe-hf-eval.md) |
+| 2026-10-29 | [MoE HF export review fixes and pipeline validation](./experiments/moe/aurora/2026-10-06-hf-export-review-fixes.md) |
+| 2026-10-29 | [HF export PR feedback fixes](./experiments/moe/aurora/2026-10-06-hf-export-pr-feedback.md) |
+| 2026-10-29 | [Matched dense 2B and MoE 12B2A HF evaluation](./experiments/moe/aurora/2026-10-06-hf-dense-moe-paired.md) |
+| 2026-10-29 | [MoE (Mixture of Experts) Benchmarks](./experiments/moe/README.md) |
+| 2026-10-29 | [Mano LR finder at 30B (Sunspot, 2026-08-23)](./experiments/lr-finder/agpt/2026-08-23-30b-mano-sunspot.md) |
+| 2026-10-29 | [Pre-Training AuroraGPT with TorchTitan + 🍋 ezpz](./README.md) |
+| 2026-10-19 | [Follow-up umbrella: Monday boost (>2048N) — 2026-10-20](./production/followup-umbrella-boost-20261020.md) |
+| 2026-10-16 | [Ten days ending 2026-09-26](./summaries/2026-09-26.md) |
+| 2026-10-16 | [Production Training — agpt 2B @ 256 nodes](./production/agpt/2b/n256/README.md) |
+| 2026-10-16 | [Production Training — agpt 20B @ 512 nodes](./production/agpt/20b/n512/README.md) |
+| 2026-10-16 | [Production Training — agpt 20B @ 256 nodes](./production/agpt/20b/n256/README.md) |
+| 2026-10-16 | [Evaluation Results — agpt 20B](./evals/agpt/20b/README.md) |
+| 2026-10-15 | [BlendCorpus restarts replay the data stream](./guides/blendcorpus-resume-position.md) |
+| 2026-10-01 | [Sunspot multi-host Monarch, TorchStore, and vLLM validation](./experiments/2026-09-25-sunspot-multihost-rl-validation.md) |
+| 2026-09-30 | [Summaries](./summaries/README.md) |
 
 </details>
 <!-- END recently-updated (auto-generated) -->
@@ -89,19 +89,19 @@ going?" Tracking is per-model and per-node-count.
 
 | Page | Notes | Modified |
 |------|-------|---------:|
-| [Production Index](./production/README.md) | Top-level snapshot of every active trajectory | 2026-09-21 |
+| [Production Index](./production/README.md) | Top-level snapshot of every active trajectory | 2026-11-14 |
 | [Dense (agpt) Production](./production/agpt/README.md) | 2B / 20B / 80B chains, v1-vs-v2 overlays | 2026-08-31 |
-| [2B 256N](./production/agpt/2b/n256/README.md) | step-**92,859** (4.674T tokens, 100.0% of 4.67T), loss 2.6524. | 2026-09-30 |
+| [2B 256N](./production/agpt/2b/n256/README.md) | step-**92,859** (4.674T tokens, 100.0% of 4.67T), loss 2.6524. | 2026-10-16 |
 | [2B 512N](./production/agpt/2b/n512/README.md) | step-**46429** (4.67T tokens, 100.0% of 4.67T), loss 2.6869. | 2026-09-30 |
-| [20B 512N](./production/agpt/20b/n512/README.md) | step-**11,100** (11,100 x 12,288 x 8,192 = **1,117.4B tokens**), loss 2.31773. | 2026-09-30 |
-| [20B 256N](./production/agpt/20b/n256/README.md) | step-**17,500** (880.8B tokens, 18.8% of 4.67T), loss 2.41783. | 2026-09-30 |
-| [agpt 80B](./production/agpt/80b/README.md) | **Blocked at scale by a high-dp NaN; root cause unknown.** Optimizer-independent (SophiaG 512N, mano 62N); the earlier "bf16 residual-stream overflow" diagnosis is refuted ([what we know](./guides/known-bugs/80b-nan-what-we-know.md)). fp32 activations prevent it at ~3.4x cost; fp32-residual alone still NaNs at dp=192; no live 80B production, fp32-residual work dormant. Wall 2 (256N init segfault) separate + open. | 2026-09-30 |
+| [20B 512N](./production/agpt/20b/n512/README.md) | step-**11,100** (11,100 x 12,288 x 8,192 = **1,117.4B tokens**), loss 2.31773. | 2026-10-16 |
+| [20B 256N](./production/agpt/20b/n256/README.md) | step-**17,500** (880.8B tokens, 18.8% of 4.67T), loss 2.41783. | 2026-10-16 |
+| [agpt 80B](./production/agpt/80b/README.md) | **Blocked at scale by a high-dp NaN; root cause unknown.** Optimizer-independent (SophiaG 512N, mano 62N); the earlier "bf16 residual-stream overflow" diagnosis is refuted ([what we know](./guides/known-bugs/80b-nan-what-we-know.md)). fp32 activations prevent it at ~3.4x cost; fp32-residual alone still NaNs at dp=192; no live 80B production, fp32-residual work dormant. Wall 2 (256N init segfault) separate + open. | 2026-10-29 |
 | [80B 512N NaN incident (2026-07-03)](./experiments/agpt/aurora/20260703-80b-512n-sophiag-nan.md) | Incident record of the 512N NaN + NaN-abort guard. NOTE: the SophiaG-Hessian attribution was later disproven (2026-07-14, task #21) -- the NaN is optimizer-independent; the follow-on residual-overflow diagnosis is also refuted, root cause unknown (see `guides/known-bugs/80b-nan-what-we-know.md`). | 2026-07-24 |
 | [20B 1024N](./production/agpt/20b/n1024/README.md) | First attempt (8463183) crashed at startup; not retried | 2026-06-24 |
 | [2B 1024N](./production/agpt/2b/n1024/README.md) | First attempt (8463182) crashed at startup; not retried | 2026-06-24 |
 | [agpt 2B](./production/agpt/2b/README.md) | All 2B trajectories + v1-vs-v2 overlay | 2026-09-30 |
 | [agpt 2B-MDS](./production/agpt/2b-mds/README.md) | Pre-torchtitan Megatron-DeepSpeed reference baseline | 2026-05-03 |
-| [2B CPT (olmo x dolmino)](./production/cpt/README.md) | Continued-pretraining ratio sweep forked from the completed 2B base (step-92,859). 300B pilots done (dolmino-100 val 2.49, olmo50-50 val 2.60, both beat the olmo-100 plateau ~2.80); eval screen queued (8647850), winner scales to ~2.4T (MDS stage-2 match). | 2026-08-31 |
+| [2B CPT (olmo x dolmino)](./production/cpt/README.md) | Continued-pretraining ratio sweep forked from the completed 2B base (step-92,859). 300B pilots done (dolmino-100 val 2.49, olmo50-50 val 2.60, both beat the olmo-100 plateau ~2.80); eval screen queued (8647850), winner scales to ~2.4T (MDS stage-2 match). | 2026-11-14 |
 | [Production Scaling Report](./production/scaling-performance.md) | Apr 18-21 experiments (historical) | 2026-06-28 |
 
 ## Evaluation (lm-eval results)
@@ -112,9 +112,9 @@ ARC-Challenge / Winogrande vs the (frozen-norm) v1 baseline.
 | Page | Notes | Modified |
 |------|-------|---------:|
 | [agpt 2B evals](./evals/agpt/2b/README.md) | v2 256N async sweep step 36K-45.5K (plateau at ARC-Easy ~0.645). v2 512N sync sweep step 14K-25K. v2 512N full sweep step 1K-13K + 256N-vs-512N per-batch. v2 ARC-Easy **0.6115** at step-13K (+33pp vs v1). | 2026-08-31 |
-| [agpt 20B evals](./evals/agpt/20b/README.md) | **🏁 20B 512N sync full sweep step 900-3,200: ARC-Easy 0.463→0.665 (+20pp), HellaSwag norm 0.296→0.574 (+28pp). Now beating 2B 256N async per token.** v1 vs v2 step 100-800 (ARC-Easy 0.27 → 0.44) + 256N-vs-512N comparator. | 2026-09-30 |
+| [agpt 20B evals](./evals/agpt/20b/README.md) | **🏁 20B 512N sync full sweep step 900-3,200: ARC-Easy 0.463→0.665 (+20pp), HellaSwag norm 0.296→0.574 (+28pp). Now beating 2B 256N async per token.** v1 vs v2 step 100-800 (ARC-Easy 0.27 → 0.44) + 256N-vs-512N comparator. | 2026-10-16 |
 | [agpt 2B-MDS evals](./evals/agpt/2b-mds/README.md) | Pre-torchtitan reference scores | 2026-07-09 |
-| [Eval Index](./evals/README.md) | Top-level eval landing page | 2026-09-30 |
+| [Eval Index](./evals/README.md) | Top-level eval landing page | 2026-11-12 |
 
 ## Big Findings (post-mortems and live workarounds)
 
@@ -133,7 +133,7 @@ relevant guide before suggesting work that touches one of these.
 
 | Page | Notes | Modified |
 |------|-------|---------:|
-| [Development Journal](./journal.md) | Session-by-session log of what happened, with findings and incidents | 2026-09-30 |
+| [Development Journal](./journal.md) | Session-by-session log of what happened, with findings and incidents | 2026-11-14 |
 | [AuroraGPT Sync Notes](./meeting-notes/agpt-sync.md) | Recurring agendas + action items | 2026-09-01 |
 | [Meeting Notes Index](./meeting-notes/README.md) | Top-level meeting index | 2026-05-04 |
 | [Summary 2026-04-12 → 2026-04-27](./summaries/2026-04-27.md) | 2-week retrospective | 2026-08-31 |
@@ -157,7 +157,7 @@ relevant guide before suggesting work that touches one of these.
 | [Scaling Index](./scaling/README.md) | Top-level scaling landing page | 2026-06-06 |
 | [agpt 2B scaling](./scaling/agpt-2b.md) | Per-N TPS / MFU | 2026-08-31 |
 | [agpt 20B scaling](./scaling/agpt-20b.md) | Per-N TPS / MFU | 2026-08-31 |
-| [agpt 80B scaling](./scaling/agpt-80b.md) | Per-N TPS / MFU | 2026-09-30 |
+| [agpt 80B scaling](./scaling/agpt-80b.md) | Per-N TPS / MFU | 2026-10-29 |
 | [MoE scaling](./scaling/moe.md) | Per-N TPS / MFU | 2026-06-13 |
 | [Per-run Experiment Reports](./experiments/README.md) | Raw smoke tests, LR-finder sweeps, benchmark logs | 2026-09-29 |
 
@@ -166,13 +166,13 @@ relevant guide before suggesting work that touches one of these.
 | Page | Notes | Modified |
 |------|-------|---------:|
 | [Optimizer Speedrun Competitions](./competitions/README.md) | [W&B link](https://api.wandb.ai/links/aurora_gpt/hda3milo) | 2026-04-28 |
-| [RL (GRPO) Experiment](./production/rl/README.md) | TRL-based GRPO on XPU (experimental) | 2026-09-25 |
+| [RL (GRPO) Experiment](./production/rl/README.md) | TRL-based GRPO on XPU (experimental) | 2026-10-29 |
 
 ## Outbound (upstream)
 
 | Page | Notes | Modified |
 |------|-------|---------:|
-| [Upstream Sync Log](./upstream-sync.md) | What we pulled from `pytorch/torchtitan` and replayed onto agpt/moe. Syncs 82 and 83 have both LANDED (`09b4ef235`, `609777a0e`). | 2026-09-30 |
+| [Upstream Sync Log](./upstream-sync.md) | What we pulled from `pytorch/torchtitan` and replayed onto agpt/moe. Syncs 82 and 83 have both LANDED (`09b4ef235`, `609777a0e`). | 2026-11-14 |
 | [`_dist_reduce` skips DTensor reduction (PR #3204)](./upstream-issues/dist_reduce_dtensor_skip.md) | **Closed as superseded 2026-06-12** — upstream landed `to_local()` fix via PR #3159 (commit `d64eabcce`, 2026-05-18). | 2026-06-12 |
 | [`StateDictStager` bug](./upstream-issues/STATE_DICT_STAGER_ISSUE.md) | Repro for upstream filing | 2026-05-01 |
 
