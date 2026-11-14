@@ -610,32 +610,50 @@ def main() -> None:
                 for column in ("assistant_masks", "completion_mask")
                 if column in dataset.column_names
             ]
-            # FAST PATH: vectorized labels build. Failures so far:
+            # FAST PATH: batched vectorized labels build. Failures so far:
             #   - pure-Python add_column: 2.7M x 8192 = 22B iters, spool frozen 22m (12483770 Exit 143)
             #   - dataset.map w/ num_proc=1: still spawns Manager on HSN -> EOFError (12483758/63, 12483786)
             #   - np.array on batched list[list[int]]: ragged lengths (last seq 8134 vs 8192) -> inhomogeneous (12483800)
-            # Fix: per-row numpy (still 2.7M allocs but in C) via add_column with pure-Python outer loop.
-            # This avoids Manager AND handles ragged tails. Outer loop 2.7M is acceptable (~40-60s on UAN;
-            # on compute with numpy int32 it vectorizes the inner 8192 in C so real cost is Python for-loop
-            # overhead only, ~8-10 min worst case — still within 12h, and no SIGBUS). Fallback if numpy absent.
+            #   - per-row numpy (2.7M Python allocs): ~30-40m on 11.2B tok B3 mix (12483808, 80 lines frozen)
+            # Fix: batched numpy — outer loop over BATCH_SIZE rows, inner is a single C-level
+            # np.where per batch. Ragged tails (last shard often 8134 vs 8192) are zero-padded
+            # to max_len_in_batch then sliced back per-row, so every _ids.tolist() keeps
+            # original length. Throughput dominated by numpy, Python loop count drops 2.7M -> ~275.
+            _BATCH = 10000
+            _PAD = 0
             try:
                 import numpy as np
 
                 _t0 = __import__("time").monotonic()
                 log.info(
-                    f"[rank {rank}] building labels via numpy-per-row "
-                    f"({len(dataset)} rows, expect ~5-8 min)..."
+                    f"[rank {rank}] building labels via batched numpy "
+                    f"(batch={_BATCH}, {len(dataset)} rows, expect ~2-3 min)..."
                 )
-                labels_col: list[list[int]] = []
-                for _i, _ex in enumerate(dataset):
-                    _ids = np.array(_ex["input_ids"], dtype=np.int32)
-                    _mask = np.array(_ex[mask_column], dtype=np.bool_)
-                    _ids[~_mask] = -100
-                    labels_col.append(_ids.tolist())
-                    if _i and _i % 500000 == 0:
+                labels_col: list[list[int]] = [None] * len(dataset)  # type: ignore[list-item]
+                # Iterate by contiguous slices so we only touch each row twice
+                # (once to gather ids/mask lengths, once to write back).
+                for _start in range(0, len(dataset), _BATCH):
+                    _end = min(_start + _BATCH, len(dataset))
+                    _slice = dataset[_start:_end]  # batched dict[str, list]
+                    _batch_lens = [len(r) for r in _slice["input_ids"]]
+                    _max_len = max(_batch_lens)
+                    # Pad ragged rows to _max_len with 0 so np.array is rectangular;
+                    # labels for padded positions are never used (sliced back to orig len).
+                    _ids_arr = np.zeros((_end - _start, _max_len), dtype=np.int32)
+                    _mask_arr = np.zeros((_end - _start, _max_len), dtype=bool)
+                    for _j, (_ids_row, _mask_row) in enumerate(
+                        zip(_slice["input_ids"], _slice[mask_column], strict=True)
+                    ):
+                        _L = len(_ids_row)
+                        _ids_arr[_j, :_L] = _ids_row
+                        _mask_arr[_j, :_L] = _mask_row
+                    _ids_arr[~_mask_arr] = -100
+                    for _j, _L in enumerate(_batch_lens):
+                        labels_col[_start + _j] = _ids_arr[_j, :_L].tolist()
+                    if _start and _start % 500000 == 0:
                         log.info(
-                            f"[rank {rank}] labels progress {_i}/{len(dataset)} "
-                            f"({100*_i/len(dataset):.0f}%, {__import__('time').monotonic()-_t0:.0f}s)"
+                            f"[rank {rank}] labels progress {_start}/{len(dataset)} "
+                            f"({100*_start/len(dataset):.0f}%, {__import__('time').monotonic()-_t0:.0f}s)"
                         )
                 dataset = dataset.add_column("labels", labels_col)
                 log.info(
