@@ -825,6 +825,7 @@ TRAJECTORIES: list[dict] = [
         "model": "20b",
         "version": "v2",
         "num_nodes": 128,
+        "gpus_per_node": 4,
         # Polaris lives in its OWN clone under /eagle (not /flare): a
         # separate checkout with separate outputs/checkpoints. See
         # docs/production/polaris/README.md.
@@ -912,6 +913,7 @@ TRAJECTORIES: list[dict] = [
         "model": "4b",
         "version": "v2",
         "num_nodes": 2,
+        "gpus_per_node": 4,
         "ckpt_dir": None,
         "readme": f"{_DOCS}/4b/README.md",
         "gbs": 8,
@@ -938,6 +940,7 @@ TRAJECTORIES: list[dict] = [
         "model": "10b",
         "version": "v2",
         "num_nodes": 8,
+        "gpus_per_node": 4,
         "ckpt_dir": None,
         "readme": f"{_DOCS}/10b/README.md",
         "gbs": 32,

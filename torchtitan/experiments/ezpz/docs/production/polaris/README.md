@@ -120,9 +120,9 @@ latest-wins into one continuous curve).
 
 > **These figures are stale.** Rendered 2026-07-22 at step ~2,499 (9 legs); the chain is at **6,800 across 23 legs** (Oct 18). Wiring was fixed on HEAD (`trajectories.py` + `update_all_charts.sh`) -- regenerate via `bash torchtitan/experiments/ezpz/scripts/update_all_charts.sh` (needs W&B creds).
 
-![20B Polaris production training](figures/production_20b_polaris_128n.png)
+![20B Polaris production training](figures/production_20b_polaris_128n.svg)
 
-![20B Polaris diagnostics](figures/diagnostics_20b_polaris_128n.png)
+![20B Polaris diagnostics](figures/diagnostics_20b_polaris_128n.svg)
 
 Regenerate (from the Polaris repo, whose venv has W&B creds + the
 plotting stack):
