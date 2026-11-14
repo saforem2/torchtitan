@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
 """Plot production training metrics pulled from W&B.
 
 W&B is the single source of truth for production training history,
@@ -64,6 +69,23 @@ def _savefig_both(fig, svg_path, dpi=200):
     print(f"Saved: {svg_path}")
     print(f"Saved: {png_path}")
 
+
+# The W&B/.o-log fetch + concat logic is shared with prod_dash.py via this
+# dependency-light module (stdlib + lazy wandb; NO numpy/matplotlib/torch) so
+# the chart plotters and the live board can never drift again. This file adapts
+# its plain-dict records to the numpy/METRIC_KEYS contract the plotters expect.
+from torchtitan.experiments.ezpz.utils import wandb_fetch  # noqa: E402
+
+# Family mid-tones from the shared palette. The local copy here said
+# 20b -> #D32F2F (red), which contradicted plot_production_combined.py where
+# red WAS the 2B family -- so 2B rendered blue in the per-run charts and red
+# in the overlay. utils/palette.py is now the only definition.
+from torchtitan.experiments.ezpz.utils.palette import (  # noqa: E402
+    alpha_for as _pal_alpha,
+    CHAIN_COLORS as _PAL_CHAIN_COLORS,
+    MODEL_COLORS,
+)
+
 # Production runs identified by step ranges (cross-checked with PBS logs).
 # Listed oldest first so concatenation matches resume order.
 # Each key here drives the figure filename + output dir:
@@ -89,25 +111,9 @@ def _savefig_both(fig, svg_path, dpi=200):
 # trajectories.py — that single edit updates the charts, the stale-doc
 # map, the field-filler, and the eval plots together.
 from torchtitan.experiments.ezpz.utils.trajectories import (  # noqa: E402
+    by_key,
     OLMO_MIX_1124_TOKENS,
     PRODUCTION_RUNS,
-    by_key,
-)
-
-# The W&B/.o-log fetch + concat logic is shared with prod_dash.py via this
-# dependency-light module (stdlib + lazy wandb; NO numpy/matplotlib/torch) so
-# the chart plotters and the live board can never drift again. This file adapts
-# its plain-dict records to the numpy/METRIC_KEYS contract the plotters expect.
-from torchtitan.experiments.ezpz.utils import wandb_fetch  # noqa: E402
-
-# Family mid-tones from the shared palette. The local copy here said
-# 20b -> #D32F2F (red), which contradicted plot_production_combined.py where
-# red WAS the 2B family -- so 2B rendered blue in the per-run charts and red
-# in the overlay. utils/palette.py is now the only definition.
-from torchtitan.experiments.ezpz.utils.palette import (  # noqa: E402
-    alpha_for as _pal_alpha,
-    CHAIN_COLORS as _pal_chain_colors,
-    MODEL_COLORS,
 )
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
@@ -143,7 +149,8 @@ def fetch_run(api: wandb.Api, run_id: str) -> dict[str, np.ndarray]:
     entry. Thin adapter over ``wandb_fetch.fetch_wandb_run``.
     """
     records = wandb_fetch.fetch_wandb_run(
-        run_id, keys=METRIC_KEYS, project=PROJECT, api=api)
+        run_id, keys=METRIC_KEYS, project=PROJECT, api=api
+    )
     return _records_to_arrays(records)
 
 
@@ -169,8 +176,13 @@ def concat_runs(
     W&B, so a partially/never-synced run's trajectory tail survives.
     """
     records = wandb_fetch.concat_chain(
-        run_ids, olog_fallbacks=olog_fallbacks, keys=METRIC_KEYS,
-        project=PROJECT, api=api, log=print)
+        run_ids,
+        olog_fallbacks=olog_fallbacks,
+        keys=METRIC_KEYS,
+        project=PROJECT,
+        api=api,
+        log=print,
+    )
     return _records_to_arrays(records)
 
 
@@ -192,6 +204,7 @@ def plot_dashboard(
     model_name: str,
     num_nodes: int,
     output_path: Path,
+    gpus_per_node: int = 12,
 ) -> Path:
     """3-panel figure: loss, tps/gpu, mfu vs step.
 
@@ -200,7 +213,7 @@ def plot_dashboard(
     haven't been written yet.
     """
     color = MODEL_COLORS.get(model_name, "#1E88E5")
-    num_gpus = num_nodes * 12
+    num_gpus = num_nodes * gpus_per_node
     steps = data["_step"].astype(float)
     loss = data["loss_metrics/global_avg_loss"].astype(float)
     # `throughput(tps)` is already logged per-rank (per-GPU) by torchtitan,
@@ -235,8 +248,9 @@ def plot_dashboard(
     ax.legend()
 
     ax = axes[1]
-    ax.plot(steps, tps_per_gpu, color="#43A047", alpha=0.25, linewidth=0.5,
-            rasterized=True)
+    ax.plot(
+        steps, tps_per_gpu, color="#43A047", alpha=0.25, linewidth=0.5, rasterized=True
+    )
     ax.plot(
         steps,
         smooth(tps_per_gpu),
@@ -249,8 +263,7 @@ def plot_dashboard(
     ax.legend()
 
     ax = axes[2]
-    ax.plot(steps, mfu, color="#FF9800", alpha=0.25, linewidth=0.5,
-            rasterized=True)
+    ax.plot(steps, mfu, color="#FF9800", alpha=0.25, linewidth=0.5, rasterized=True)
     ax.plot(steps, smooth(mfu), color="#FF9800", linewidth=1.8, label="MFU (smoothed)")
     ax.set_ylabel("MFU (%)")
     ax.set_xlabel("Training Step")
@@ -269,6 +282,7 @@ def plot_diagnostics(
     model_name: str,
     num_nodes: int,
     output_path: Path,
+    gpus_per_node: int = 12,
 ) -> Path:
     """3-panel figure: grad_norm, lr, max_loss vs step."""
     color = MODEL_COLORS.get(model_name, "#1E88E5")
@@ -287,16 +301,21 @@ def plot_diagnostics(
     fig, axes = plt.subplots(3, 1, figsize=(14, 9), sharex=True)
     fig.suptitle(
         f"AuroraGPT {model_name.upper()} Diagnostics  |  "
-        f"{num_nodes} nodes ({num_nodes * 12} GPUs)  |  "
+        f"{num_nodes} nodes ({num_nodes * gpus_per_node} GPUs)  |  "
         f"step {int(steps[-1]):,}",
         fontsize=14,
         fontweight="bold",
     )
 
     ax = axes[0]
-    ax.plot(steps, grad_norm, color=color, alpha=0.25, linewidth=0.5,
-            rasterized=True)
-    ax.plot(steps, smooth(grad_norm), color=color, linewidth=1.8, label="grad_norm (smoothed)")
+    ax.plot(steps, grad_norm, color=color, alpha=0.25, linewidth=0.5, rasterized=True)
+    ax.plot(
+        steps,
+        smooth(grad_norm),
+        color=color,
+        linewidth=1.8,
+        label="grad_norm (smoothed)",
+    )
     ax.set_ylabel("grad_norm")
     ax.set_title("Gradient Norm")
     ax.set_yscale("log")
@@ -309,9 +328,16 @@ def plot_diagnostics(
     ax.legend()
 
     ax = axes[2]
-    ax.plot(steps, max_loss, color="#7B1FA2", alpha=0.25, linewidth=0.5,
-            rasterized=True)
-    ax.plot(steps, smooth(max_loss), color="#7B1FA2", linewidth=1.8, label="max_loss (smoothed)")
+    ax.plot(
+        steps, max_loss, color="#7B1FA2", alpha=0.25, linewidth=0.5, rasterized=True
+    )
+    ax.plot(
+        steps,
+        smooth(max_loss),
+        color="#7B1FA2",
+        linewidth=1.8,
+        label="max_loss (smoothed)",
+    )
     ax.set_ylabel("global_max_loss")
     ax.set_xlabel("Training Step")
     ax.set_title("Per-Step Max Loss (across DP ranks)")
@@ -444,17 +470,26 @@ def plot_overlay(
         alpha = s["alpha"]
         label = s["key"]
 
-        axes[0].plot(steps, loss, color=color, alpha=0.4 * alpha, linewidth=0.5,
-                     rasterized=True)
-        axes[0].plot(steps, smooth(loss), color=color, alpha=alpha, linewidth=1.8, label=label)
+        axes[0].plot(
+            steps, loss, color=color, alpha=0.4 * alpha, linewidth=0.5, rasterized=True
+        )
+        axes[0].plot(
+            steps, smooth(loss), color=color, alpha=alpha, linewidth=1.8, label=label
+        )
 
-        axes[1].plot(steps, tps, color=color, alpha=0.4 * alpha, linewidth=0.5,
-                     rasterized=True)
-        axes[1].plot(steps, smooth(tps), color=color, alpha=alpha, linewidth=1.8, label=label)
+        axes[1].plot(
+            steps, tps, color=color, alpha=0.4 * alpha, linewidth=0.5, rasterized=True
+        )
+        axes[1].plot(
+            steps, smooth(tps), color=color, alpha=alpha, linewidth=1.8, label=label
+        )
 
-        axes[2].plot(steps, mfu, color=color, alpha=0.4 * alpha, linewidth=0.5,
-                     rasterized=True)
-        axes[2].plot(steps, smooth(mfu), color=color, alpha=alpha, linewidth=1.8, label=label)
+        axes[2].plot(
+            steps, mfu, color=color, alpha=0.4 * alpha, linewidth=0.5, rasterized=True
+        )
+        axes[2].plot(
+            steps, smooth(mfu), color=color, alpha=alpha, linewidth=1.8, label=label
+        )
 
     axes[0].set_ylabel("Loss")
     axes[0].set_title("Training Loss")
@@ -481,8 +516,7 @@ def plot_overlay(
 # table omitted 20b_v2_256 and 2b_v2_512_lr3.22e-5 entirely, so those two fell
 # through to a default and drew in whatever the model mid-tone happened to be.
 OVERLAY_STYLE: dict[str, dict] = {
-    _k: {"color": _c, "alpha": _pal_alpha(_k)}
-    for _k, _c in _pal_chain_colors.items()
+    _k: {"color": _c, "alpha": _pal_alpha(_k)} for _k, _c in _PAL_CHAIN_COLORS.items()
 }
 
 
@@ -494,7 +528,9 @@ def overlay_keys_for_model(model: str) -> list[str]:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--model", type=str, default=None,
+        "--model",
+        type=str,
+        default=None,
         help=(
             "Run key from PRODUCTION_RUNS to plot (e.g. 2b_v1_256, "
             "2b_v2_256, 2b_v2_512, 20b_v1_256, 20b_v2_512), or omit "
@@ -502,7 +538,10 @@ def main() -> None:
         ),
     )
     parser.add_argument(
-        "--overlay", type=str, default=None, choices=["2b", "20b"],
+        "--overlay",
+        type=str,
+        default=None,
+        choices=["2b", "20b"],
         help=(
             "Generate a v1-vs-v2 overlay dashboard for the given model, "
             "instead of (or in addition to) per-run dashboards. The "
@@ -514,7 +553,12 @@ def main() -> None:
         "--output-dir",
         type=Path,
         default=None,
-        help="Override output directory (default: docs/production/agpt/<model>/n<num_nodes>/figures/ for per-trajectory dashboards; docs/production/agpt/<model>/figures/ for overlays)",
+        help=(
+            "Override output directory (default: "
+            "docs/production/agpt/<model>/n<num_nodes>/figures/ for "
+            "per-trajectory dashboards; docs/production/agpt/<model>/figures/ "
+            "for overlays)"
+        ),
     )
     args = parser.parse_args()
 
@@ -564,12 +608,7 @@ def main() -> None:
         # (handled in the --overlay branch above).
         if "_v1_" in key:
             default_out = (
-                DOCS_BASE
-                / "production"
-                / "agpt"
-                / "historical"
-                / "v1-bf16"
-                / "figures"
+                DOCS_BASE / "production" / "agpt" / "historical" / "v1-bf16" / "figures"
             )
         else:
             default_out = (
@@ -589,17 +628,21 @@ def main() -> None:
             print(f"  no data, skipping {key}")
             continue
 
+        # 12 tiles per Aurora/Sunspot node; Polaris and Sirius records set 4.
+        gpus_per_node = by_key(key).get("gpus_per_node") or 12
         plot_dashboard(
             data,
             model_name,
             cfg["num_nodes"],
             out_dir / f"production_{key}n.svg",
+            gpus_per_node=gpus_per_node,
         )
         plot_diagnostics(
             data,
             model_name,
             cfg["num_nodes"],
             out_dir / f"training_diagnostics_{key}n.svg",
+            gpus_per_node=gpus_per_node,
         )
         # PRODUCTION_RUNS is a legacy projection that drops prior_tokens /
         # token_target (and is asserted byte-for-byte in tests), so read the

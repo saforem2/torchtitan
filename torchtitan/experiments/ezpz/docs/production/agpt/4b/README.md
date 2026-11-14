@@ -34,6 +34,38 @@ Tokens are steps x GBS x 4096. The full olmo-mix-1124 budget is 4.67T.
 | `9053470` seat 3 (umbrella) | Nov 9-11 | `1 -> 2698` | `12.002 -> 3.311` | 781 TPS/GPU, 8.5% MFU, ~5 s/step | Training when PBS killed the umbrella for a GPU fault in another seat. Saved `step-2600`. |
 | `9076358` | started Nov 14 | from `step-2600` | -- | -- | running, 12h `small`, own PBS job; no step logged at the time of writing |
 
+Umbrella `9053470` (the manual 24h umbrella: 2088 nodes on `large`, launched in a
+placeholder job named `test.sh`) trained this seat from 03:07:54 to 07:01:41 UTC on
+Nov 11, ~5.2 s/step. Logged values from
+`logs/multi-autoretry-9053470/trainer-3-v2-4b-n512-attempt-1.console.log`:
+
+| Step | Tokens | Loss | Grad norm | TPS/GPU | MFU |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 0.0B | 12.00226 | 1.7622 | 33 | 0.37% |
+| 10 | 0.3B | 11.92056 | 1.8139 | 276 | 3.02% |
+| 50 | 1.3B | 9.77805 | 4.3188 | 783 | 8.56% |
+| 250 | 6.3B | 6.58036 | 1.7553 | 798 | 8.73% |
+| 500 | 12.6B | 5.71695 | 1.2996 | 858 | 9.38% |
+| 750 | 18.9B | 5.11663 | 0.7835 | 793 | 8.68% |
+| 1,000 | 25.2B | 4.69840 | 0.8445 | 809 | 8.85% |
+| 1,250 | 31.5B | 4.34715 | 0.5923 | 792 | 8.66% |
+| 1,500 | 37.7B | 4.01323 | 0.5855 | 799 | 8.74% |
+| 1,750 | 44.0B | 3.85628 | 0.8479 | 783 | 8.57% |
+| 2,000 | 50.3B | 3.73506 | 1.3205 | 791 | 8.65% |
+| 2,250 | 56.6B | 3.53816 | 0.6027 | 779 | 8.52% |
+| 2,500 | 62.9B | 3.38003 | 0.3251 | 785 | 8.59% |
+| 2,698 | 67.9B | 3.31110 | 0.3888 | 781 | 8.54% |
+
+Memory 36.5 GiB per tile (57%). Steps 1-10 include compile and warmup.
+
+Charts (Aurora 512N, from W&B via `plot_production_wandb.py`):
+
+![Aurora 512N: loss, throughput, MFU](n512/figures/production_4b_v2_512n.svg)
+
+![Aurora 512N: grad norm, learning rate, max loss](n512/figures/training_diagnostics_4b_v2_512n.svg)
+
+![Aurora 512N: tokens vs time](n512/figures/tokens_vs_time_4b_v2_512n.svg)
+
 - It stays on the **sorted** manifest to keep its data cursor valid. With that
   order every rank reads all of its non-code files before any code: no starcoder
   until each rank's fourth file. New runs use the seed-0 shuffle
@@ -58,9 +90,24 @@ Started while Polaris could not place its jobs. Full detail:
 |---|---|---|---|
 | `33471` | `2900 -> 5058` | `6.50 -> 6.14` | walltime |
 | `33487` | `5058 -> 7092` | `6.05 -> 5.90` | walltime; last good checkpoint `step-7000` |
-| `33525` | `7000 -> 7454+` | `5.97 -> 6.02` | running at `15:44 UTC` Nov 14, `-A datascience` |
+| `33525` | `7001 -> 8551` | `5.97 -> 6.07` | ended Nov 14 18:43; `-A datascience` |
 
+Earlier legs: `33376` (1-1080), `33456` (901-1260), `33460` (1101-3029). W&B runs, in
+resume order: `jm4cpxhz`, `senzi8jf`, `byb8t878`, `8fq5kilz`, `dorbtxse`, `m1vycznv`.
 Throughput 409-416 TPS/GPU, MFU 4.2-4.27%.
+
+**Not converging like Aurora.** Grad norm sits at 10-100 from step ~800 on (Aurora
+512N: ~1 falling to 0.35), and loss has stayed near 6 for 5,000 steps (Aurora: 3.3
+at step 2,698). Inference, not tested: the LR `6.58e-4` comes from the GBS=6144
+finder basin and this run uses GBS 8.
+
+Charts (Sirius 2N, from W&B via `plot_production_wandb.py`):
+
+![Sirius 2N: loss, throughput, MFU](n2/figures/production_4b_sirius_2n.svg)
+
+![Sirius 2N: grad norm, learning rate, max loss](n2/figures/training_diagnostics_4b_sirius_2n.svg)
+
+![Sirius 2N: tokens vs time](n2/figures/tokens_vs_time_4b_sirius_2n.svg)
 
 ## Polaris: 16N and 32N on Dolma
 
