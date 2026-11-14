@@ -26,6 +26,10 @@ While Polaris `7832130` waits for nodes, Sirius trains `5b_olmo3_polaris` (`2N`,
 The 10B ran `200` steps on `32` GPUs without the FSDP uneven-sharding error. Jobs,
 losses and failures: [sirius-olmo3-5b-10b.md](sirius-olmo3-5b-10b.md).
 
+Per-model pages for these OLMo-3 tokenizer, 4K runs on every machine (Aurora
+olmo-mix seats, Sirius and Polaris Dolma runs): [agpt 5B](5b/README.md),
+[agpt 10B](10b/README.md).
+
 ## Headline (2026-08-31): production is idle
 
 **Nothing has trained on Aurora since 2026-08-26**, and the blocker is the
