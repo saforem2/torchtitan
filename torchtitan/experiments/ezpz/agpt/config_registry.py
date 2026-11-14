@@ -27,7 +27,7 @@ from torchtitan.components.data.text_datasets import TextProcessor
 from torchtitan.components.loss import ChunkedLossWrapper, CrossEntropyLoss
 
 from torchtitan.components.optim import LRSchedulersContainer, Optim
-from torchtitan.config import CommConfig, TrainingConfig
+from torchtitan.config import CommConfig
 from torchtitan.distributed.activation_remat import (
     DefaultActivationRematConfig,
     FullActivationRematConfig,
@@ -37,6 +37,7 @@ from torchtitan.experiments.ezpz.blendcorpus.blendcorpus_builder import (
 )
 from torchtitan.experiments.ezpz.blendcorpus.build_tokenizer import EZPZTokenizer
 from torchtitan.experiments.ezpz.compile import CompileConfig
+from torchtitan.experiments.ezpz.config import EzpzMetricsConfig, EzpzTrainingConfig
 from torchtitan.experiments.ezpz.grain_checkpoint import GrainStreamingCheckpointManager
 from torchtitan.experiments.ezpz.optimizer.containers import (
     default_adamw,
@@ -44,10 +45,13 @@ from torchtitan.experiments.ezpz.optimizer.containers import (
     default_muon,
     default_sophiag,
 )
-from torchtitan.experiments.ezpz.trainer import FaultTolerantTrainer
+from torchtitan.experiments.ezpz.trainer import (
+    FaultTolerantTrainer,
+    set_max_context_length,
+)
 from torchtitan.experiments.ezpz.validator import EzpzValidator
+from torchtitan.experiments.ezpz.wandb_logger import EzpzWandBLogger
 from torchtitan.experiments.torchft.config.job_config import FaultTolerance
-from torchtitan.observability.metrics import MetricsProcessor
 
 from . import model_registry
 from .sft_data import (
@@ -326,8 +330,8 @@ def agpt(
         cfg.activation_remat = DefaultActivationRematConfig()
     else:
         cfg.activation_remat = FullActivationRematConfig()
-    cfg.training.max_context_length = seq_len
-    cfg.training.dtype = dtype
+    set_max_context_length(cfg, seq_len)
+    cfg.precision.dtype = dtype
     cfg.dataloader.dataset = "blendcorpus"
     if dataset_path is None:
         dataset_path = f"torchtitan/experiments/ezpz/data-lists/{ezpz.distributed.get_machine().lower()}/books.txt"
@@ -349,7 +353,7 @@ def agpt(
         cfg.validator.dataloader.dataset_path = dataset_path
         cfg.validator.dataloader.data_cache_path = cfg.dataloader.data_cache_path
     cfg.metrics.log_freq = 1
-    cfg.metrics.enable_wandb = True
+    cfg.metrics.loggers = [EzpzWandBLogger.Config()]
     if compile:
         cfg.compile = CompileConfig()
     cfg.parallelism.fsdp_reshard_after_forward = fsdp_reshard_after_forward
@@ -374,14 +378,14 @@ def _base_config(flavor: str) -> FaultTolerantTrainer.Config:
                 min_lr_factor=0.0,
             ),
         ),
-        training=TrainingConfig(
+        training=EzpzTrainingConfig(
             # #4121: tokens, not sequences. 8 seqs x 2048 = 16384.
             num_tokens_per_microbatch_per_dp_rank=8 * 2048,
             max_context_length=2048,
             steps=10000,
         ),
         dataloader=BlendCorpusDataLoader.Config(dataset="c4_test"),
-        metrics=MetricsProcessor.Config(log_freq=10),
+        metrics=EzpzMetricsConfig(log_freq=10),
         checkpointer=CheckpointManager.Config(
             interval=500,
             last_save_model_only=False,
@@ -456,10 +460,10 @@ def agpt_debugmodel_local() -> FaultTolerantTrainer.Config:
         "torchtitan/components/data/dataset.py SingleDatasetConfig"
     )
     cfg.validator.enable = False
-    cfg.metrics.enable_wandb = False
+    cfg.metrics.loggers = []
     cfg.checkpointer = None
     cfg.training.steps = 10
-    cfg.training.max_context_length = 512
+    set_max_context_length(cfg, 512)
     # 2 seqs x 512 = 1024 tokens (#4121 unit change)
     cfg.training.num_tokens_per_microbatch_per_dp_rank = 2 * 512
     return cfg
@@ -596,7 +600,7 @@ def _agpt_2b_mds_anneal_base() -> FaultTolerantTrainer.Config:
     # retry, which also used a low constant LR on the same base family).
     cfg.optim.optimizer = default_adamw(lr=_MDS_ANNEAL_LR)
     cfg.training.steps = _MDS_ANNEAL_STEPS
-    cfg.metrics.enable_wandb = True
+    cfg.metrics.loggers = [EzpzWandBLogger.Config()]
     return cfg
 
 
@@ -615,6 +619,57 @@ def agpt_2b_mds_anneal_flat() -> FaultTolerantTrainer.Config:
     cfg.optim.lr_scheduler.decay_type = "linear"
     cfg.optim.lr_scheduler.min_lr_factor = 1.0
     cfg.checkpointer.folder = "checkpoints/agpt-2b-mds-anneal-flat"
+    return cfg
+
+
+def agpt_2b_replicated_benchmark() -> FaultTolerantTrainer.Config:
+    """Replicated-DP benchmark config matching the pinned MDS SophiaG path."""
+    cfg = agpt_2b_mds_anneal_flat()
+    cfg.optim.optimizer = default_sophiag(
+        lr=2e-6,
+        betas=(0.9, 0.95),
+        rho=0.01,
+        update_hessian_before_step=False,
+    )
+    cfg.optim.lr_scheduler.warmup_steps = 0
+    cfg.checkpointer.folder = "checkpoints/agpt-2b-replicated-benchmark"
+    return cfg
+
+
+def agpt_2b_replicated_benchmark_adamw() -> FaultTolerantTrainer.Config:
+    """agpt_2b_replicated_benchmark with AdamW (lr 2e-6, betas 0.9/0.95, wd 0.1),
+    matching the MDS ``MDS_OPTIMIZER=adamw`` arm of the replicated benchmark."""
+    cfg = agpt_2b_replicated_benchmark()
+    cfg.optim.optimizer = default_adamw(lr=2e-6, betas=(0.9, 0.95), weight_decay=0.1)
+    return cfg
+
+
+def agpt_mds_shape_benchmark_adamw() -> FaultTolerantTrainer.Config:
+    """The z2rrt02w MDS shape (``mds-4096x10``) from random init with that
+    run's AdamW (lr 2e-4, betas 0.9/0.95, wd 0.1), sequence 4096, no AC.
+    Throughput benchmark only; the CLI supplies data and parallelism."""
+    cfg = agpt("mds-4096x10", activation_checkpoint_mode="none", seq_len=4096)
+    cfg.optim.optimizer = default_adamw(lr=2e-4, betas=(0.9, 0.95), weight_decay=0.1)
+    cfg.optim.lr_scheduler.warmup_steps = 0
+    cfg.checkpointer.folder = "checkpoints/agpt-mds-shape-benchmark"
+    cfg.metrics.loggers = [EzpzWandBLogger.Config()]
+    return cfg
+
+
+def agpt_2b_loss_ab() -> FaultTolerantTrainer.Config:
+    """AGPT-2B (``2b-mds``) from random init for short loss-curve A/Bs of
+    numerics changes: AdamW lr 3e-4 (betas 0.9/0.95, wd 0.1), 40 warmup
+    updates then constant, sequence 8192, no AC, no validator. ``--debug.seed``
+    sets the init; the blendcorpus sample order is fixed, so arms sharing a
+    seed see the same init and data."""
+    cfg = agpt("2b-mds", activation_checkpoint_mode="none", seq_len=8192)
+    cfg.optim.optimizer = default_adamw(lr=3e-4, betas=(0.9, 0.95), weight_decay=0.1)
+    cfg.optim.lr_scheduler.warmup_steps = 40
+    cfg.optim.lr_scheduler.decay_ratio = 0.0
+    cfg.optim.lr_scheduler.min_lr_factor = 1.0
+    cfg.validator.enable = False
+    cfg.checkpointer.folder = "checkpoints/agpt-2b-loss-ab"
+    cfg.metrics.loggers = [EzpzWandBLogger.Config()]
     return cfg
 
 
@@ -703,14 +758,19 @@ def agpt_2b_mds154391_tulu_math_uc_streaming() -> FaultTolerantTrainer.Config:
     # references identical so config parsing cannot erase this specialized
     cfg.checkpoint = cfg.checkpointer
     cfg.metrics.log_freq = 10
-    cfg.metrics.enable_wandb = True
+    cfg.metrics.loggers = [EzpzWandBLogger.Config()]
     cfg.validator = None
     return cfg
 
 
 def _cot_sft_config(
-    dataset_fn, folder: str, *, lr: float = 2e-5, steps: int = 900,
-    seq_len: int = 1024, flavor: str = "2b-mds",
+    dataset_fn,
+    folder: str,
+    *,
+    lr: float = 2e-5,
+    steps: int = 900,
+    seq_len: int = 1024,
+    flavor: str = "2b-mds",
     local_batch_size: int = 2,
 ):
     """Shared builder for Grain-native CoT SFT (same trainer as CPT).
@@ -728,15 +788,22 @@ def _cot_sft_config(
     else:
         raise ValueError(f"unknown flavor {flavor!r}")
 
-    cfg = agpt(flavor, local_batch_size=local_batch_size,
-               activation_checkpoint_mode="none",
-               seq_len=seq_len, dtype="float32", compile=True,
-               checkpoint_interval=300, hf_assets_path=hfa)
+    cfg = agpt(
+        flavor,
+        local_batch_size=local_batch_size,
+        activation_checkpoint_mode="none",
+        seq_len=seq_len,
+        dtype="float32",
+        compile=True,
+        checkpoint_interval=300,
+        hf_assets_path=hfa,
+    )
 
     # debugmodel smoke: train from scratch (no DCP to load).
     if flavor == "debugmodel":
         cfg.checkpointer = CheckpointManager.Config(
-            interval=300, last_save_model_only=False)
+            interval=300, last_save_model_only=False
+        )
         cfg.checkpointer.folder = folder
     else:
         if not (base / "model-00001-of-00001.safetensors").is_file():
@@ -747,7 +814,8 @@ def _cot_sft_config(
         prior = cfg.checkpointer
         assert prior is not None
         cfg.checkpointer = GrainStreamingCheckpointManager.Config(
-            **{field.name: getattr(prior, field.name) for field in fields(prior)})
+            **{field.name: getattr(prior, field.name) for field in fields(prior)}
+        )
         cfg.checkpointer.initial_load_path = str(dcp_base)
         cfg.checkpointer.initial_load_in_hf = False
         cfg.checkpointer.initial_load_model_only = True
@@ -757,8 +825,13 @@ def _cot_sft_config(
     cfg.checkpoint = cfg.checkpointer
 
     cfg.dataloader = GrainDataLoader.Config(
-        dataset=dataset_fn(), seed=42, shuffle=True, repeat=True,
-        streaming_shuffle_buffer_size=10_000, num_prefetch_microbatches=2)
+        dataset=dataset_fn(),
+        seed=42,
+        shuffle=True,
+        repeat=True,
+        streaming_shuffle_buffer_size=10_000,
+        num_prefetch_microbatches=2,
+    )
     cfg.optim.optimizer = default_adamw(lr=lr)
     cfg.optim.lr_scheduler.warmup_steps = 0
     cfg.optim.lr_scheduler.decay_ratio = 0.0
@@ -767,52 +840,70 @@ def _cot_sft_config(
     cfg.training.steps = steps
     cfg.training.num_tokens_per_train_step = 6_144 * seq_len
     cfg.metrics.log_freq = 10
-    cfg.metrics.enable_wandb = True
+    cfg.metrics.loggers = [EzpzWandBLogger.Config()]
     cfg.validator = None
     return cfg
 
 
 def agpt_2b_mds_gsm8k_r1cot_streaming() -> FaultTolerantTrainer.Config:
     """GSM8K alone via Grain streaming -- Stage-2 warm-up, no TRL."""
-    return _cot_sft_config(gsm8k_r1cot_streaming_dataset,
-                           "checkpoints/agpt2b-mds-gsm8k-r1cot-streaming")
+    return _cot_sft_config(
+        gsm8k_r1cot_streaming_dataset, "checkpoints/agpt2b-mds-gsm8k-r1cot-streaming"
+    )
 
 
 def agpt_2b_mds_distill_cot_streaming() -> FaultTolerantTrainer.Config:
     """50/50 OpenThoughts + OpenR1 CoT via Grain -- replaces --pretokenize_to."""
-    return _cot_sft_config(distill_cot_mix_streaming_dataset,
-                           "checkpoints/agpt2b-mds-distill-cot-streaming")
+    return _cot_sft_config(
+        distill_cot_mix_streaming_dataset,
+        "checkpoints/agpt2b-mds-distill-cot-streaming",
+    )
 
 
 def agpt_2b_mds_gsm8k_plus_distill_streaming() -> FaultTolerantTrainer.Config:
     """GSM8K + distill breadth via Grain (all 3 CoT sources)."""
-    return _cot_sft_config(gsm8k_plus_distill_cot_streaming_dataset,
-                           "checkpoints/agpt2b-mds-gsm8k-plus-distill-streaming")
+    return _cot_sft_config(
+        gsm8k_plus_distill_cot_streaming_dataset,
+        "checkpoints/agpt2b-mds-gsm8k-plus-distill-streaming",
+    )
 
 
 # ── Sunspot-divisible smokes (debugmodel, hd=768 % 12 == 0) ──────────
 # These prove the Grain CoT pipeline on Sunspot's PPN=12 mesh. The dataset
 # code is flavor-agnostic; Polaris keeps the 2b-mds production shape.
 
+
 def agpt_debugmodel_gsm8k_r1cot_streaming() -> FaultTolerantTrainer.Config:
     """GSM8K CoT smoke on debugmodel -- Sunspot PPN=12 safe."""
-    return _cot_sft_config(gsm8k_r1cot_streaming_dataset,
-                           "checkpoints/agpt-debug-gsm8k-r1cot-streaming",
-                           flavor="debugmodel", local_batch_size=8, seq_len=1024)
+    return _cot_sft_config(
+        gsm8k_r1cot_streaming_dataset,
+        "checkpoints/agpt-debug-gsm8k-r1cot-streaming",
+        flavor="debugmodel",
+        local_batch_size=8,
+        seq_len=1024,
+    )
 
 
 def agpt_debugmodel_gsm8k_plus_distill_streaming() -> FaultTolerantTrainer.Config:
     """GSM8K + distill breadth (all 3 CoT sources) on debugmodel -- Sunspot PPN=12 safe."""
-    return _cot_sft_config(gsm8k_plus_distill_cot_streaming_dataset,
-                           "checkpoints/agpt-debug-broad-streaming",
-                           flavor="debugmodel", local_batch_size=8, seq_len=1024)
+    return _cot_sft_config(
+        gsm8k_plus_distill_cot_streaming_dataset,
+        "checkpoints/agpt-debug-broad-streaming",
+        flavor="debugmodel",
+        local_batch_size=8,
+        seq_len=1024,
+    )
 
 
 def agpt_debugmodel_distill_cot_streaming() -> FaultTolerantTrainer.Config:
     """OpenThoughts+OpenR1 smoke on debugmodel -- Sunspot PPN=12 safe."""
-    return _cot_sft_config(distill_cot_mix_streaming_dataset,
-                           "checkpoints/agpt-debug-distill-cot-streaming",
-                           flavor="debugmodel", local_batch_size=8, seq_len=1024)
+    return _cot_sft_config(
+        distill_cot_mix_streaming_dataset,
+        "checkpoints/agpt-debug-distill-cot-streaming",
+        flavor="debugmodel",
+        local_batch_size=8,
+        seq_len=1024,
+    )
 
 
 # --- data-mix A/B (stage-2 mid-training): flat won the anneal, so DATA is the
@@ -889,7 +980,7 @@ def _agpt_2b_mds_mix_blend(
     """
     cfg = _agpt_2b_mds_mix_base()
     # Build per-source datasets, then mix after packing so weights count tokens.
-    # open-web-math streams from HF (small, math-dense); FWE reads 16 local parquet
+    # open-web-math streams from HF (small, math-dense); FW-Edu reads 16 local parquet
     # shards materialized under HuggingFaceRandomAccessSource (verified TEGU path).
     from torchtitan.components.data import DatasetMixConfig, WeightedDataset
 
@@ -915,7 +1006,7 @@ def _agpt_2b_mds_mix_blend(
         )
     )
     # NOTE: weights count fixed-length 8192-token rows (post-packing), which is
-    # the token-weighted equivalent of the old token-mixture ratio. A 40/60 OWM/FWE
+    # the token-weighted equivalent of the old token-mixture ratio. A 40/60 OWM/FW-Edu
     # mix therefore weights 40% of TRAINED TOKENS from math, matching the paper's
     # intended ratio once document lengths average out.
     cfg.dataloader = GrainDataLoader.Config(
@@ -957,14 +1048,13 @@ def agpt_2b_mds_mix_owm_edu_6040() -> FaultTolerantTrainer.Config:
 
     60% FineWeb-Edu / 40% open-web-math: the ``60/40'' kind-shift arm
     motivated by arXiv:2502.02737 Sec 4.3 / arXiv:2406.17557 (FineWeb-Edu
-    33.6% MMLU @ 38B, ablation DCLM 35.5 -> FWE 37.5 on MMLU while DCLM
+    33.6% MMLU @ 38B, ablation DCLM 35.5 -> FW-Edu 37.5 on MMLU while DCLM
     still wins HellaSwag). Current pre-training is 94.8% DCLM, so this is
     a distribution-*kind* change, not a degree tweak. Extending narrow SFT
     (B2v2 ep3/ep6 0.09/0.105 vs B2 0.205, jobs 12482572/73) already showed
     the ceiling is data-distribution, not more tokens on the same 7.4k.
     """
     return _agpt_2b_mds_mix_blend(0.40, 0.60, "checkpoints/agpt-2b-mds-mix-owm60-edu40")
-
 
 
 # --- Wave 3: SCIENCE-corpus 25% blends. The 75/25 owm/edu winner showed the
@@ -1043,7 +1133,7 @@ def _agpt_2b_olmo_anneal_base() -> FaultTolerantTrainer.Config:
     # currently a no-op -- but only by coincidence. Recompute explicitly so it
     # stays correct if that default ever moves.
     _lbs = cfg.training.num_tokens_per_microbatch_per_dp_rank // 8192
-    cfg.training.max_context_length = 8192
+    set_max_context_length(cfg, 8192)
     cfg.training.num_tokens_per_microbatch_per_dp_rank = _lbs * 8192
     cfg.activation_remat = None
     if not (Path(_OLMO_ANNEAL_BASE) / ".metadata").is_file():
@@ -1059,7 +1149,7 @@ def _agpt_2b_olmo_anneal_base() -> FaultTolerantTrainer.Config:
     cfg.dataloader.dataset_path = None
     cfg.optim.optimizer = default_adamw(lr=_MDS_ANNEAL_LR)
     cfg.training.steps = _MDS_ANNEAL_STEPS
-    cfg.metrics.enable_wandb = True
+    cfg.metrics.loggers = [EzpzWandBLogger.Config()]
     return cfg
 
 
@@ -1674,6 +1764,7 @@ def _agpt_v2_4k(
         load_dataset_kwargs={"data_dir": _olmo_mix_subset_dir("wiki")},
     )
 
+
 def agpt_v2_4b_4k() -> FaultTolerantTrainer.Config:
     """4.64B (5B_olmo2tok geometry) at 4K seqlen, OLMo-3 tokenizer, streaming.
 
@@ -1711,12 +1802,13 @@ def _olmo_mix_raw_files() -> list[str]:
     the file count is divisible by the DP world size; otherwise every rank
     reads the whole stream and keeps 1/N of it. The manifest builder
     (``scripts/build_olmo_mix_manifest.py``) sizes the list for that.
+    Rank ``r`` reads files ``r, r + N, ...``, so the whole job reads one
+    contiguous block of the manifest at a time. Use a shuffled manifest; a
+    sorted one feeds the subsets in path order, as a curriculum.
     """
     manifest = os.environ.get("AGPT_V2_DATA_MANIFEST", "")
     if not manifest:
-        raise ValueError(
-            "AGPT_V2_DATA_MANIFEST must name a raw olmo-mix file manifest"
-        )
+        raise ValueError("AGPT_V2_DATA_MANIFEST must name a raw olmo-mix file manifest")
     files = [line.strip() for line in Path(manifest).read_text().splitlines()]
     files = [f for f in files if f]
     if not files:
@@ -1753,8 +1845,6 @@ def agpt_v2_10b_4k_olmo_mix() -> FaultTolerantTrainer.Config:
     """9.48B at 4K seqlen on the full raw olmo-mix-1124 (umbrella seat)."""
 
     return _agpt_v2_4k_olmo_mix("10b_olmo2tok_dp12")
-
-
 
 
 # Optimizer-comparison arms for the OLMo-2 ladder.
@@ -2511,7 +2601,9 @@ def ezpz_agpt_80b_deep_from_json() -> FaultTolerantTrainer.Config:
 # for this vocab. OLMo-2-1124-7B tokenizer.json is byte-identical to OLMo-3.
 
 
-def _polaris_dolma_grain(cfg: FaultTolerantTrainer.Config) -> FaultTolerantTrainer.Config:
+def _polaris_dolma_grain(
+    cfg: FaultTolerantTrainer.Config,
+) -> FaultTolerantTrainer.Config:
     """Wire olmo-mix-1124 via Grain + HF streaming (precached local parquet).
 
     Uses the Polaris HF cache (/home/foremans/.cache/huggingface/hub) where

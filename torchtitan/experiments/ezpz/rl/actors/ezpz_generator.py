@@ -4,107 +4,56 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-"""ezpz subclass of upstream `VLLMGenerator` for the XPU stack.
+"""XPU settings for the upstream RL generator.
 
-WIP — substantial integration ahead. The skeleton lives here so the
-import boundary is settled and Phase 2 (Monarch framework smoke,
-2026-06-13) can be followed by Phase 3 (this file) without churning
-on file placement.
+This module used to hold ``EzpzVLLMGenerator``, a placeholder subclass of the
+old ``torchtitan.rl.generator.generator.VLLMGenerator`` with no overrides (only
+TODOs); no config ever used it. Upstream then split that class into
+``Generator`` (endpoints, engine loop, weight prefetch) and a
+``GenerationEngine`` selected by ``Generator.Config.engine``
+(``VLLMEngine.Config`` by default). Every XPU difference the old TODO list named
+now has a home that needs no generator subclass:
 
-What needs overriding from upstream `VLLMGenerator`:
+1. ``has_cuda_capability(9, 0)`` in ``VLLMEngine._build_engine_args`` is False on
+   XPU, so the engine already takes the ``block_size=256`` branch
+   (``xpu_overrides.patch_has_cuda_capability_for_xpu`` makes it explicit).
+2. No CUDA-graph capture on vLLM-XPU: ``xpu_vllm_engine_config()`` below sets
+   ``VLLMCudaGraphConfig(mode="NONE")``, which the engine turns into
+   ``enforce_eager=True``.
+3. Attention backend: the engine asks vLLM for ``FLEX_ATTENTION`` or ``CUSTOM``
+   (``vllm_attention_backend``); ``xpu_overrides.patch_vllm_xpu_attention_backend``
+   maps those to vLLM-XPU implementations.
+4. ``set_batch_invariance`` only runs with ``debug.batch_invariant``, which the
+   ezpz overlays leave off.
+5. TorchStore transport: ``rl/actors/monarch/system.py``
+   ``_torchstore_strategy_from_env()`` (``TORCHTITAN_TORCHSTORE_TRANSPORT``) plus
+   ``xpu_overrides.patch_torchstore_network_availability_for_xpu``.
+6. vLLM worker: ``rl/generator/vllm/worker.py`` subclasses vLLM's ``XPUWorker`` on
+   XPU and keeps its native device setup and model runner.
 
-  1. **`has_cuda_capability(9, 0)` check** at the engine-args
-     construction site (generator.py:465). XPU has no equivalent
-     SM-version concept; the check controls a `block_size` override
-     for non-H100. The simplest port is "always set block_size=256
-     on XPU" (the non-CUDA-9.0 branch).
-
-  2. **`cuda_graph.mode` config**. vLLM-XPU's compilation pipeline
-     does not support CUDA-graph capture. Force `enforce_eager=True`
-     unconditionally. Could surface this as an `EzpzVLLMCudaGraphConfig`
-     subclass that fixes `mode="NONE"`, or override the
-     `engine_kwargs` construction directly.
-
-  3. **`AttentionBackendEnum`** — upstream uses
-     `FLEX_ATTENTION`/`varlen`/etc. The vLLM-XPU backend exposes its
-     own set of attention impls (`spda_v1`, `vllm_xpu_attention`).
-     Need to map ezpz's `Decoder.first_attention.inner_attention`
-     to the right XPU backend.
-
-  4. **`set_batch_invariance`** (called from upstream `__init__`).
-     Lives in `torchtitan.distributed.utils`; uses
-     `torch._inductor.config.fallback_random` which is CUDA-flavored.
-     Probably fine on XPU since fallback_random is just a config
-     flag, but verify before relying on it for bitwise repro.
-
-  5. **`torchstore` strategy** — must force `TransportType.Gloo`
-     (or `MonarchRPC`) instead of the default which picks
-     `MonarchRDMA` (CUDA-only). Override in `pull_model_state_dict`.
-
-Open question: do we override by subclass or by reimplementation?
-Upstream's `VLLMGenerator` is ~990 LOC with the LLMEngine
-constructor woven into `setup_async`. Subclassing means overriding
-the parts of `setup_async` that build `EngineArgs`; in practice
-that's mostly the constructor since most other endpoints are
-about pulling state dicts + serving generation requests.
-
-For now this file defines the EzpzVLLMGenerator class signature
-and stubs out the engine-args override. The Monarch framework smoke
-in 2026-06-13 confirmed the actor framework itself works on XPU;
-this class is what plugs vLLM-XPU into that framework.
+Generator dtype: ``VLLMGenerator.Config.model_dtype`` is gone; the generator
+computes in ``Controller.Config.precision.param_dtype``. See
+``rl/model_configs.py`` ``AGPT_RL_PRECISION``.
 """
 
 from __future__ import annotations
 
-import logging
-from dataclasses import dataclass
-from typing import Literal
+from typing import Any, TYPE_CHECKING
 
-# Upstream imports — note these only resolve in the rl-vllm venv
-# (py3.12 + torch 2.12 + monarch + vllm-xpu). Don't import this module
-# from a context that doesn't have all of those.
-try:
-    from torchtitan.rl.generator import VLLMCudaGraphConfig, VLLMGenerator
-except ImportError as e:
-    raise ImportError(
-        "EzpzVLLMGenerator requires upstream `torchtitan.rl.generator`"
-        " which only resolves in the rl-vllm venv (py3.12 + torch 2.12 +"
-        " monarch + vllm-xpu). See docs/production/rl/history/vllm-xpu-wiring-plan.md."
-    ) from e
+if TYPE_CHECKING:
+    from torchtitan.rl.generator.vllm.engine import VLLMEngine
 
 
-logger = logging.getLogger(__name__)
+def xpu_vllm_engine_config(**kwargs: Any) -> VLLMEngine.Config:
+    """``VLLMEngine.Config`` for vLLM-XPU: eager execution, no CUDA-graph capture.
 
-
-@dataclass(kw_only=True, slots=True)
-class EzpzVLLMCudaGraphConfig(VLLMCudaGraphConfig):
-    """vLLM cudagraph config that always disables capture on XPU.
-
-    vLLM-XPU's compilation pipeline does not currently support
-    CUDA-graph capture. Setting `mode="NONE"` here selects eager
-    execution through upstream
-    `VLLMGenerator`'s existing logic.
+    ``kwargs`` go to ``VLLMEngine.Config`` (e.g. ``watermark``,
+    ``extra_engine_args``). Imports vLLM, so call it from a config factory, not at
+    module import.
     """
+    from torchtitan.rl.generator.vllm.config import VLLMCudaGraphConfig
+    from torchtitan.rl.generator.vllm.engine import VLLMEngine
 
-    mode: Literal["NONE", "FULL_DECODE_ONLY", "FULL_AND_PIECEWISE", "FULL"] = "NONE"
-
-
-class EzpzVLLMGenerator(VLLMGenerator):
-    """Subclass of upstream `VLLMGenerator` for the ezpz XPU stack.
-
-    WIP — see `docs/production/rl/history/vllm-xpu-wiring-plan.md` for the full
-    integration plan. Currently a placeholder.
-    """
-
-    # TODO Phase 3a: override engine-args construction
-    #   - skip `has_cuda_capability(9, 0)` check (always set
-    #     block_size=256, like the non-H100 branch upstream)
-    #   - force eager execution via EzpzVLLMCudaGraphConfig
-    #     default
-    #   - map our attention configs to XPU-supported vLLM backends
-
-    # TODO Phase 3b: override `pull_model_state_dict` to use
-    #   `TransportType.Gloo` strategy (RDMA path is CUDA-only)
-
-    # TODO Phase 3c: drop or replace `set_batch_invariance` if it
-    #   touches CUDA-only torch._inductor config
+    if "cuda_graph" in kwargs:
+        raise ValueError("xpu_vllm_engine_config always disables CUDA graphs")
+    return VLLMEngine.Config(cuda_graph=VLLMCudaGraphConfig(mode="NONE"), **kwargs)

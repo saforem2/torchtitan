@@ -62,6 +62,11 @@ _2B_V2 = RUNS / "agpt-2b-v2/torchtitan-ezpz/outputs/checkpoints"
 _20B_V2 = RUNS / "agpt-20b-v2/torchtitan-ezpz/outputs/checkpoints"
 _20B_N256 = RUNS / "agpt-20b-n256/torchtitan-ezpz/outputs/checkpoints"
 _80B_V2 = RUNS / "agpt-80b-v2/torchtitan-ezpz/checkpoints"
+# The main repo clone holds the -fixedpos forks (2026-10-20, PR #66) that both
+# 20B chains resume from since the data-position fix.
+_MAIN_CKPTS = Path(
+    "/flare/AuroraGPT/foremans/projects/saforem2/torchtitan-ezpz/outputs/checkpoints"
+)
 
 # Polaris is a different machine AND a different filesystem: its clone lives
 # on /eagle, not /flare. Reusing RUNS here would silently point every Polaris
@@ -293,8 +298,12 @@ TRAJECTORIES: list[dict] = [
         "version": "v2",
         "num_nodes": 512,
         "ckpt_dir": str(
-            _20B_V2 / "agpt-20b-sophiag-olmo-mix-1124-n512-gbs12288-constlr-from9000"
-        ),  # forked 2026-08-21; the pre-fork dir stopped advancing that day
+            _MAIN_CKPTS
+            / "agpt-20b-sophiag-olmo-mix-1124-n512-gbs12288-constlr-from9000-fixedpos"
+        ),  # fixedpos fork from step-10800 (2026-10-20): the constlr-from9000 chain
+        # (head step-11100) went NaN from step 11101 in umbrella 8938159, and its
+        # step-11200 is an empty interrupted save. Before that: forked 2026-08-21;
+        # the pre-fork dir stopped advancing that day
         # and pointing here is why the 20B-512 curve looked flat: the registry
         # tracked a chain the seat had already left.
         "readme": f"{_DOCS}/20b/n512/README.md",
@@ -363,6 +372,9 @@ TRAJECTORIES: list[dict] = [
             "av8h56xt",
             "wnws2jtn",
             "fpw58jgz",
+            "8je9lhff",  # Oct 18-19 umbrella 8938159: NaN every step 11101-11148
+            "2gzsirm3",  # Nov 11 umbrella 9053470, fixedpos: 10801-10882
+            "ez5oe0r6",  # Nov 11 umbrella 9053470 auto-retry from step-10800
         ],
         # Backfill for the 5399->6801 hole, added 2026-08-16.
         #
@@ -462,7 +474,11 @@ TRAJECTORIES: list[dict] = [
         "version": "v2",
         "num_nodes": 256,
         # RELOCATED 2026-06-12 from agpt-20b-v2 to its own clone.
-        "ckpt_dir": str(_20B_N256 / "agpt-20b-sophiag-olmo-mix-1124-n256-gbs6144"),
+        # fixedpos fork (2026-10-20) continues the chain: the old dir ends at
+        # step-20900 (umbrella 8938159), the fork resumed 20901 (umbrella 9053470).
+        "ckpt_dir": str(
+            _MAIN_CKPTS / "agpt-20b-sophiag-olmo-mix-1124-n256-gbs6144-fixedpos"
+        ),
         "readme": f"{_DOCS}/20b/n256/README.md",
         "gbs": 6144,
         "seq_len": SEQ_LEN,
@@ -540,6 +556,8 @@ TRAJECTORIES: list[dict] = [
             # against W&B config (20b, n256 ckpt folder, jobid 8828612) and
             # the Aurora trainer-2 log; the allocation ended at walltime.
             "iv185ozq",
+            "gvzni7as",  # Oct 18-19 umbrella 8938159: to 20987, ckpt step-20900
+            "gg6841jm",  # Nov 11 umbrella 9053470, fixedpos: 20901-21143, step-21100
         ],
         # 17 of this chain's 20 runs end in state "crashed" (12h/2h dispatches
         # hitting walltime), and a crashed run's final steps often never sync --

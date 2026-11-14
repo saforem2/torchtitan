@@ -15,8 +15,9 @@ import socket
 from typing import Any
 
 import torch.distributed as dist
-from monarch._src.spmd.host_mesh import host_mesh_from_store
 from monarch.actor import Actor, endpoint
+
+from torchtitan.experiments.ezpz.rl.monarch_compat import host_mesh_from_store
 
 
 class HostProbe(Actor):

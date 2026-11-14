@@ -4,7 +4,7 @@
 > Run `scripts/refresh_all.sh` to regenerate the tables/charts below from
 > disk + W&B.
 >
-> Last updated: 2026-10-29 (restart status; historical generated metrics remain labeled below)
+> Last updated: 2026-11-14 (restart status; historical generated metrics remain labeled below)
 
 > **Polaris (A100) production** is tracked separately (different hardware,
 > `dolma` dataset, `72xxxxx` job IDs): see
@@ -64,6 +64,13 @@ one PBS job per seat: `9076330` (20B-512), `9076346` (20B-256), `9076358` (4B),
 `9076371` (10B, now 512N). See the
 [umbrella post-mortem and resubmission](2026-11-11-umbrella-2088n.md).
 
+Before that, umbrella `8938159` (Oct 18-19) took the 20B-256 to `step-20900` and
+sent the 20B-512 NaN from step 11,101. Both 20B chains now resume from
+`-fixedpos` forks that restore the BlendCorpus data position (PR #66,
+[resume-position analysis](../guides/blendcorpus-resume-position.md)); the
+20B-512's head moved back to `step-10800` as a result. Per-chain detail:
+[20B 512N](agpt/20b/n512/README.md), [20B 256N](agpt/20b/n256/README.md).
+
 ## Restart gate — 2026-10-29
 
 Monday umbrella `8951415` failed before training. The corrected two-seat 20B
@@ -81,15 +88,17 @@ submitted yet. See the [verified incident, frozen inputs and acceptance gates](2
 One row per trajectory; `% target` is against the 4.67T olmo-mix budget.
 **These are historical generated rows**, not the current restart queue. The summary below
 predates the latest dispatch where noted. Post-training stages (CPT / SFT /
-RL-GRPO) are in the [next table](#post-training-stages-cpt-sft-rl). Detail +
+RL-GRPO) are in the [next table](#post-training-stages-cpt--sft--rl). Detail +
 per-dispatch history is in the linked pages.
 
 | Trajectory | State | Persisted step | Loss | % target | Trend |
 |------------|-------|---------------:|-----:|---------:|-------|
 | [**2B 256N**](agpt/2b/n256/README.md) async | **COMPLETE** ✅ | **92,859** | 2.652 | **100.0%** | 🏁 target reached (4.674T) |
 | [2B 512N](agpt/2b/n512/README.md) sync | **COMPLETE** | 46,429 | **2.687** | **100.0%** | ✅ **finished 2026-08-13 19:11 UTC** as umbrella 8744247 t0, exit 0. Full 4.674T olmo-mix-1124 budget. Final eval: MMLU 0.2511 (chance), and the last 500B tokens moved no metric. Stage 2 (dolmino CPT) seeded from step-46429 **has since run** (8756070 t0 then 8756957 t0) and sits at step 7,728, also idle. |
-| [20B 256N](agpt/20b/n256/README.md) | **idle** since 08-26 | **12,000**[^head] | 2.372 | 12.9% | ⏸️ the only pre-training chain `8773440` actually advanced: seat `t2`, **+201 steps, 2.31488 -> 2.24577**. Nothing since. |
-| [20B 512N](agpt/20b/n512/README.md) | **idle** since 08-26 | **10,600**[^head] | 2.400 | 22.8% | ⏸️ seat `t1` of `8773440` **never started** (0 steps). Last advance was `8764675` on 08-20. |
+| [20B 256N](agpt/20b/n256/README.md) | **queued** (`9076346`) | **21,100** | 2.440 | 22.7% | ⏸️ `9053470` (Nov 9-11) advanced 20,901 -> 21,143 on the fixedpos fork and persisted step-21,100 (1,062.0B tokens). |
+| [20B 512N](agpt/20b/n512/README.md) | **running** (`9076330`, started 2026-11-14) | **10,800** (fixedpos) | 2.462 | 23.3% | ⏸️ the constant-LR chain went NaN from 11,101 (`8938159`, Oct 18-19); forked from step-10,800 with the data position fixed. `9053470` logged 10,801 -> 10,882, no new checkpoint. |
+| [agpt 4B, OLMo-3, 4K](agpt/4b/README.md) | **running** (`9076358`, Aurora 512N) | **2,600** | 3.311 | 1.4% | Aurora umbrella `9053470` logged 1 -> 2,698. Sirius 2N hedge at step 7,454; Polaris 16N/32N queued. |
+| [agpt 10B, OLMo-3, 4K](agpt/10b/README.md) | **queued** (`9076371`, Aurora 512N, fresh) | -- | -- | -- | 768N attempts diverged at step 1 (loss 17788+). Sirius 8N hedge restarted fresh; Polaris 16N/32N queued. |
 | [**80B**](agpt/80b/README.md) | **blocked** (dp wall) | — | nan | — | 🔴 optimizer-independent grad-path overflow at dp>~186; not a SophiaG bug |
 | [2B 512N stage-2 dolmino](cpt/README.md) | **idle** since 08-26 | **7,728**[^head] | 2.519 | n/a (CPT) | ⏸️ a 2B-512 seat of `8773440` logged **0 steps**. Seeded from 2B-512 step-46429. |
 | [2B 512N constlr fork](agpt/2b/n512/README.md) | **idle** since 08-26 | **21,307**[^head] | 2.745 | n/a (fork) | ⏸️ a 2B-512 seat of `8773440` ran **+504 steps, 2.74535 -> 2.73836**. Constant-LR fork branched at step 9,201. |
@@ -100,16 +109,17 @@ Continued-pretraining, supervised fine-tuning, and RL-GRPO runs that build ON
 a pre-trained base. No `% target` (they don't consume the 4.67T budget); each
 has its own token/step goal in the linked page.
 
+| Stage | Model | Data / recipe | Status | Progress | Notes |
+|-------|-------|---------------|--------|----------|-------|
 | CPT | 2b-256n (plateaued) | [olmo×dolmino sweep](cpt/README.md) | **pilot complete** ✅ | step 5,960, loss **2.49** | 🟢 dolmino CPT beats olmo plateau (2.49 vs 2.80); more dolmino = lower loss |
 | SFT | [2b-mds](sft/agpt/2b-mds/tulu_math_uc_mix/README.md) | tulu_math_uc_mix (metamathqa-swap, ~4.5B tok) | **complete** ✅ | 729 steps, loss **0.77** | 🏁 the reused SFT deliverable (checkpoint-729-hf); input to GRPO |
 | SFT | [2b-mds](sft/agpt/2b-mds/tulu_math_uc_mix_full/README.md) | tulu_math_uc_mix_full (FULL OpenMathInstruct-2, ~54B tok) | **complete** ✅ | **deliverable=ckpt-900** (8672 overfit) | 🏁 8672 reached epoch 1.0 but forgot (base-LM->chance, IFEval flat); ckpt-900 = IFEval 0.253 >= metamathqa + base-LM intact + GRPO 0.31->0.74 |
-| SFT | **2b-mds B2v2** | [ckpt-900 → gsm8k-r1cot 3/6ep](sft/README.md) ([POST-TRAINING-2B](POST-TRAINING-2B.md#b2v2----stronger-stage-2-sft-on-ckpt-900-2026-11-04), [journal](../docs/journal.md)) | **complete, eval 0.09/0.105 vs B2 0.205 — worse** | 6/12 steps, loss 0.8069, acc 0.8198 | 🔴 2N Sunspot 12482423/12482485 Exit 0; eval 12482572/73 (frameworks 2026.1.0 vLLM 0.26 XPU) 0.09 (0.86/416) / 0.105 (0.91/378) — more narrow epochs hurt, same as B3/B4 |
-| CPT | **2b-mds 60/40 FWE kind-shift** — `cpt_fineweb_edu_4n.sh` (`agpt_2b_mds_mix_owm_edu_6040`: 40% open-web-math / 60% FineWeb-Edu via Grain local 140 parquets, `PPN=8 GBS=64 seq=8192`, base `gs138650/step-0`, VENV `xpu-torch216-sync-5a7a622f16`) | **`R live` `12483245`** — chain `12483048 0→4091` / `12483075 4091→7869` (both `02:00` walltime) → `12483245 7800→10143+` resuming `step-7800` ckpt; new low **loss 1.856 at 10108** (MBH), MFU **18.16%**, ckpt `step-10000` verified, `~5.3%` of 100B budget (`190734` steps) — _provisional, see [journal](../docs/journal.md)_ | `10143/190734` | **MMLU kind-shift lever** (SmolLM2 33.6% @38B; olmo-mix 94.8% DCLM -> FWE). Next walltime re-queue; eval gate ~15k steps |
+| SFT | **2b-mds B2v2** | [ckpt-900 → gsm8k-r1cot 3/6ep](sft/README.md) ([POST-TRAINING-2B](POST-TRAINING-2B.md#b2v2----stronger-stage-2-sft-on-ckpt-900-2026-11-04), [journal](../journal.md)) | **complete, eval 0.09/0.105 vs B2 0.205 — worse** | 6/12 steps, loss 0.8069, acc 0.8198 | 🔴 2N Sunspot 12482423/12482485 Exit 0; eval 12482572/73 (frameworks 2026.1.0 vLLM 0.26 XPU) 0.09 (0.86/416) / 0.105 (0.91/378) — more narrow epochs hurt, same as B3/B4 |
+| CPT | **2b-mds 60/40 FWE kind-shift** — `cpt_fineweb_edu_4n.sh` (`agpt_2b_mds_mix_owm_edu_6040`: 40% open-web-math / 60% FineWeb-Edu via Grain local 140 parquets, `PPN=8 GBS=64 seq=8192`, base `gs138650/step-0`, VENV `xpu-torch216-sync-5a7a622f16`) | **`R live` `12483245`** — chain `12483048 0→4091` / `12483075 4091→7869` (both `02:00` walltime) → `12483245 7800→10143+` resuming `step-7800` ckpt; new low **loss 1.856 at 10108** (MBH), MFU **18.16%**, ckpt `step-10000` verified, `~5.3%` of 100B budget (`190734` steps) — _provisional, see [journal](../journal.md)_ | `10143/190734` | **MMLU kind-shift lever** (SmolLM2 33.6% @38B; olmo-mix 94.8% DCLM -> FWE). Next walltime re-queue; eval gate ~15k steps |
 | SFT | **pretok distill** — `_pretokenize_distill_cot_mix_1n.sh` (`50% OpenThoughts-114k-decontam + 50% gsm8k-r1cot` → `/tegu/datasets/agpt2b-distill-cot-mix-len8192`, `train_sft.py --pretokenize_to num_proc=4`) | **`R --` `12483253 1N 12h`** staging; gate `dataset_info.json` + `[decontam]` — _provisional_ | — | Unblocks `sft_distill_cot_4n.sh` stage-2 broad SFT; narrow `12483074 10/10 11.02→10.72 completed` (1N) |
 | RL | **2b-mds B2 GRPO 2N** — `rl_grpo_b2_2n.sh` (`checkpoint-93-hf B2=0.205`, `gs=8 lr=5e-6 100 steps ckpt/25`, Monarch TorchStore+XPU vLLM `float32` [monarch.md](rl/monarch.md)) | **`R --` `12483252 3(2+1) 06:00`** staged — _provisional_ | — | Validated pattern `12479177 40/40 auto→Gloo Exit 0` |
-| <em>was:</em> CPT/SFT/RL | 2b-mds | **16N Sunspot fanout** ([journal](../docs/journal.md), wired `685ce083b`) | **wired, not yet executed** | — | `cpt_fineweb_edu_4n.sh` + `cpt_olmo25_dolmino75_4n.sh` + `sft_distill_cot_4n.sh` + `rl_grpo_b2_2n.sh`; pre-tokenized distill via `_pretokenize_distill_cot_mix_1n.sh` → `/tegu/datasets/agpt2b-distill-cot-mix-len8192` |
 | SFT | [2b-v2-256n](sft/agpt/2b-v2-256n/tulu_math_uc_mix/README.md) | tulu_math_uc_mix | **blocked** | — | 🔴 v2-base 384-rank oneCCL scale crash at 32N |
-| RL | B2 ckpt-93 (0.205) | Monarch+XPU GRPO — [monarch.md](rl/monarch.md), [journal](../docs/journal.md) | **Sunspot validated** ✅ | 40/40 v0-3, 4 pushes/pulls, 3 finite grads | 🟢 job 12479177 auto→Gloo Exit 0 (Sunspot 2-host); Aurora `prod` gate still required |
+| RL | B2 ckpt-93 (0.205) | Monarch+XPU GRPO — [monarch.md](rl/monarch.md), [journal](../journal.md) | **Sunspot validated** ✅ | 40/40 v0-3, 4 pushes/pulls, 3 finite grads | 🟢 job 12479177 auto→Gloo Exit 0 (Sunspot 2-host); Aurora `prod` gate still required |
 | RL | 2b-mds-sft-729 | [sum_digits arithmetic (GRPO)](rl/grpo/aurora2b/sft_arithmetic/README.md) | **complete** ✅ | 1000 steps, acc **0.76** | 🏁 8N GRPO on the SFT'd model; 8× over baseline |
 > Full SFT index: [production/sft/README.md](sft/README.md) · GRPO index:
 > [production/rl/grpo/README.md](rl/grpo/README.md) · CPT: [production/cpt/README.md](cpt/README.md).

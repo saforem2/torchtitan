@@ -8,9 +8,24 @@
 
 ## v2 — 20B @ 256N — SophiaG LR=2.28e-5 (fp32 master)
 
-> Last updated: 2026-09-30
+> Last updated: 2026-11-14
 >
-> Status: **NOT RUNNING.** Umbrella `8870515` advanced this chain through logged
+> **Current status (2026-11-14): queued, persisted head `step-21100`
+> (1.06T tokens, 22.7% of 4.67T).** `9076346` (260 nodes, `small`, 12h) waits to
+> resume it.
+>
+> - **Oct 18-19, umbrella `8938159`:** healthy, 17,501 -> 20,987 (loss 2.447,
+>   19.9% MFU), persisted `step-20900`.
+> - **Oct 20, fixedpos fork (PR #66):** every 20B checkpoint had stored
+>   `consumed_samples=0`, so restarts replayed the data stream
+>   ([resume-position analysis](../../../../guides/blendcorpus-resume-position.md)). The chain continues in
+>   `...-n256-gbs6144-fixedpos` ([journal](../../../../journal.md#2026-10-20-aurora----umbrella-nan-fixedpos-fork-boost-queued)).
+> - **Nov 9-11, umbrella `9053470`:** 20,901 -> 21,143 on `frameworks/2026.1.0`
+>   (loss 2.446 -> 2.440, 328 TPS/GPU, 16.4% MFU), persisted `step-21100`
+>   ([write-up](../../../2026-11-11-umbrella-2088n.md)). `step-21100` stores a nonzero sample counter, so the next
+>   resume does not rewind the data.
+>
+> Previous status (2026-09-30): **NOT RUNNING.** Umbrella `8870515` advanced this chain through logged
 > step 17,600 and persisted **step 17,500** (**880.8B tokens**). Step 17,600 is
 > an empty placeholder and is not resumable. Tail eval `8880658` finished with
 > PBS exit 0 and seven finite measurements, including HellaSwag
@@ -121,16 +136,19 @@
 | umbrellas `8698125`..`8764675` | 2026-07-28..08-20 | 12h-24h | 6,151 -> **12,000** | 2.41007 -> **2.43380** | ~370 (mean) | ~18.5% (mean) | Carried by the ~2,098N 5-chain umbrella seat t2 across eight dispatches, with the 16N `8703284` bridge and the 260N `8698753` backfill in between. TPS/MFU are means over the committed metric store, which covers 6,151-10,380 of this range. Per-dispatch step ranges: [dispatch log](../../../dispatch-log.md). |
 | `8773440` t2 | 2026-08-26 | 12h | **201 steps** on top of the step-12,000 head | **2.31488 -> 2.24577** | -- | -- | Umbrella used 5h13m of a 12h slot, `Exit_status=-14`; three of five seats trained, both 512N seats never started. The seat was abandoned early as `stuck_pre_training` because ezpz 0.21's progress regex matched `step=` while torchtitan prints `step: ` -- fixed in ezpz 0.27.3, pinned by [`tests/failover/test_progress_marker_contract.py`](../../../../../tests/failover/test_progress_marker_contract.py). |
 | umbrellas `8784462`..`8828611` t2 | 2026-09-05..17 | -- | 12,401 -> **15,242** | 2.22184 -> **2.42473** | -- | -- | Four productive legs (`8784462`, `8808931`, `8812215`, `8828611`) advanced the persisted head through step 15,200; `8808932` made no progress after a startup `std::bad_alloc`. |
-| `8828612` t2 | 2026-09-19/20 | -- | 15,201 -> **16,036** | 2.19908 -> **2.45566** | -- | -- | **Latest umbrella outcome.** Persisted step 16,000. The sibling 20B-512 seat made no progress after two startup `std::bad_alloc` failures. Remote logs and checkpoint tree verified 2026-09-21. |
+| `8828612` t2 | 2026-09-19/20 | -- | 15,201 -> **16,036** | 2.19908 -> **2.45566** | -- | -- | Persisted step 16,000. The sibling 20B-512 seat made no progress after two startup `std::bad_alloc` failures. Remote logs and checkpoint tree verified 2026-09-21. |
+| `8870515` t2 | to 2026-09-29 | -- | 16,801 -> 17,600 | -> 2.41783 | -- | -- | Persisted step-17,500 (Sep 29); the step-17,600 save was interrupted. |
+| `8938159` | 2026-10-18/19 | 24h | 17,501 -> 20,987 | -> 2.447 | -- | 19.9% | Persisted step-20,900 (Oct 19). Last leg on the pre-fix data position ([journal](../../../../journal.md#2026-10-20-aurora----umbrella-nan-fixedpos-fork-boost-queued)). |
+| `9053470` t1 | 2026-11-09/11 | 4h26m (umbrella) | 20,901 -> 21,143 (fixedpos) | 2.446 -> 2.440 | 328 | 16.4% | **Latest outcome.** Persisted step-21,100 ([write-up](../../../2026-11-11-umbrella-2088n.md)). |
 
-**Latest checkpoint:** step-17,500 (disk-audited on Aurora 2026-09-30; 3,073 files including nonempty metadata).
+**Latest checkpoint:** step-21,100 in the fixedpos fork (disk-audited on Aurora 2026-11-14).
 
-**Cumulative persisted steps:** 17,500 (disk-confirmed)
+**Cumulative persisted steps:** 21,100 (disk-confirmed)
 
-**Tokens consumed:** 17,500 x 6,144 x 8,192 = **880.8B tokens** (18.8% of 4.67T target)
+**Tokens consumed:** 21,100 x 6,144 x 8,192 = **1,062.0B tokens** (22.7% of 4.67T target)
 
-**Loss:** 2.41783 at the last logged step, 17,600 (`8870515` t2). This is a
-single-step value after the persisted step-17,500 checkpoint.
+**Loss:** 2.4434, the last value W&B holds for the Nov 11 run (`gg6841jm`, through
+step 21,143). A single-step value.
 
 > **Corrected 2026-08-17** (and again 2026-08-30, see the status header).
 > This page previously carried three different step

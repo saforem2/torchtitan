@@ -54,7 +54,7 @@ from torchtitan.experiments.ezpz.rl.alphabet_sort_agpt.config_registry import (
     rl_grpo_lora_agpt_2b_easy,
 )
 config = rl_grpo_lora_agpt_2b_easy()
-assert config.rollouter.train_dataset.max_turns == 1
+assert config.rollouter.training_dataloader.dataset.max_turns == 1
 for package in ("torch", "torchmonarch", "torchstore", "vllm"):
     print(package, metadata.version(package))
 PY
@@ -69,15 +69,14 @@ printf 'RL_SYNC_START job=%s commit=%s out=%s\n' "$JOB" "$EXPECTED_SHA" "$OUT" |
     --async-loop.num-prompts-per-train-step=4 \
     --async-loop.num-samples-per-prompt=4 \
     --async-loop.target-offpolicy-steps=0 \
-    --async-loop.validation.num-samples=8 \
-    --async-loop.training-sample-builder.no-drop-zero-std-reward-groups \
+    --async-loop.validation.steps=8 \
+    --async-loop.batcher.training-sample-builder.no-drop-zero-std-reward-groups \
     --generator.sampling.max-tokens=256 \
     --generator.parallelism.data-parallel-degree=1 \
     --generator.parallelism.tensor-parallel-degree=1 \
     --trainer.parallelism.data-parallel-shard-degree=1 \
     --trainer.parallelism.tensor-parallel-degree=1 \
     --trainer.checkpointer.interval=1 \
-    --metrics.no-enable-wandb \
     2>&1 | tee -a "$LOG"
 rc=${PIPESTATUS[0]}
 test "$rc" -eq 0 || {

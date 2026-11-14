@@ -53,7 +53,7 @@ c = rl_grpo_agpt_2b_bounded_v3()
 assert c.async_loop.num_training_steps == 3
 assert c.async_loop.num_prompts_per_train_step == 4
 assert c.async_loop.num_samples_per_prompt == 8
-assert c.async_loop.validation.num_samples == 8
+assert c.async_loop.validation.steps == 8
 assert c.generator.sampling.max_tokens == 128
 assert c.trainer.checkpointer.interval == 1
 assert not any(
@@ -77,15 +77,14 @@ echo "ROBUST_V3_GRPO_START $(date -Is) commit=$(git rev-parse HEAD) model_sha=$s
   --async-loop.num-prompts-per-train-step=4 \
   --async-loop.num-samples-per-prompt=8 \
   --async-loop.target-offpolicy-steps=0 \
-  --async-loop.validation.num-samples=8 \
-  --async-loop.training-sample-builder.no-drop-zero-std-reward-groups \
+  --async-loop.validation.steps=8 \
+  --async-loop.batcher.training-sample-builder.no-drop-zero-std-reward-groups \
   --generator.sampling.max-tokens=128 \
   --generator.parallelism.data-parallel-degree=1 \
   --generator.parallelism.tensor-parallel-degree=1 \
   --trainer.parallelism.data-parallel-shard-degree=1 \
   --trainer.parallelism.tensor-parallel-degree=1 \
-  --trainer.checkpointer.interval=1 \
-  --metrics.no-enable-wandb
+  --trainer.checkpointer.interval=1
 rc=$?
 echo "ROBUST_V3_GRPO_DONE rc=$rc $(date -Is)"
 exit "$rc"

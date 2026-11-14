@@ -31,7 +31,7 @@ from dataclasses import dataclass
 
 from datasets import load_dataset
 
-from torchtitan.config import Configurable
+from torchtitan.rl.rollout.data import RLDataset
 
 # Same prompt suffix as gsm8k-r1cot SFT + the Stage 0 eval (train/eval/RL match).
 # ASCII-only; kept identical to rl/tasks/gsm8k_reason.py so a trace scored by the
@@ -79,7 +79,7 @@ class GSM8KReasonSample:
     """Gold numeric answer, normalized (from the solution's ``#### N`` marker)."""
 
 
-class GSM8KReasonDataset(Configurable):
+class GSM8KReasonDataset(RLDataset):
     """Endless, seeded stream of GSM8K chain-of-thought samples.
 
     Loads ``openai/gsm8k`` (config ``main``), optionally filters to an easy subset
@@ -94,7 +94,7 @@ class GSM8KReasonDataset(Configurable):
     """
 
     @dataclass(kw_only=True, slots=True)
-    class Config(Configurable.Config):
+    class Config(RLDataset.Config):
         seed: int = 42
         """Seed for the row-order shuffle."""
 

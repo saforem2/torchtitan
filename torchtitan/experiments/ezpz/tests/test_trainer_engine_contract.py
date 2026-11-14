@@ -129,9 +129,9 @@ def test_ezpz_engine_installs_xpu_graph_wrapper(monkeypatch):
         sdc_replayer=None,
         dist_moe_runtime=None,
         training=SimpleNamespace(
-            disable_cuda_graphs=True,
+            disable_accelerator_graphs=True,
             preprocess_microbatch_groups_lazily=False,
-            cuda_graph_per_accumulation_group=False,
+            accelerator_graph_per_microbatch_group=False,
         ),
         debug=SimpleNamespace(spmd_typechecking=False),
         parallelism=SimpleNamespace(
@@ -164,9 +164,9 @@ def test_ezpz_engine_composes_native_ddp_with_post_modelspec_context(monkeypatch
         sdc_replayer=None,
         dist_moe_runtime=None,
         training=SimpleNamespace(
-            disable_cuda_graphs=True,
+            disable_accelerator_graphs=True,
             preprocess_microbatch_groups_lazily=False,
-            cuda_graph_per_accumulation_group=False,
+            accelerator_graph_per_microbatch_group=False,
         ),
         debug=SimpleNamespace(spmd_typechecking=False),
         parallelism=SimpleNamespace(
@@ -194,6 +194,50 @@ def test_ezpz_engine_composes_native_ddp_with_post_modelspec_context(monkeypatch
     composed.assert_called_once()
     assert callable(composed.call_args.args[0])
     assert composed.call_args.args[1] == "cpu"
+
+
+@pytest.mark.skipif(
+    not torch.distributed.is_gloo_available(), reason="Gloo backend is unavailable"
+)
+def test_ezpz_native_ddp_checkpointer_uses_unwrapped_model_keys(monkeypatch, tmp_path):
+    from torchtitan.components.checkpointer import MODEL, ModelWrapper
+    from torchtitan.experiments.ezpz.native_ddp import NativeDDP
+
+    torch.distributed.init_process_group(
+        "gloo", init_method=f"file://{tmp_path}/rendezvous", rank=0, world_size=1
+    )
+    try:
+        model = torch.nn.Sequential(torch.nn.Linear(4, 3))
+        wrapped = NativeDDP(model)
+        engine = object.__new__(EzpzTrainingEngine)
+        engine.config = SimpleNamespace(
+            parallelism=SimpleNamespace(enable_data_parallel_native_ddp=True)
+        )
+        engine.model_parts = [wrapped]
+
+        def build_checkpointer(self, *, extra_states, sd_adapter):
+            self.checkpointer = SimpleNamespace(
+                states={MODEL: ModelWrapper(self.model_parts)}
+            )
+
+        monkeypatch.setattr(
+            "torchtitan.experiments.torchft.trainer.FaultTolerantTrainingEngine"
+            "._initialize_checkpointer",
+            build_checkpointer,
+        )
+
+        assert set(ModelWrapper([wrapped]).state_dict()) == {
+            "module.0.weight",
+            "module.0.bias",
+        }
+        engine._initialize_checkpointer(extra_states=None, sd_adapter=None)
+
+        state = engine.checkpointer.states[MODEL].state_dict()
+        assert set(state) == {"0.weight", "0.bias"}
+        assert state["0.weight"].data_ptr() == model[0].weight.data_ptr()
+        assert engine.model_parts == [wrapped]
+    finally:
+        torch.distributed.destroy_process_group()
 
 
 def test_ezpz_model_identity_survives_modelspec_removal():

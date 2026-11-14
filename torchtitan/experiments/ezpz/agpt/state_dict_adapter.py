@@ -64,10 +64,16 @@ class AgptStateDictAdapter(Llama3StateDictAdapter):
                 type(rope).__name__,
             )
 
-    def to_hf(self, state_dict: dict[str, Any]) -> dict[str, Any]:
+    def to_hf(
+        self, state_dict: dict[str, Any], *, to_quantized_layout: bool = False
+    ) -> dict[str, Any]:
         # Complex checkpoints: parent already does the right thing.
         if not self._is_cos_sin:
-            return super().to_hf(state_dict)
+            return super().to_hf(state_dict, to_quantized_layout=to_quantized_layout)
+        if to_quantized_layout:
+            raise ValueError(
+                f"{type(self).__name__} does not support quantized HF checkpoints."
+            )
 
         # CosSinRoPE: HF-native rotate_half layout -> map keys, NO Q/K permute.
         state_dict = self._native_fused_linears_to_hf(state_dict)
@@ -93,11 +99,19 @@ class AgptStateDictAdapter(Llama3StateDictAdapter):
             hf_state_dict[new_key] = value
         return hf_state_dict
 
-    def from_hf(self, hf_state_dict: dict[str, Any]) -> dict[str, Any]:
+    def from_hf(
+        self, hf_state_dict: dict[str, Any], *, is_quantized_layout: bool = False
+    ) -> dict[str, Any]:
         # Complex checkpoints: parent (includes the ComplexRoPE guard + reverse
         # permute).
         if not self._is_cos_sin:
-            return super().from_hf(hf_state_dict)
+            return super().from_hf(
+                hf_state_dict, is_quantized_layout=is_quantized_layout
+            )
+        if is_quantized_layout:
+            raise ValueError(
+                f"{type(self).__name__} does not support quantized HF checkpoints."
+            )
 
         # CosSinRoPE: HF-native -> map keys, NO reverse permute, and DON'T assert
         # ComplexRoPE (the parent's guard would wrongly reject a cos_sin model).

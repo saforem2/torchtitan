@@ -2,7 +2,12 @@
 
 > **Living document** -- updated as jobs complete and new runs are submitted.
 >
-> Last updated: 2026-10-31 -- chain advanced to step 6800; queue re-armed 2-deep (7803246 Q / 7803247 H)
+> Last updated: 2026-11-14 -- the 20B chain is idle at step 6800 (Oct 18). Both
+> re-armed legs stopped before training: `7803246` (Nov 1, `No module named
+> 'torch_remat'`) and `7803247` (Nov 2, unknown Lmod module, exit 2), each with
+> `FAILOVER STOP: stuck_pre_training`. Nothing 20B is queued on Polaris.
+>
+> Previously: 2026-10-31 -- chain advanced to step 6800; queue re-armed 2-deep (7803246 Q / 7803247 H)
 
 Polaris (NVIDIA A100-SXM4-40GB) production trajectories. Distinct from the
 Aurora/Sunspot (Intel XPU) chains tracked in the
@@ -28,7 +33,7 @@ absolute (not % of a budget).
 | Trajectory | State | Persisted step | Live step | Loss | Tokens | Notes |
 |------------|-------|---------------:|----------:|-----:|-------:|-------|
 | **2B n128** (`gbs512`) | idle (last leg done) | **5,300** | 5,383 | **2.36** | ~22.6B | 53 ckpts; last leg 7228272 ran full 12h |
-| **20B n128** (`gbs1024`) | **running** (re-armed 2026-10-31, 2-deep) | **6,800** | 6,859 | **2.05** | 57.0B | 23 legs trained -> step-6800; +1200 steps since Aug docs went stale (legs 5601-6800). Last leg 7753580 self-aborted at 6859 via grad_norm guard (28.9x) -- last checkpoint 6800 intact. Queued 7803246 Q / 7803247 H |
+| **20B n128** (`gbs1024`) | **idle** since Oct 18 (both Oct 31 re-arms stopped before training, see note) | **6,800** | 6,859 | **2.05** | 57.0B | 23 legs trained -> step-6800; +1200 steps since Aug docs went stale (legs 5601-6800). Last leg 7753580 self-aborted at 6859 via grad_norm guard (28.9x) -- last checkpoint 6800 intact. Queued 7803246 Q / 7803247 H |
 
 Smaller/earlier 2B node-count variants also exist on disk (comparison
 runs, not the canonical chain): n64 -> step ~1,970 / loss 2.57;

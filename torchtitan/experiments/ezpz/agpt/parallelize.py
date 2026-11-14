@@ -21,6 +21,7 @@ Differences vs upstream `parallelize_llama`:
   `reshard_after_forward=reshard_after_forward_policy == "always"`).
 """
 
+import math
 import os
 
 import ezpz
@@ -34,8 +35,9 @@ from torch.distributed.fsdp import (
     fully_shard,
     MixedPrecisionPolicy,
 )
+from torch.distributed.tensor import DTensor, Shard
 
-from torchtitan.config import TORCH_DTYPE_MAP, TrainingConfig
+from torchtitan.config import PrecisionConfig, TORCH_DTYPE_MAP
 from torchtitan.config.parallelism import ParallelismConfig
 
 from torchtitan.distributed import ParallelismContext
@@ -45,20 +47,45 @@ from torchtitan.distributed.fsdp import (
     get_fsdp_reshard_after_forward_policy,
     linear_param_shard_placements,
 )
-from torchtitan.distributed.local_compile import apply_local_compile
+from torchtitan.distributed.local_compile import LocalCompileConfig
 from torchtitan.experiments.ezpz.fsdp_compat import resolve_fsdp_mesh
 from torchtitan.experiments.ezpz.logging import logger
 
 from torchtitan.models.llama3.model import Llama3Model
 
 
+# [ezpz] Per-block torch.compile, opt-in via EZPZ_AGPT_COMPILE_BLOCKS.
+# Upstream replaced apply_compile (one fullgraph torch.compile per
+# TransformerBlock, the historical components=[model, loss] path) with named
+# @local_compile regions, which leave most of the block eager. This restores
+# the old per-block compile, after AC and before FSDP/native DDP, without
+# touching core. "default"/"1" -> mode=None; any other value is passed as the
+# torch.compile mode (e.g. "max-autotune").
+def _maybe_compile_transformer_blocks(model: nn.Module) -> None:
+    mode = os.environ.get("EZPZ_AGPT_COMPILE_BLOCKS", "").strip()
+    if mode in ("", "0", "false", "none"):
+        return
+    compile_mode = None if mode in ("1", "true", "default") else mode
+    for _, transformer_block in model.layers.named_children():
+        # A traced backward cannot add into weight.grad in place; the
+        # regular AccumulateGrad path gives the same sum.
+        for module in transformer_block.modules():
+            if getattr(module, "inplace_wgrad_accum", False):
+                module.inplace_wgrad_accum = False
+        transformer_block.compile(backend="inductor", fullgraph=True, mode=compile_mode)
+    logger.info(
+        "Compiled each TransformerBlock with torch.compile (fullgraph, mode=%s)",
+        compile_mode,
+    )
+
+
 def parallelize_llama(
     model: Llama3Model,
     *,
     parallelism_context: ParallelismContext,
-    training: TrainingConfig,
+    precision: PrecisionConfig,
     parallelism: ParallelismConfig,
-    local_compile_regions: list[str],
+    local_compile: LocalCompileConfig,
     activation_remat: ActivationRematConfig | None,
     dump_folder: str,
     skip_dp: bool = False,
@@ -70,12 +97,12 @@ def parallelize_llama(
     """
     # Bind the @local_compile regions before any module runs (process-wide);
     # BaseModel.parallelize does the same first.
-    apply_local_compile(local_compile_regions)
+    local_compile.apply()
     parallel_dims = parallelism_context
     assert (
-        training.max_context_length % parallel_dims.seq_len_divisor == 0
+        model.config.max_context_length % parallel_dims.seq_len_divisor == 0
     ), f"""
-        Sequence length {training.max_context_length} must be divisible by the product of TP degree
+        Sequence length {model.config.max_context_length} must be divisible by the product of TP degree
         ({parallel_dims.tp}) and 2 * CP degree ({parallel_dims.cp}).
         """
 
@@ -115,6 +142,8 @@ def parallelize_llama(
     if activation_remat is not None:
         activation_remat.apply(model)
 
+    _maybe_compile_transformer_blocks(model)
+
     # Native DDP is installed by the ezpz trainer after parameters leave the
     # meta device. Apply TP/AC/compile here, but do not also install FSDP.
     # The vLLM generator similarly owns its data-parallel behavior.
@@ -134,7 +163,7 @@ def parallelize_llama(
     dp_mesh, dp_mesh_dims = resolve_fsdp_mesh(parallel_dims)
 
     # [ezpz] Ablation arm B ("norms-only fp32 master"), opt-in via
-    # EZPZ_FP32_NORMS=1. Only meaningful with training.dtype=bfloat16 (bf16
+    # EZPZ_FP32_NORMS=1. Only meaningful with precision.dtype=bfloat16 (bf16
     # master everywhere): promote the affine norm weights to an fp32 master
     # while the bulk stays bf16. FSDP2 rejects mixed dtypes inside one
     # fully_shard group, so the promoted norms must also be sharded
@@ -144,11 +173,11 @@ def parallelize_llama(
     if os.environ.get("EZPZ_FP32_NORMS", "0").strip() not in ("", "0", "false"):
         from torchtitan.experiments.ezpz.agpt.fp32_norms import promote_norms_to_fp32
 
-        if training.dtype != "bfloat16":
+        if precision.dtype != "bfloat16":
             logger.warning(
-                "EZPZ_FP32_NORMS=1 with training.dtype=%s: the master copy is "
+                "EZPZ_FP32_NORMS=1 with precision.dtype=%s: the master copy is "
                 "already float32, so promoting norms is a no-op.",
-                training.dtype,
+                precision.dtype,
             )
         fp32_norm_modules = promote_norms_to_fp32(model)
 
@@ -156,10 +185,10 @@ def parallelize_llama(
         model,
         dp_mesh,
         dp_mesh_dims=dp_mesh_dims,
-        param_dtype=TORCH_DTYPE_MAP[training.mixed_precision_param],
-        reduce_dtype=TORCH_DTYPE_MAP[training.mixed_precision_reduce],
+        param_dtype=TORCH_DTYPE_MAP[precision.param_dtype],
+        reduce_dtype=TORCH_DTYPE_MAP[precision.reduce_dtype],
         pp_enabled=parallel_dims.pp_enabled,
-        cpu_offload=training.enable_cpu_offload,
+        cpu_offload=parallelism.fsdp_enable_cpu_offloading,
         reshard_after_forward_policy=parallelism.fsdp_reshard_after_forward,
         separate_fsdp_modules=fp32_norm_modules,
     )
@@ -169,7 +198,7 @@ def parallelize_llama(
     else:
         logger.info("Applied FSDP to the model")
 
-    if training.enable_cpu_offload:
+    if parallelism.fsdp_enable_cpu_offloading:
         logger.info("Applied CPU Offloading to the model")
 
     return model
@@ -210,6 +239,55 @@ def disable_fsdp_gradient_division(model: nn.Module) -> None:
         fsdp_modules_updated,
         force_sum_reduction,
     )
+
+
+def fsdp_shard_degree(
+    dp_mesh: DeviceMesh, dp_mesh_dims: DataParallelMeshDims | None
+) -> int:
+    """Number of ranks FSDP splits each parameter across.
+
+    With ``DataParallelMeshDims`` this is the (flattened) product of the
+    ``shard`` axes; replicate axes (HSDP) do not shard. Without it the mesh
+    is FSDP's own: 1-D means FSDP and 2-D means ``(replicate, shard)`` HSDP,
+    so the shard degree is the size of the last dimension.
+    """
+    if dp_mesh_dims is not None:
+        names = dp_mesh_dims.shard_names
+        return math.prod(dp_mesh[name].size() for name in names) if names else 1
+    return dp_mesh.size(dp_mesh.ndim - 1)
+
+
+def divisible_linear_param_shard_placements(
+    module: nn.Module,
+    shard_degree: int,
+    fallbacks: list[tuple[tuple[int, ...], int]] | None = None,
+) -> dict[nn.Parameter, Shard]:
+    """Core's stacked-linear ``Shard(ndim-2)`` map, minus uneven entries.
+
+    ``linear_param_shard_placements`` (cde3c93227, mirroring upstream #4808)
+    shards stacked ``[N, F, D]`` weights on the matrix-row dim ``F`` so the
+    two-element projection axis of ``w13`` is not padded to the shard degree.
+    FSDP2 only supports uneven sharding on dim 0, so a row count that the
+    shard degree does not divide (AGPT-2B ``F=11008`` over 12 or 24 ranks)
+    raises ``NotImplementedError`` at ``fully_shard``. Drop those entries so
+    FSDP's default padded ``Shard(0)`` applies to them; each rank then
+    stores a padded ``[ceil(N/shard_degree), F, D]`` slice. Each dropped
+    ``(local shape, dim)`` is appended to ``fallbacks`` so the caller can
+    warn once.
+
+    The placement only changes the local storage layout. DCP save/load works
+    on global DTensor metadata, so checkpoints stay interchangeable.
+    """
+    placements = linear_param_shard_placements(module)
+    kept: dict[nn.Parameter, Shard] = {}
+    for param, placement in placements.items():
+        # FSDP checks the local tensor: a TP-sharded DTensor is already split.
+        local = param.to_local() if isinstance(param, DTensor) else param
+        if local.shape[placement.dim] % shard_degree == 0:
+            kept[param] = placement
+        elif fallbacks is not None:
+            fallbacks.append((tuple(local.shape), placement.dim))
+    return kept
 
 
 def apply_fsdp(
@@ -303,13 +381,27 @@ def apply_fsdp(
             reshard_after_forward=reshard_after_forward,
         )
 
+    shard_degree = fsdp_shard_degree(dp_mesh, dp_mesh_dims)
+    fallbacks: list[tuple[tuple[int, ...], int]] = []
     for transformer_block in model.layers.values():
-        stacked_param_placements = linear_param_shard_placements(transformer_block)
+        stacked_param_placements = divisible_linear_param_shard_placements(
+            transformer_block, shard_degree, fallbacks
+        )
         fully_shard(
             transformer_block,
             **fsdp_config,
             reshard_after_forward=reshard_after_forward,
             shard_placement_fn=stacked_param_placements.get,
+        )
+    if fallbacks:
+        logger.warning(
+            "FSDP: %d stacked linear params (shapes/dims %s) do not divide "
+            "the shard degree %d on their matrix-row dim; using padded "
+            "Shard(0) for them. Each rank stores and all-gathers a padded "
+            "slice; pick a shard degree that divides the rows to avoid it.",
+            len(fallbacks),
+            sorted(set(fallbacks)),
+            shard_degree,
         )
 
     if not tied and model.norm is not None and model.lm_head is not None:

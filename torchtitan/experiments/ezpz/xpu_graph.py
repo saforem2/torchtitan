@@ -49,7 +49,7 @@ from typing import Any
 
 import torch
 
-from torchtitan.distributed.cuda_graph import CUDAGraphInputSpec
+from torchtitan.distributed.accelerator_graph import AcceleratorGraphInputSpec
 
 logger = logging.getLogger(__name__)
 
@@ -303,12 +303,12 @@ def maybe_wrap_with_xpu_graph(
         return fwd_bwd_fn
 
     wrapper: Any = None
-    input_spec: CUDAGraphInputSpec | None = None
+    input_spec: AcceleratorGraphInputSpec | None = None
 
     def graphed(*args, **kwargs):
         nonlocal wrapper, input_spec
         if wrapper is None:
-            input_spec = CUDAGraphInputSpec((args, kwargs))
+            input_spec = AcceleratorGraphInputSpec((args, kwargs))
 
             def flat_fn(*flat_inputs):
                 assert input_spec is not None

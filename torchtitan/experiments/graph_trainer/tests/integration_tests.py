@@ -20,6 +20,7 @@ from torchtitan_recipes.tests.graph_trainer import (
     qwen3 as qwen3_recipes,
 )
 
+from torchtitan.config.parallelism import ParallelismConfig
 from torchtitan.models.common.moe import (
     MoE,
     RoundRobinTokenChoiceTopKRouter,
@@ -92,8 +93,10 @@ def llama3_fsdp_tp_regional_inductor():
 
 
 def deepseek_v3_fused_mla_swiglu_fsdp_tp_ep():
-    config = deepseek_v3_recipes.graph_trainer_deepseek_v3_debugmodel()
-    config.training.disable_cuda_graphs = True
+    config = deepseek_v3_recipes.graph_trainer_deepseek_v3_debugmodel(
+        parallelism=ParallelismConfig(expert_parallel_degree=2)
+    )
+    config.training.disable_accelerator_graphs = True
     config.compile.disable_passes = [
         "joint_transformer_block_bucketing_reordering_pass",
     ]
@@ -103,33 +106,35 @@ def deepseek_v3_fused_mla_swiglu_fsdp_tp_ep():
     ]
     config.parallelism.data_parallel_shard_degree = 2
     config.parallelism.tensor_parallel_degree = 2
-    config.parallelism.expert_parallel_degree = 2
     return config
 
 
 def deepseek_v3_hsdp_edp_shard_ep():
-    config = deepseek_v3_recipes.graph_trainer_deepseek_v3_debugmodel()
-    config.training.disable_cuda_graphs = True
+    config = deepseek_v3_recipes.graph_trainer_deepseek_v3_debugmodel(
+        parallelism=ParallelismConfig(expert_parallel_degree=2)
+    )
+    config.training.disable_accelerator_graphs = True
     config.parallelism.data_parallel_replicate_degree = 2
     config.parallelism.data_parallel_shard_degree = 4
-    config.parallelism.expert_parallel_degree = 2
     return config
 
 
 def deepseek_v3_fsdp_tp_cp_ep():
-    config = deepseek_v3_recipes.graph_trainer_deepseek_v3_debugmodel()
+    config = deepseek_v3_recipes.graph_trainer_deepseek_v3_debugmodel(
+        parallelism=ParallelismConfig(expert_parallel_degree=4)
+    )
     config.parallelism.data_parallel_shard_degree = 2
     config.parallelism.tensor_parallel_degree = 2
     config.parallelism.context_parallel_degree = 2
-    config.parallelism.expert_parallel_degree = 4
     return config
 
 
 def deepseek_v3_fsdp_tp_ep():
-    config = deepseek_v3_recipes.graph_trainer_deepseek_v3_debugmodel()
+    config = deepseek_v3_recipes.graph_trainer_deepseek_v3_debugmodel(
+        parallelism=ParallelismConfig(expert_parallel_degree=4)
+    )
     config.parallelism.data_parallel_shard_degree = 4
     config.parallelism.tensor_parallel_degree = 2
-    config.parallelism.expert_parallel_degree = 4
     return config
 
 
@@ -142,15 +147,16 @@ def deepseek_v3_fsdp_tp_ep_regional_inductor():
 def _deepseek_v3_ep_overlap(
     *, inductor_compilation: str, chunk_dim: str, module_fqn: str
 ):
-    config = deepseek_v3_recipes.graph_trainer_deepseek_v3_debugmodel()
-    config.training.disable_cuda_graphs = True
+    config = deepseek_v3_recipes.graph_trainer_deepseek_v3_debugmodel(
+        parallelism=ParallelismConfig(expert_parallel_degree=4)
+    )
+    config.training.disable_accelerator_graphs = True
     config.compile.inductor_compilation = inductor_compilation
     config.compile.ep_overlap.enabled = True
     config.compile.ep_overlap.chunk_dim = chunk_dim
     config.compile.ep_overlap.module_fqn = module_fqn
     config.parallelism.data_parallel_shard_degree = 8
     config.parallelism.tensor_parallel_degree = 1
-    config.parallelism.expert_parallel_degree = 4
     return config
 
 
@@ -209,15 +215,16 @@ def deepseek_v3_graph_pp_dual_pipe_v():
 
 
 def _deepseek_v3_graph_pp(schedule: str):
-    config = deepseek_v3_recipes.graph_trainer_deepseek_v3_debugmodel()
-    config.training.disable_cuda_graphs = True
+    config = deepseek_v3_recipes.graph_trainer_deepseek_v3_debugmodel(
+        parallelism=ParallelismConfig(expert_parallel_degree=2)
+    )
+    config.training.disable_accelerator_graphs = True
     config.training.num_tokens_per_microbatch_per_dp_rank = 2048
     config.compile.inductor_compilation = "full"
     config.parallelism.pipeline_parallel_degree = 2
     config.parallelism.num_pp_microbatches = 8
     config.parallelism.pipeline_parallel_schedule = schedule
     config.parallelism.data_parallel_shard_degree = 4
-    config.parallelism.expert_parallel_degree = 2
     return config
 
 
@@ -236,7 +243,7 @@ def _round_robin_routing(config):
 def deepseek_v3_hybrid_ep_paged_stash():
     config = deepseek_v3_recipes.graph_trainer_deepseek_v3_debugmodel_hybridep()
     # Paged stash may release and reallocate buffers after an overflow.
-    config.training.disable_cuda_graphs = True
+    config.training.disable_accelerator_graphs = True
     config.parallelism.data_parallel_shard_degree = 2
     config.parallelism.tensor_parallel_degree = 2
     config.parallelism.expert_parallel_degree = 2
@@ -246,7 +253,7 @@ def deepseek_v3_hybrid_ep_paged_stash():
 
 def deepseek_v3_graph_pp_hybrid_ep_paged_stash():
     config = deepseek_v3_recipes.graph_trainer_deepseek_v3_debugmodel_hybridep()
-    config.training.disable_cuda_graphs = True
+    config.training.disable_accelerator_graphs = True
     config.parallelism.pipeline_parallel_degree = 2
     config.parallelism.num_pp_microbatches = 4
     config.parallelism.pipeline_parallel_schedule = "Interleaved1F1B"
@@ -258,7 +265,7 @@ def deepseek_v3_graph_pp_hybrid_ep_paged_stash():
 
 def qwen3_fsdp_tp_cp():
     config = qwen3_recipes.graph_trainer_qwen3_debugmodel()
-    config.training.disable_cuda_graphs = True
+    config.training.disable_accelerator_graphs = True
     config.parallelism.data_parallel_shard_degree = 2
     config.parallelism.tensor_parallel_degree = 2
     config.parallelism.context_parallel_degree = 2
@@ -267,7 +274,7 @@ def qwen3_fsdp_tp_cp():
 
 def qwen3_moe_fsdp_tp_ep():
     config = qwen3_recipes.graph_trainer_qwen3_debugmodel_moe()
-    config.training.disable_cuda_graphs = True
+    config.training.disable_accelerator_graphs = True
     config.parallelism.data_parallel_shard_degree = 4
     config.parallelism.tensor_parallel_degree = 2
     config.parallelism.expert_parallel_degree = 4
@@ -306,10 +313,11 @@ def llama3_autoparallel_fsdp_tp():
 
 
 def deepseek_v3_autoparallel_edp_shard_ep():
-    config = deepseek_v3_recipes.graph_trainer_deepseek_v3_debugmodel()
+    config = deepseek_v3_recipes.graph_trainer_deepseek_v3_debugmodel(
+        parallelism=ParallelismConfig(expert_parallel_degree=2)
+    )
     config.compile.enable_autoparallel = True
     config.parallelism.data_parallel_shard_degree = 4
-    config.parallelism.expert_parallel_degree = 2
     return config
 
 

@@ -275,7 +275,7 @@ class TestYaRNScaling(unittest.TestCase):
 
     def test_deepseek_mscale_applies_below_original_sequence_length(self):
         from torchtitan.models.deepseek_v3 import build_model_config, MODEL_FLAVORS
-        from torchtitan.models.deepseek_v3.model import DeepSeekMLAAttention
+        from torchtitan.models.deepseek_v3.attention import DeepSeekMLAAttention
 
         _, max_context_length = MODEL_FLAVORS["debugmodel"]
         model_config = build_model_config(
@@ -360,6 +360,17 @@ class TestPerLayerRoPECache(unittest.TestCase):
             len({id(rope_cfg) for rope_cfg in layer_rope_cfgs}),
             len(layer_rope_cfgs),
         )
+
+
+class TestRoPEBufferDtypeGuard(unittest.TestCase):
+    def test_cache_values_survive_rejected_cast(self):
+        for cls in (ComplexRoPE, CosSinRoPE):
+            with self.subTest(rope=cls.__name__):
+                rope = cls.Config(dim=8, max_context_length=16).build()
+                expected = rope.cache.clone()
+                with self.assertRaises(ValueError):
+                    rope.to(torch.bfloat16)
+                torch.testing.assert_close(rope.cache, expected, rtol=0, atol=0)
 
 
 if __name__ == "__main__":

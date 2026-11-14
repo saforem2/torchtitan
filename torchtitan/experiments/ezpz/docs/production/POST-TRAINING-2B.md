@@ -18,6 +18,15 @@
 
 ## 2026-11-12 — CPT 34.3k/190k healthy + pretok landed (broad SFT parked to 50k)
 
+> **One-line status:** CPT-FWE 4N at **75k/190k (39.4% budget, `12483799 R` MFU ~18% healthy, step-75000 `22.4G`) — chain fixed to `12h` walltime (was `2h` churn, `99e918b342`), HF converts at `74000/74200` `3.7G` verified. SFT on fresh HF (`cpt74k-b3-1n`) blocked on `XCCL→ezpz launch` fix (raw `mpiexec` broke `CCL` on `PVC/FLAT`). Raw CPT CoT `0/200` on `73k/74k` is expected degenerate `pre-SFT` signal — meaningful CoT gates on SFT `final/` only. B2 `0.205` remains best CoT.
+
+---
+
+## 2026-11-12 — CPT 34.3k/190k healthy + pretok landed (broad SFT parked to 50k)
+
+CPT-FW-Edu 4N (`agpt_2b_mds_mix_owm_edu_6040` 60/40 FW-Edu, `PPN=8 GBS=64 seq=8192`, 100B=190734 steps) now `12483437 R 00:34` `step 34298 loss 1.93 MFU 17.1%` `tps 4,571` — **17.8% of 100B budget**, healthy (MFU recovered 13.4%->17.1% across chain `12483388 step 26742` -> `12483416 32800->33303` -> `12483437`). Chaining every `02:00` via `afterany 12483446 H` to 50k then general SFT; latest on disk `step-34200`. Eval at `step-17000` was `0.000` GSM8K-CoT by design (pure CPT, no `chat_template`) vs B2 `0.205` which required stage-1 SFT first — not a regression. Narrow SFT-on-CPT (`agpt2b_b2v2_distill_cot_2n.sh` on CPT-17000 HF, LR 2e-5 3ep GBS 384) scored **0.015** vs B2 `0.165` — format collapse on FW-Edu-shifted manifold, hparams not CPT evidence.
+
+Pretok **landed**: `_pretokenize_distill_cot_mix_1n.sh` job `12483443` `Exit` (NPROC=1, `rl-monarch-torch214-locality-20261001`, bypass `ezpz_setup_job` MPI wrapping, `LOG_DIR=logs/pretokenize-distill-cot-mix-<id>`) — `91,481 rows -> 36,934 packed seqs @8192` (3.4G, `dataset_info.json` + 8x `data-*.arrow`), mix-cache **hit** `cba5c64` in 5.8s (6 prior jobs e.g. `12483441` segfaulted at NPROC=1 via `3553055 Segmentation fault` until VENV-path fix). Broad SFT via `sft_distill_cot_4n.sh --pretokenized_dataset /tegu/datasets/agpt2b-distill-cot-mix-len8192` now **ready but parked** to CPT 50k per `POST-TRAINING-PLAN.md` phase ordering — no training until 50k checkpoint converts to HF.
 
 ---
 
@@ -32,8 +41,6 @@
 > [!WARNING]
 > **Do NOT use `checkpoint-8672`.** It is the final checkpoint of the full-mix run and catastrophically forgot: hellaswag 0.593 → **0.273**, arc_easy 0.694 → **0.298** — at or near random chance. Use `checkpoint-900` from the same run. The recipe page's header once called 8672 "the deliverable" — fixed 2026-08-16; its own body was always right.
 Base for everything below is the MDS stage-3 checkpoint `global_step138650` (not a distinct artifact — the 2B MDS is one continuous 140k-step run whose "stages" are data-mix transitions) unless noted.
-
----
 
 ---
 

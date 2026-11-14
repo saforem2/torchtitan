@@ -64,7 +64,7 @@ c = rl_grpo_lora_agpt_2b_gsm8k_b2smoke()
 assert c.async_loop.num_training_steps == 20
 assert c.async_loop.num_prompts_per_train_step == 8
 assert c.async_loop.num_samples_per_prompt == 4
-assert c.generator.model_dtype == "float32"
+assert c.precision.param_dtype == "float32"
 assert c.generator.sampling.max_tokens == 700
 assert c.trainer.checkpointer.interval == 10
 assert tuple(c.renderer.extra_stop_token_ids) == (1, 107)
@@ -84,15 +84,14 @@ echo "MDS154391_GRPO20_START commit=$actual_commit model_sha=$model_sha out=$OUT
   --async-loop.num-prompts-per-train-step=8 \
   --async-loop.num-samples-per-prompt=4 \
   --async-loop.target-offpolicy-steps=0 \
-  --async-loop.validation.num-samples=20 \
-  --async-loop.training-sample-builder.no-drop-zero-std-reward-groups \
+  --async-loop.validation.steps=20 \
+  --async-loop.batcher.training-sample-builder.no-drop-zero-std-reward-groups \
   --generator.sampling.max-tokens=700 \
   --generator.parallelism.data-parallel-degree=1 \
   --generator.parallelism.tensor-parallel-degree=1 \
   --trainer.parallelism.data-parallel-shard-degree=1 \
   --trainer.parallelism.tensor-parallel-degree=1 \
-  --trainer.checkpointer.interval=10 \
-  --metrics.no-enable-wandb
+  --trainer.checkpointer.interval=10
 rc=$?
 echo "MDS154391_GRPO20_DONE rc=$rc $(date -Is)"
 exit "$rc"

@@ -24,9 +24,10 @@ from torchtitan.experiments.ezpz.rl.reason_agpt.reward import (
     ThinkFormatReward,
 )
 from torchtitan.rl.rollout.advantage import AdvantageEstimator
-from torchtitan.rl.rollout.environment import TokenEnv
+from torchtitan.rl.rollout.data import IterableRolloutDataLoader
 from torchtitan.rl.rollout.rollouter import Rollouter, RolloutWorker
 from torchtitan.rl.rollout.rubric import Rubric
+from torchtitan.rl.rollout.token_env import TokenEnv
 
 
 class GSM8KReasonWorker(RolloutWorker):
@@ -65,8 +66,10 @@ class GSM8KReasonRollouter(Rollouter):
 
     @dataclass(kw_only=True, slots=True)
     class Config(Rollouter.Config):
-        train_dataset: GSM8KReasonDataset.Config = field(
-            default_factory=lambda: GSM8KReasonDataset.Config(seed=42, split="train")
+        training_dataloader: IterableRolloutDataLoader.Config = field(
+            default_factory=lambda: IterableRolloutDataLoader.Config(
+                dataset=GSM8KReasonDataset.Config(seed=42, split="train")
+            )
         )
         validation_dataset: GSM8KReasonDataset.Config = field(
             default_factory=lambda: GSM8KReasonDataset.Config(

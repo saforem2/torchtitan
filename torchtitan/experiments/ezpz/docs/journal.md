@@ -1,3 +1,19 @@
+# Development Journal
+
+## 2026-11-14: Monarch GRPO trains on XPU and CUDA after the upstream sync
+
+Two-host Monarch GRPO (trainer host 0, vLLM generator host 1, TorchStore weight sync), AGPT-2B LoRA on GSM8K, 3 steps, on the `8e63247c` sync branch (#79). All three exit `0`; validation response length `117.9` at steps 0 and 3 on each.
+
+| Run | loss (steps 1-3) | reward (steps 1-3) | wall |
+|---|---|---|---|
+| Sirius `33518` (A100) | `0.0022` / `-0.037` / `0.062` | `0.43` / `0.54` / `0.44` | ~18 min |
+| Sunspot `12483743` | `0.024` / `0.054` / `0.093` | `0.47` / `0.52` / `0.42` | `851` s |
+| Aurora `9089138` | `0.017` / `0.082` / `0.11` | `0.47` / `0.46` / `0.48` | `1150` s |
+
+XPU blockers, in the order they surfaced: vLLM `PassConfig(enable_sp)` (`bd525d7f9`); `vllm-xpu-kernels` `4e38707` enables MHC/MQA-logits/GDN bindings on a PVC build but compiles them only for Xe2, so `_xpu_C` fails to import and vLLM picks no device (rebuilt wheel, `build_vllm_xpu_kernels_pvc.pbs`); vLLM `is_quantized_kv_cache` missing from the XPU vLLM (`bd2e0a95f`); `torchvision` for vLLM's warmup (`0.30.0.dev20261007+xpu`, `--no-deps`). CUDA needed three: workers advertised by IP on multi-NIC hosts, no `MPI_Init` in actors, rank 1 exits without `MPI_Finalize`.
+
+Open: XPU generator weight fetch is ~73 s per sync on both machines (CUDA `3.9` s). Smoke launcher: [`rl/scripts/grpo/multihost_grpo_e2e.pbs`](../rl/scripts/grpo/multihost_grpo_e2e.pbs). Details: [upstream-sync](upstream-sync.md), [monarch.md](production/rl/monarch.md).
+
 ## 2026-11-14 15:44 UTC: Sirius — 5B 7454 + 10B 197 both R
 
 `datascience` unlimited (`backfill`) — `AuroraGPT` `5004812288/5040000000` exhausted was project-specific; `-A datascience` cleared `No active allocation`. `cudnn/9.26.0` `Unknown machine: sirius` was `submit_agpt_olmo3_polaris.sh` on `sirius` (fixed via `submit_agpt_olmo3_sirius.sh`). `workq Tot=4` briefly `Q`'d `33527 8N` (`R:512 A:25`) then both `R`:
@@ -7,9 +23,11 @@
 | `33525` | `5b_olmo3_polaris` | `2N 8` | `7000->7454` (`+454` since `14:31 UTC`) | `5.97 g30.5` -> `6.02 g10.0`, `tps 416 MFU 4.27%` | `step-7400`, `3.8T` | `01:14/06:00` `R` |
 | `33527` | `10b_olmo3_polaris` | `8N 32` | fresh `1->197` (prior `step-100` corrupt `no .metadata` cleaned) | `12.03 g2.37` -> `6.31 g1.36`, `tps 186 MFU 3.81%` | `step-100` `89G` | `01:12/06:00` `R` |
 
-`5B` resumed from `step-7000` (not `7092` — that `walltime 21667>21600` kill left `7092` but resume picks last good `7000`); now `7454` (+`+` ckpts `7200/7300/7400`). `10B` fresh-restarted after `Gloo x3200c0s13b0` crash at `step 200` plus walltime-corrupt `step-100` (`32` shards `no .metadata` via `rm -rf` `1s` delay). Polaris `7832130 Q 18N small` (`Not enough free nodes`) unchanged since Nov 9 `13:40` (`81 small / 43 medium` queued `15:44 UTC`, `32 small` running) — `Sirius` only mover. `LR-finder` `Nov 11-12` `150` `GBS128` `1e-8->1e-1`: `5B AdamW 2.48e-04 / Mano 1.81e-04`, `10B AdamW 1.28e-04 / Mano 2.25e-04` (inversion at `10B`) — ready for `Polaris` `queue` drain.
+`5B` resumed from `step-7000` (not `7092` — that `walltime 21667>21600` kill left `7092` but resume picks last good `7000`); now `7454` (+`+` ckpts `7200/7300/7400`). `10B` fresh-restarted after `Gloo x3200c0s13b0` crash at `step 200` plus walltime-corrupt `step-100` (`32` shards `no .metadata` via `rm -rf` `1s` delay). Polaris `7832130 Q 18N small` (`Not enough free nodes`) unchanged since Nov 9 `13:40` (`81 small / 43 medium` queued `15:44 UTC`, `32 small` running) — `Sirius` only mover. `LR-finder` `Nov 11-12` `150` `GBS128` `1e-8->1e-1`: `5B AdamW 2.48e-04 / Mano 1.81e-04`, `10B AdamW 1.28e-04 / Mano 2.25e-04` (inversion at `10B`; not yet on the [5B](experiments/lr-finder/agpt/5b/README.md) / [10B](experiments/lr-finder/agpt/10b/README.md) LR-finder pages) — ready for `Polaris` `queue` drain. Report: [Sirius hedge report](production/agpt/sirius-olmo3-5b-10b.md).
 
+## 2026-11-14: Sirius hedge — 5B to 7091, 10B allocation exhausted _(superseded by entry above)_
 
+`33487` `5B 2N` `R` `4900->7091` steady `loss 6.05->5.90 g6.3`, `tps 416 MFU 4.27%`, `71` ckpts (`step-600..7092`, `3.6T`) — +2191 steps since `15:18 UTC` Nov 13 restart, ~1h walltime left on `6h` slice. `33488` `10B 8N` `32 GPUs` `FSDP` proof done (`12.00->6.19` over `200` steps, `tps 182`), `Gloo` node crash `x3200c0s13b0` at `step 200` (`FAILOVER exhausted`), `ckpt step-100 106G` intact; resubmit rejected `No active allocation found for project AuroraGPT and resource sirius` — allocation spent. Polaris `7832130 Q 18N small` still `Q` `13:03 UTC` (`83 small / 43 medium` queued, down from `91/52` but `Not enough free nodes`). `5B` remains only forward mover until Polaris drains or allocation renewed. Report: [Sirius hedge report](production/agpt/sirius-olmo3-5b-10b.md).
 
 
 ## 2026-11-13: Sirius hedge — 10B 8N + 5B 2N survive outage, both restarted
@@ -23,7 +41,7 @@ Recovery `15:18 UTC` after Sirius `UAN` outage (`~00:13-15:18`, `sirius-uan-0002
 | `33471` | `5b_olmo3_polaris` | `2N 8` | `2900->5058` | `6.50 g15.4` -> `step 5058 6.14 g12.1`, `tps 409 MFU 4.2%` | `50` ckpts `step-600..5000` (`2.6T`, every 100) | **`E walltime` 06:10** (21658s > 21600) — resubmitted `33487 R` from `step-5000` |
 | `33487` | `5b_olmo3_polaris` | `2N 8` | `5058->` | resumes `step-5000` | — | **`R` 15:18+** `6h` |
 
-`10B` proof is the value: `FSDP2` on `32 GPUs` ran `200` steps with healthy convergence (`12.00->6.38` in 1h15m, `tps 185 MFU 3.8%`) — confirms Polaris `10B` `n32` will not hit `FSDP uneven sharding`. `5B` is steady real training: `2900->5058` (+2158 steps, `+50` ckpts) through the `13h` gap. Prior note at `00:11` (now superseded) only had `step 1-2` and `step 2901`; this entry replaces it with walltime-verified `200`/`5058`.
+`10B` proof is the value: `FSDP2` on `32 GPUs` ran `200` steps with healthy convergence (`12.00->6.38` in 1h15m, `tps 185 MFU 3.8%`) — confirms Polaris `10B` `n32` will not hit `FSDP uneven sharding`. `5B` is steady real training: `2900->5058` (+2158 steps, `+50` ckpts) through the `13h` gap. Prior note at `00:11` (now superseded) only had `step 1-2` and `step 2901`; this entry replaces it with walltime-verified `200`/`5058`. Report: [Sirius hedge report](production/agpt/sirius-olmo3-5b-10b.md).
 
 ## 2026-11-13 00:11 UTC: Sirius hedge — 10B 8N FSDP-safe + 5B 2N resume 2900 _(superseded by entry above)_
 
@@ -34,15 +52,15 @@ Recovery `15:18 UTC` after Sirius `UAN` outage (`~00:13-15:18`, `sirius-uan-0002
 | `33469` | `agpt_10b_olmo3_polaris` | `8N / 32 GPUs` | fresh `step 1` `6h` | `step 1 12.00 g 2.41` -> `step 2 11.86` `CUDA graph recorded`, no FSDP uneven | **`R` 00:09-06:00** — proves Polaris 10B 32-GPU sizing |
 | `33471` | `agpt_5b_olmo3_polaris` | `2N / 8 GPUs` | resume `step-2900` `n2-gbs8` | `step 2901 6.50 g 15.4` | **`R` 00:09-06:00** — 2900->2901, 4.3h gap covered |
 
-`DCP` checkpoints are sharding-incompatible across world sizes: `n2-gbs8` (8 GPUs) cannot load as `n8-gbs32` (32 GPUs) — `33468 8N 5B` fresh was correct vs dupe `33470 Q` killed. `CKPT_DIR=checkpoints/agpt-${MODEL}-n${NNODES}-gbs${GBS}`. Sirius outage `~00:13 UTC` (`sirius-uan-0002 10.140.48.172 Connection timed out`, all paths) blocked commit until now — last good poll `00:11`; jobs expected `R` to `06:00`.
+`DCP` checkpoints are sharding-incompatible across world sizes: `n2-gbs8` (8 GPUs) cannot load as `n8-gbs32` (32 GPUs) — `33468 8N 5B` fresh was correct vs dupe `33470 Q` killed. `CKPT_DIR=checkpoints/agpt-${MODEL}-n${NNODES}-gbs${GBS}`. Sirius outage `~00:13 UTC` (`sirius-uan-0002 10.140.48.172 Connection timed out`, all paths) blocked commit until now — last good poll `00:11`; jobs expected `R` to `06:00`. Report: [Sirius hedge report](production/agpt/sirius-olmo3-5b-10b.md).
 
+## 2026-11-12: Sunspot CPT-FW-Edu 4N at 34.3k; pretok landed
 
+CPT-FW-Edu 4N (`agpt_2b_mds_mix_owm_edu_6040` 60/40 FW-Edu, `PPN=8 GBS=64 seq=8192`, 100B=190734 steps) now `12483437 R 00:34` `step 34298 loss 1.93 MFU 17.1%` — **17.8% budget**, MFU recovered 13.4%->17.1% since chain start (`12483388 step 26742` -> `12483416 32800->33303` -> `12483437`). Chaining `afterany 12483446 H` every `02:00` (no gap) to 50k then general SFT; latest disk `step-34200`, eval at `step-17000` was `0.000` by design (pure CPT). Narrow SFT-on-CPT scored `0.015` vs B2 `0.165` — format collapse, not CPT evidence.
 
-CPT-FWE 4N (`agpt_2b_mds_mix_owm_edu_6040` 60/40 FWE, `PPN=8 GBS=64 seq=8192`, 100B=190734 steps) now `12483437 R 00:34` `step 34298 loss 1.93 MFU 17.1%` — **17.8% budget**, MFU recovered 13.4%->17.1% since chain start (`12483388 step 26742` -> `12483416 32800->33303` -> `12483437`). Chaining `afterany 12483446 H` every `02:00` (no gap) to 50k then general SFT; latest disk `step-34200`, eval at `step-17000` was `0.000` by design (pure CPT). Narrow SFT-on-CPT scored `0.015` vs B2 `0.165` — format collapse, not CPT evidence.
+Pretok **landed** `12483443`: `_pretokenize_distill_cot_mix_1n.sh` (NPROC=1, `rl-monarch-torch214-locality-20261001`, bypass `ezpz_setup_job`) — `91,481 rows -> 36,934 packed @8192` (3.4G, `dataset_info.json` + 8x `data-*.arrow`) via mix-cache `cba5c64` hit in 5.8s to `/tegu/datasets/agpt2b-distill-cot-mix-len8192`. 6 prior segfaults `3553055` (`12483441` etc.) fixed by VENV `rl-monarch` path. Broad SFT `sft_distill_cot_4n.sh --pretokenized_dataset` ready but **parked to CPT 50k** per `POST-TRAINING-PLAN.md` phase 2. Reports: [POST-TRAINING-2B](production/POST-TRAINING-2B.md), [60/40 kind-shift](production/sft/fineweb-edu-60-40-kind-shift.md), [CPT](production/cpt/README.md).
 
-Pretok **landed** `12483443`: `_pretokenize_distill_cot_mix_1n.sh` (NPROC=1, `rl-monarch-torch214-locality-20261001`, bypass `ezpz_setup_job`) — `91,481 rows -> 36,934 packed @8192` (3.4G, `dataset_info.json` + 8x `data-*.arrow`) via mix-cache `cba5c64` hit in 5.8s to `/tegu/datasets/agpt2b-distill-cot-mix-len8192`. 6 prior segfaults `3553055` (`12483441` etc.) fixed by VENV `rl-monarch` path. Broad SFT `sft_distill_cot_4n.sh --pretokenized_dataset` ready but **parked to CPT 50k** per `POST-TRAINING-PLAN.md` phase 2.
-
-## 2026-11-11: Sunspot CPT-FWE 4N resumes (step 10k) + pretok & GRPO launch — _provisional, jobs live_
+## 2026-11-11: Sunspot CPT-FW-Edu 4N resumes (step 10k) + pretok & GRPO launch — _provisional, jobs live_
 
 > **Provisional:** three Sunspot `workq` jobs are still running at time of writing.
 > Numbers below are the last-observed logs, not exit-verified. Finalize when
@@ -50,7 +68,7 @@ Pretok **landed** `12483443`: `_pretokenize_distill_cot_mix_1n.sh` (NPROC=1, `rl
 > pretok, and GSM8K-CoT delta vs `B2=0.205` for CPT/GRPO. Marked `R --` = staged,
 > `R host` = training.
 
-**Lane 1 — CPT-FWE 4N 60/40 kind-shift** (`agpt_2b_mds_mix_owm_edu_6040`, 40% open-web-math / 60% FineWeb-Edu via Grain local parquets `140 shards`, `GrainPacking`, `PPN=8`, `GBS=64`, `seq=8192`, 100B budget => `190734` steps, base `gs138650/step-0` MDS v2, VENV `xpu-torch216-sync-5a7a622f16`):
+**Lane 1 — CPT-FW-Edu 4N 60/40 kind-shift** ([kind-shift plan](production/sft/fineweb-edu-60-40-kind-shift.md), [CPT](production/cpt/README.md)) (`agpt_2b_mds_mix_owm_edu_6040`, 40% open-web-math / 60% FineWeb-Edu via Grain local parquets `140 shards`, `GrainPacking`, `PPN=8`, `GBS=64`, `seq=8192`, 100B budget => `190734` steps, base `gs138650/step-0` MDS v2, VENV `xpu-torch216-sync-5a7a622f16`):
 
 | Job | Steps | Tip loss | MFU | Outcome |
 | --- | --- | --- | --- | --- |
@@ -112,6 +130,155 @@ on HEAD, no fanout job executed yet — gated on verified pre-tokenized dataset
 `dataset_info.json` + `[decontam]` counts. Monarch XPU gate remains
 [monarch.md](production/rl/monarch.md) (`12479177` `40/40` `auto→Gloo` `Exit 0`).
 
+## 2026-11-05 (Sunspot) -- Combination loss A/B at two nodes, 2000 updates
+
+`agpt_2b_loss_ab` at `24` tiles, three seeds, `2000` updates, default vs BF16
+ZeRO-1 storage with block-causal attention (`12482684`-`12482686`).
+Combination minus default, mean over seeds: `+0.058` in `2`-`10`, `-0.013`
+to `-0.017` through update `1200`, `-0.004` in `1601`-`2000`; every window
+inside the default seed spread (`0.025` at the end). Final `10`-update
+windows `2.803`/`2.812`/`2.830` vs `2.801`/`2.821`/`2.826`. `15.1`-`16.4%`
+faster (`1.99`-`2.05` vs `2.38`-`2.42 s/update`). Still opt-in; defaults are
+Sam's call.
+[Report](experiments/agpt/sunspot/2026-11-02-throughput-recovery.md#two-nodes-2000-updates).
+
+## 2026-11-05 (Sunspot) -- Block-causal plus BF16 storage loss A/B
+
+`agpt_2b_loss_ab`, three seeds, `400` updates, default vs BF16 ZeRO-1
+storage with block-causal attention (`12482631`-`12482633`). Combination
+minus default, mean over seeds: `+0.051` in updates `2`-`10` (the BF16
+storage offset), `-0.017` to `-0.039` through update `300`, `-0.007` in
+`301`-`400`; every seed/window inside the `0.048`-`0.087` seed spread. Final
+windows mixed in sign. `11.7`-`18.6%` faster at one node. Both stay opt-in
+pending a multi-node and a longer run.
+[Report](experiments/agpt/sunspot/2026-11-02-throughput-recovery.md#block-causal-and-bf16-storage-together).
+
+## 2026-11-05 (Sunspot) -- TT vs MDS AdamW/ZeRO-1 at AGPT-2B
+
+Same allocation, `24` tiles (`12482619`): MDS AdamW/ZeRO-1 `2.2046`/`2.2056
+s/update`; TT FP32 storage `2.3023` (`4.4%` slower), BF16 storage `2.1387`
+(`3.0%` faster), BF16 storage with block-causal `1.9200` (`12.9%` faster,
+`95.46` TFLOP/s/tile).
+[Report](experiments/agpt/sunspot/2026-11-02-throughput-recovery.md#against-mds-adamwzero-1-at-agpt-2b).
+
+## 2026-11-05 (Sunspot) -- BF16 ZeRO-1 storage loss A/B
+
+`agpt_2b_loss_ab`, three seeds, `400` updates, FP32 vs BF16 ZeRO-1 model
+storage (`12482597`-`12482599`). BF16 minus FP32, mean over seeds: `+0.051`
+in updates `2`-`10`, `-0.041` in `11`-`50`, `-0.002` in `301`-`400`; at most
+`0.072` in any seed/window against `0.053`-`0.104` seed spread. Over the last
+`10` updates BF16 is higher in all three seeds (`+0.004`-`+0.008`). `2.5`-`6.2%`
+faster at accumulation `2`. Stays opt-in; next is a longer and a multi-node
+run. [Report](experiments/agpt/sunspot/2026-11-02-throughput-recovery.md#bf16-model-storage).
+
+## 2026-11-04 (Sunspot) -- MDS trace at z2rrt02w; BF16 ZeRO-1 storage
+
+MDS rank-0 trace at the `z2rrt02w` shape (`12482583`, `MDS_PROFILE=1`):
+`8.008 s/update`, `7.83 s` busy, against `8.95 s` for TT block-causal. TT is
+`+0.54 s` in attention backward and `+0.50 s` in casts and elementwise work;
+its cast kernels run once per layer per microbatch because the ZeRO-1 model
+holds BF16 values in FP32 storage. New opt-in
+`BENCH_DDP_ZERO1_PARAMS=bfloat16` stores the model in BF16: `8.082`/`8.087
+s/update` against `8.956`-`9.463 s` (`12482585`), `0.9%` behind MDS, peak
+memory `20.3` vs `41.8 GiB`. Gradients accumulate in BF16.
+[Report](experiments/agpt/sunspot/2026-11-02-throughput-recovery.md#bf16-model-storage).
+
+## 2026-11-04 (Sunspot) -- Block-causal stays opt-in
+
+Block-causal attention stays off by default; set
+`EZPZ_XPU_ATTN_CAUSAL_BLOCKS=4` to use it. Not yet run at multi-node scale or
+past `400` updates.
+[Report](experiments/agpt/sunspot/2026-11-02-throughput-recovery.md#loss-curve-ab).
+
+## 2026-11-04 (Sunspot) -- Block-causal loss A/B
+
+`agpt_2b_loss_ab` (AGPT-2B from random init, AdamW `3e-4`, `12` tiles,
+per-block compile), three seeds, `400` updates per arm. Block-causal
+attention (`4` chunks) minus default, mean over seeds: `+0.003`-`+0.004` in
+updates `11`-`200`, `-0.0007` in `301`-`400`; at most `0.013` in any
+seed/window, against `0.018`-`0.034` seed-to-seed spread. Final losses
+`4.122`/`4.093`/`4.090` vs `4.127`/`4.094`/`4.087`. `7.8`-`9.5%` less time per
+update in every pair. Jobs `12482374`-`12482376`.
+[Report](experiments/agpt/sunspot/2026-11-02-throughput-recovery.md#loss-curve-ab).
+
+---
+
+## 2026-11-04 (Sunspot) -- Block-causal gradients
+
+Same-batch gradient probe (`probe_block_causal_grads.py`): block-causal
+gradients differ from default by relative L2 `0.93`-`2.6` at update `1`,
+against a default repeat of `0.02`. Ruled out in turn: `torch.compile` (same
+error eager and compiled on one tile), amplified backward rounding (q/k/v
+gradient noise at `4e-3` gives `0.02`), training-call dtype/strides (saved
+calls replay correctly), and the autograd wrapper (`blk1` at the noise
+level). Forward-output noise at `1e-3` moves the gradients `7`-`100x` more
+than backward noise at `4e-3`, so these gradients are chaotic under any
+rounding-level forward change; the op matches the default kernel on four
+saved training calls. Over five sampled updates (`12482343`) block-causal
+sits inside the forward-noise range (`0.11`-`3.1` vs `0.09`-`5.3`); default
+repeat, `blk1` and backward noise stay at `5e-3`-`4e-2`. Next is a multi-seed
+loss-curve A/B. Jobs `12482320`-`12482343`.
+[Report](experiments/agpt/sunspot/2026-11-02-throughput-recovery.md#same-batch-gradients).
+
+---
+
+## 2026-11-04 (Sunspot) -- Block-causal attention at AGPT-2B
+
+`EZPZ_XPU_ATTN_CAUSAL_BLOCKS=4` on the best TT AGPT-2B arm (DDP/ZeRO-1,
+per-block compile, `24` tiles, `2 x 1`): `2.0788 s/update`, `88.17` model
+TFLOP/s/tile, against `2.2976 s` for the later same-job control. Flash backward
+drops from `0.613` to `0.384 s` per update. Update-1 losses agree to `0.001`;
+late losses sit `0.03`-`0.14` above both controls, so it stays opt-in until a
+gradient comparison. The MDS phase did not run (`BENCH_EXPECTED_MDS_HEAD`
+unset). Job `12482301`.
+[Report](experiments/agpt/sunspot/2026-11-02-throughput-recovery.md#block-causal-attention-at-agpt-2b).
+
+---
+
+## 2026-11-03 (Sunspot) -- TT at the z2rrt02w shape
+
+New flavor `mds-4096x10` (`agpt_mds_shape_benchmark_adamw`) runs the 2025 MDS
+shape in TT. Same node, same batch (GAS `16`, sequence `4096`): MDS `110.36`
+model TFLOP/s/tile, TT DDP/ZeRO-1 `87.17`-`87.66`, TT FSDP `58.22`. The trace
+is compute-bound and the torch `2.14` flash backward runs at `38` TFLOP/s
+because it does not skip causally masked tiles. Block-causal attention
+(`EZPZ_XPU_ATTN_CAUSAL_BLOCKS=4`) gives `96.62`, `7`-`10%` over same-job
+controls; TT is still `14%` behind MDS. Jobs `12482280`, `12482281`.
+[Report](experiments/agpt/sunspot/2026-11-02-throughput-recovery.md#tt-at-the-2025-high-throughput-shape).
+
+---
+
+## 2026-11-03 (Sunspot) -- Cold first launch and MDS shape
+
+The `6.1%` "machine gap" is not the machine. On a node that has not run this
+workload in the last ~10 minutes, the first TT launch runs at `87`-`92` model
+TFLOP/s/tile for its whole lifetime; every later launch in the same job gives
+`92.6`-`95.1`, at or above July's `93.75`. Ruled out: `CCL_OP_SYNC`,
+`OMP_NUM_THREADS`, node image, hardware, page cache, CPU contention, XeLink
+prewarm and expandable segments. MDS does not show it. Separately, MDS at the
+2025 `z2rrt02w` shape (hidden `4096`, sequence `4096`, Llama2 vocab) gives
+`109.18` on today's Sunspot stack against `102.9` in July 2025; the current
+AGPT-2B shape has never exceeded `93.0`. Jobs `12482147`-`12482248`.
+[Report](experiments/agpt/sunspot/2026-11-02-throughput-recovery.md#anchor-launch-environment).
+
+---
+
+## 2026-11-02 (Sunspot) -- XPU throughput recovery
+
+Took over Codex thread `01a168eb` after its historical-throughput goal stalled.
+Per-block `torch.compile` (`EZPZ_AGPT_COMPILE_BLOCKS`) raises TT native
+DDP/ZeRO-1 from `75.84` to `79.42`-`80.20` model TFLOP/s/tile; TT is `2.3`-`2.6%`
+faster than the MDS SophiaG control in the same allocation. MDS reproduces its
+March `8dscnx65` rate (`89.76` vs `89.99`) at GBS `384`/accumulation `16`/AdamW.
+The TT anchor `6tc71of4` re-run on its own code and runtime gives `88.00` vs
+`93.75` in July. Local batch `> 1` was broken by the flat token layout (RoPE
+`cache[:T]`) and is fixed in the blendcorpus loader; native DDP at local batch
+`2` runs out of memory on FP32 logits. Jobs `12482111`, `12482112`, `12482114`,
+`12482126`, `12482127`. Next: the `6.1%` machine gap and native DDP local batch
+`2`. [Report](experiments/agpt/sunspot/2026-11-02-throughput-recovery.md).
+
+---
+
 ## 2026-11-04: B2v2 stage-2 SFT eval on Sunspot — more epochs hurts
 
 Extends B2 lineage `global_step138650 -> checkpoint-900-hf (IFEval 0.253)` with
@@ -138,6 +305,7 @@ Verdict and full table in [POST-TRAINING-2B B2v2](production/POST-TRAINING-2B.md
 and [production SFT index](production/sft/README.md). Next is pre-tokenized
 OpenThoughts-114k distill mix, not more narrow epochs — see 16N fanout below.
 
+## 2026-11-02: historical XPU throughput reconciliation
 
 - Recompute older Sunspot TT histories with the new report's exact model
   FLOPs convention: `6tc71of4` gives `93.75`, `xcs4xrqe` gives `90.85`

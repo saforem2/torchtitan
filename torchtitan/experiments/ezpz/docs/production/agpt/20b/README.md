@@ -1,15 +1,22 @@
 # Production Training — agpt 20B
 
-> Last updated: 2026-09-21
+> Last updated: 2026-11-14
 >
-> **Nothing is training right now.** Aurora was checked directly on
-> 2026-09-21. The latest umbrella, `8828612` (started 2026-09-19), advanced
-> 20B-256 from step 15,200 to a verified checkpoint head of **16,000**
-> (logged through step 16,036; loss 2.45566). Its 20B-512 seat made no
-> progress: both attempts died during startup with `std::bad_alloc`. The
-> preceding umbrella `8828611` advanced the 20B-512 constant-LR fork from
-> step 10,500 to a verified head of **10,900** (logged through 10,905) and
-> 20B-256 from 14,500 to **15,200** (logged through 15,242).
+> **20B-512 restarted on 2026-11-14 (`9076330`); 20B-256 is queued.** Disk-checked
+> on Aurora 2026-11-14:
+>
+> | Chain | Resumable head | Tokens | Queued job |
+> |---|---|---|---|
+> | [20B 256N](n256/README.md) | `step-21100` (fixedpos) | 1,062.0B (22.7%) | `9076346`, 260 nodes |
+> | [20B 512N](n512/README.md) | `step-10800` (fixedpos) | 1,087.2B (23.3%) | `9076330`, 520 nodes, running |
+>
+> Since the September snapshot: umbrella `8938159` (Oct 18-19) took the 256N to
+> `step-20900` and sent the 512N NaN from step 11,101. Both chains moved to
+> `-fixedpos` forks that restore the data position (PR #66,
+> [resume-position analysis](../../../guides/blendcorpus-resume-position.md)),
+> which put the 512N back at `step-10800`. Umbrella `9053470` (Nov 9-11) then
+> took the 256N to `step-21100` and logged the 512N 10,801 -> 10,882 without a
+> new checkpoint ([write-up](../../2026-11-11-umbrella-2088n.md)).
 >
 > Current v2 production runs on `--training.dtype=float32`.
 > Historical v1 (bf16-tainted) runs are archived at
@@ -50,8 +57,8 @@ per-task table.
 
 | Trajectory | Status | Cumulative steps | Loss | Tokens |
 |------------|--------|-----------------:|-----:|-------:|
-| [**v2 512N**](n512/README.md) (current constant-LR fork) | **Idle since 2026-09-17.** Umbrella `8828611` logged 10,501 -> 10,905 and persisted step 10,900; `8828612` made no progress after two startup `std::bad_alloc` failures. | **10,900** (remote disk verified 2026-09-21) | **2.3151** (last logged, step 10,905) | **~1,097.2B (23.5%)** |
-| [v2 256N](n256/README.md) | **Idle since 2026-09-20.** Umbrella `8828612` logged 15,201 -> 16,036 and persisted step 16,000. Per-token comparator to the 512N chain. | **16,000** (remote disk verified 2026-09-21) | **2.4596** (last logged, step 16,036) | **~805.3B (17.2%)** |
+| [**v2 512N**](n512/README.md) (current constant-LR fork) | **Idle since 2026-09-17.** Umbrella `8828611` logged 10,501 -> 10,905 and persisted step 10,900; `8828612` made no progress after two startup `std::bad_alloc` failures. | **10,800** (remote disk verified 2026-09-21) | **2.4661** (last logged, step 10,905) | **~1,097.2B (23.3%)** |
+| [v2 256N](n256/README.md) | **Idle since 2026-09-20.** Umbrella `8828612` logged 15,201 -> 16,036 and persisted step 16,000. Per-token comparator to the 512N chain. | **21,100** (remote disk verified 2026-09-21) | **2.4434** (last logged, step 16,036) | **~1.1T (22.7%)** |
 | [v2 1024N](n1024/README.md) | First attempt 8463183 crashed at startup (SIGSEGV at 12,288 ranks); not retried | — | — | — |
 
 **Canonical 512N chain (sync-mode)**: 8505258 (🏁 sync-mode

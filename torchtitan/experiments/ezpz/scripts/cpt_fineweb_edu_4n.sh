@@ -10,7 +10,7 @@
 # Use 4N x PPN=8 = 32r (walltime 12:00:00, workq up to 23h — was 02:00 backfill
 # churn, now 12h = ~24k steps/hop vs 4k; chain watcher remains as safety net).
 # Submit: qsub -l select=4 -l walltime=12:00:00 -v NHOSTS_TRAIN=4,NGPU_PER_HOST=8 torchtitan/experiments/ezpz/scripts/cpt_fineweb_edu_4n.sh
-# pack: 4N(FWE)+4N(mix)+4N(SFT)+2N(GRPO)+2N(test) = 16N active on workq (max 128N)
+# pack: 4N(FW-Edu)+4N(mix)+4N(SFT)+2N(GRPO)+2N(test) = 16N active on workq (max 128N)
 #
 # CPT 4N: MDS gs138650 step-0 (2B-mds, 11008) -> 60/40 owm/FineWeb-Edu blend on Sunspot.
 # Base: MDS_ANNEAL_BASE=/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan/outputs/checkpoints/agpt-2b-mds-gs138650/step-0

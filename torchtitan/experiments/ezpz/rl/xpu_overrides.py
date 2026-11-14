@@ -16,10 +16,11 @@ on Intel XPU (Aurora / Sunspot):
    unconditionally. Monkey-patched in `torchtitan.tools.utils` so the
    real `attention.py` and `generator.py` see the patched version.
 
-2. **`PerHostProvisioner`** in `train.py:45` — partitions GPUs across
-   trainer/generator meshes by exporting `CUDA_VISIBLE_DEVICES`. The
-   XPU equivalent for partitioning visibility is `ZE_AFFINITY_MASK`
-   (Level Zero). Replaced wholesale in `ezpz/rl/train_upstream.py`.
+2. **`PerHostProvisioner`** in `rl/actors/monarch/provisioning.py` —
+   partitions GPUs across trainer/generator meshes by exporting
+   `CUDA_VISIBLE_DEVICES`. The XPU equivalent for partitioning visibility
+   is `ZE_AFFINITY_MASK` (Level Zero). Replaced by `EzpzPerHostProvisioner`
+   through `EzpzMonarchActorSystem` in `ezpz/rl/train_upstream.py`.
 
 We do NOT stub `models/attention.py` — vllm-xpu actually ships
 `vllm.v1.attention.backends.flash_attn` (just like vllm-cuda does),
@@ -133,10 +134,17 @@ class EzpzPerHostProvisioner:
         num_gpus = len(gpu_ids)
         local_size = num_gpus
 
-        # Lazy imports — only needed when actually spawning.
-        from monarch._src.actor.host_mesh import default_bootstrap_cmd
+        # Lazy imports — only needed when actually spawning. Monarch >= 0.7
+        # exports this from monarch.actor (upstream provisioning.py uses it).
+        try:
+            from monarch.actor import default_bootstrap_cmd
+        except ImportError:
+            from monarch._src.actor.host_mesh import default_bootstrap_cmd
 
         base_cmd = default_bootstrap_cmd()
+        on_cuda = torch.cuda.is_available() and not (
+            hasattr(torch, "xpu") and torch.xpu.is_available()
+        )
 
         def _per_rank(point):
             # Try common Point API attrs to extract per-mesh rank.
@@ -193,6 +201,12 @@ class EzpzPerHostProvisioner:
             ):
                 if k in os.environ:
                     env_overlay[k] = os.environ[k]
+            if on_cuda:
+                # CUDA counterpart of ZE_AFFINITY_MASK: the mesh's GPUs, with
+                # LOCAL_RANK picking one. Actors are not MPI ranks, so keep
+                # ``import ezpz`` from calling MPI_Init (see ezpz/__init__.py).
+                env_overlay["CUDA_VISIBLE_DEVICES"] = ",".join(str(g) for g in gpu_ids)
+                env_overlay["EZPZ_NO_MPI_INIT"] = "1"
             if extra_env:
                 env_overlay.update(extra_env)
             return base_cmd.with_env(env_overlay)
@@ -1014,7 +1028,9 @@ def patch_create_block_mask_separate_full_blocks_for_xpu() -> None:
     if "separate_full_blocks" in _inspect.signature(_cbm).parameters:
         return  # torch supports it -> nothing to do
 
-    import torchtitan.models.common.attention as _attn
+    # `torchtitan.models.common.attention` is a package; the helper is a global
+    # of its `attention` submodule (the package does not re-export it).
+    import torchtitan.models.common.attention.attention as _attn
 
     # decoder.py binds `create_attention_mask` by name at import, so patching that
     # module attribute is bypassed. create_attention_mask calls the module-global
@@ -1022,7 +1038,7 @@ def patch_create_block_mask_separate_full_blocks_for_xpu() -> None:
     # wrap THAT to strip the unsupported kwarg.
     if not hasattr(_attn, "_compiled_create_block_mask"):
         raise RuntimeError(
-            "xpu_overrides: torchtitan.models.common.attention."
+            "xpu_overrides: torchtitan.models.common.attention.attention."
             "_compiled_create_block_mask not found -- upstream renamed it; update "
             "patch_create_block_mask_separate_full_blocks_for_xpu."
         )
@@ -1140,6 +1156,108 @@ def patch_torchstore_network_availability_for_xpu() -> None:
     )
 
 
+def patch_vllm_pretrained_config_alias() -> None:
+    """Re-export ``PretrainedConfig`` from ``vllm.transformers_utils.config``.
+
+    Upstream ``rl/generator/vllm/registry.py`` imports ``PretrainedConfig``
+    through vLLM's re-export. The vLLM-XPU build (``b46907cce``, transformers
+    5.x) imports only the renamed ``PreTrainedConfig`` there, so the generator
+    actor fails with ImportError (Sunspot 12483522). Alias the old name when it
+    is missing; a vLLM that already exports it is left alone.
+    """
+    import importlib.util
+
+    if importlib.util.find_spec("vllm") is None:
+        return
+    try:
+        import vllm.transformers_utils.config as vllm_config
+    except Exception:
+        return
+    if hasattr(vllm_config, "PretrainedConfig"):
+        return
+    try:
+        from transformers import PreTrainedConfig
+    except ImportError:
+        from transformers import PretrainedConfig as PreTrainedConfig
+    vllm_config.PretrainedConfig = PreTrainedConfig
+
+
+def _is_quantized_kv_cache(kv_cache_dtype: str) -> bool:
+    # Same test as vllm.utils.torch_utils.is_quantized_kv_cache in the vLLM
+    # upstream pins (1.0.0.dev20261107).
+    return (
+        kv_cache_dtype.startswith("fp8")
+        or kv_cache_dtype.endswith("per_token_head")
+        or kv_cache_dtype.startswith("nvfp4")
+    )
+
+
+def patch_vllm_is_quantized_kv_cache() -> None:
+    """Add ``is_quantized_kv_cache`` to ``vllm.utils.torch_utils`` when missing.
+
+    Upstream ``rl/generator/vllm/attention/mla.py`` imports it, and
+    ``model_wrapper.py`` imports that module for every model. The vLLM-XPU
+    build (``b46907cce``) predates the helper, so the generator actor fails
+    with ImportError (Sunspot 12483730). A vLLM that has it is left alone.
+    """
+    import importlib.util
+
+    if importlib.util.find_spec("vllm") is None:
+        return
+    try:
+        import vllm.utils.torch_utils as torch_utils
+    except Exception:
+        return
+    if hasattr(torch_utils, "is_quantized_kv_cache"):
+        return
+    torch_utils.is_quantized_kv_cache = _is_quantized_kv_cache
+
+
+_SP_PASS_FIELDS = ("enable_sp", "sp_min_token_num")
+
+
+def patch_vllm_pass_config_without_sp() -> None:
+    """Accept upstream's SP ``PassConfig`` args on a vLLM without the SP pass.
+
+    ``rl/generator/vllm/config.py`` builds ``PassConfig(enable_sp=...,
+    sp_min_token_num=...)``. vLLM removed torch.compile sequence parallelism
+    and both fields in ``194bd72be`` (#60517); the vLLM-XPU build
+    (``b46907cce``) has neither, so generator setup fails with a pydantic
+    "Unexpected keyword argument" (Aurora 9087154). Rebind ``PassConfig`` in
+    that module only to drop the two fields while SP is off, and raise if SP
+    is requested. vLLM's own class is untouched; a vLLM that still has the
+    fields is left alone.
+    """
+    import importlib.util
+
+    if importlib.util.find_spec("vllm") is None:
+        return
+    try:
+        import torchtitan.rl.generator.vllm.config as tt_vllm_config
+    except Exception:
+        return
+    pass_config_cls = tt_vllm_config.PassConfig
+    if getattr(pass_config_cls, "_ezpz_sp_compat", False):
+        return
+    fields = getattr(pass_config_cls, "__dataclass_fields__", {})
+    if all(name in fields for name in _SP_PASS_FIELDS):
+        return
+
+    def pass_config_without_sp(**kwargs):
+        if kwargs.get("enable_sp"):
+            raise ValueError(
+                "enable_sequence_parallel requires vLLM's sequence-parallel "
+                "pass (PassConfig.enable_sp), which this vLLM build removed "
+                "(vllm 194bd72be)"
+            )
+        for name in _SP_PASS_FIELDS:
+            kwargs.pop(name, None)
+        return pass_config_cls(**kwargs)
+
+    pass_config_without_sp._ezpz_sp_compat = True  # type: ignore[attr-defined]
+    tt_vllm_config.PassConfig = pass_config_without_sp
+
+
 def apply_all_xpu_patches() -> None:
     """Apply every XPU compatibility patch before importing upstream rl/.
 
@@ -1166,6 +1284,9 @@ def apply_all_xpu_patches() -> None:
     patch_dtensor_make_replicate_for_xpu()
     patch_vllm_xpu_skip_oneccl_warmup()
     patch_vllm_xpu_attention_backend()
+    patch_vllm_pretrained_config_alias()
+    patch_vllm_is_quantized_kv_cache()
+    patch_vllm_pass_config_without_sp()
     patch_create_block_mask_separate_full_blocks_for_xpu()
     patch_vllm_xpu_no_alias_current_stream()
     patch_torchstore_network_availability_for_xpu()

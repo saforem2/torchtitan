@@ -99,6 +99,9 @@ def test_qknorm_sharding_and_parameter_flop_accounting_survive() -> None:
 
     with torch.device("meta"):
         model = config.build()
-    nparams, flops = config.get_nparams_and_flops(model, seq_len=512)
+    # #4819 replaced get_nparams_and_flops with a per-microbatch FLOPs estimator.
+    nparams = sum(p.numel() for p in model.parameters())
+    estimate_flops = config.build_flops_estimator(model, seq_len=512)
+    flops = estimate_flops({"input": torch.zeros(512, dtype=torch.long)})
     assert nparams > 0
     assert flops > 0

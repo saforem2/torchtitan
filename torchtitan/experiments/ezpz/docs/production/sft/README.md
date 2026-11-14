@@ -85,7 +85,7 @@ another recipe.
 | `agpt/2b-mds` (`global_step138650`) via `checkpoint-900-hf` | **B2v2 gsm8k-r1cot 3ep/6ep** — see [POST-TRAINING-2B](../POST-TRAINING-2B.md#b2v2----stronger-stage-2-sft-on-ckpt-900-2026-11-04) | **complete, eval 0.09/0.105 vs B2 0.205 — worse** | 0.8069 / 0.77 | ~11k seqs x 3/6ep | `outputs/sft/agpt2b-b2v2-distill-cot-2n-ep6/final` (ckpts 2/4/6+final ep3, 2/4/6/8/10/12+final ep6) | Stage-2 SFT extending B2 lineage (ckpt-900 -> gsm8k-r1cot). 2N Sunspot jobs **12482423** (`xakno7kg`) / **12482485** (`ur6pqqhp`) Exit 0; eval **12482572/73** (`frameworks/2026.1.0 vLLM 0.26 XPU`, Exit 0) **0.09 (0.86/416/22)** / **0.105 (0.91/378/15)** vs B2 0.205 (0.985/282). More narrow epochs hurt — same as B3/B4. Distill mix shelved (HF cache race). Next: pre-tokenized OpenThoughts distill via [fineweb-edu-60-40-kind-shift.md](fineweb-edu-60-40-kind-shift.md) (CPT lever) |
 ## Why SFT is a separate production stage (and not just an `experiment/`)
 
-SFT'd checkpoints get re-used. The
+SFT'd checkpoints get reused. The
 `agpt/2b-mds/tulu_math_uc_mix` (checkpoint-729-hf) artifact is the input
 to every subsequent GRPO experiment on this model — every alignment
 experiment, every chat-mode eval, every red-team test. That makes it

@@ -202,7 +202,7 @@ from torchtitan.experiments.ezpz.rl.reason_agpt.config_registry import (
 )
 c = rl_grpo_lora_agpt_2b_gsm8k_b2smoke()
 assert c.async_loop.num_samples_per_prompt == 4, c.async_loop.num_samples_per_prompt
-assert c.generator.model_dtype == "float32", c.generator.model_dtype
+assert c.precision.param_dtype == "float32", c.precision.param_dtype
 assert tuple(c.renderer.extra_stop_token_ids) == (1, 107), c.renderer.extra_stop_token_ids
 requested = os.environ.get("TORCHTITAN_TORCHSTORE_TRANSPORT", "auto")
 assert requested in {"auto", "gloo", "xccl", "monarch_rdma"}, requested
@@ -236,16 +236,15 @@ set +e
   --async-loop.num-prompts-per-train-step="${NUM_PROMPTS_PER_STEP}" \
   --async-loop.num-samples-per-prompt="${GROUP_SIZE}" \
   --async-loop.target-offpolicy-steps=0 \
-  --async-loop.validation.num-samples=20 \
-  --async-loop.training-sample-builder.no-drop-zero-std-reward-groups \
+  --async-loop.validation.steps=20 \
+  --async-loop.batcher.training-sample-builder.no-drop-zero-std-reward-groups \
   --generator.sampling.max-tokens=700 \
   --generator.parallelism.data-parallel-degree=1 \
   --generator.parallelism.tensor-parallel-degree=1 \
   --trainer.parallelism.data-parallel-shard-degree=1 \
   --trainer.parallelism.tensor-parallel-degree=1 \
   --trainer.checkpointer.interval="${CKPT_INTERVAL}" \
-  --trainer.optim.optimizer.lr="${LR}" \
-  --metrics.no-enable-wandb
+  --trainer.optim.optimizer.lr="${LR}"
 rc=$?
 set -e
 rm -f "${STORE}"

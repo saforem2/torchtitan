@@ -19,7 +19,7 @@ from typing import Any, cast, Literal, TYPE_CHECKING
 import torch
 import torch.distributed as dist
 import torch.distributed.checkpoint as dcp
-from torch.distributed.checkpoint import HuggingFaceStorageWriter
+from torch.distributed.checkpoint import HuggingFaceStorageWriter, Metadata
 from torch.distributed.checkpoint._consolidate_hf_safetensors import (
     consolidate_safetensors_files_on_every_rank,
 )
@@ -37,6 +37,7 @@ from torchtitan.tools.garbage_collector import GarbageCollector
 from .base import (
     BaseCheckpointManager,
     EMA,
+    export_state_dict,
     LR_SCHEDULER,
     MODEL,
     ModelWrapper,
@@ -265,7 +266,7 @@ class CheckpointManager(BaseCheckpointManager):
         async_mode: AsyncMode,
         enable_garbage_collection: bool = False,
         to_hf: bool = False,
-    ) -> Future | AsyncSaveResponse | None:
+    ) -> Future | AsyncSaveResponse | Metadata | None:
         """Execute the DCP saving process.
 
         This method orchestrates the state_dict transformation (e.g., to HuggingFace
@@ -281,13 +282,13 @@ class CheckpointManager(BaseCheckpointManager):
                 state_dict to be compatible with safetensors and HF model definitions.
 
         Returns:
-            - None: If saved synchronously (AsyncMode.DISABLED).
+            - Metadata: If saved synchronously (AsyncMode.DISABLED).
             - Future: If AsyncMode.ASYNC is used (tracks disk I/O).
             - AsyncSaveResponse: If AsyncMode.ASYNC_WITH_PINNED_MEM is used
               (tracks both staging and disk I/O).
         """
 
-        ret: Future | AsyncSaveResponse | None = None
+        ret: Future | AsyncSaveResponse | Metadata | None = None
 
         storage_writer: HuggingFaceStorageWriter | None = None
         fqn_to_index_mapping: dict[Any, int] | None = None
@@ -348,6 +349,13 @@ class CheckpointManager(BaseCheckpointManager):
 
         # Post-Processing
         if to_hf and fqn_to_index_mapping:
+            # Each rank's to_hf output holds only its own PP stage and experts;
+            # the save's global metadata lists the tensors of every rank.
+            assert self.sd_adapter is not None and isinstance(ret, Metadata)
+            fqn_to_index_mapping = self.sd_adapter.fqn_to_index_mapping_for_save(
+                ret.state_dict_metadata
+            )
+            assert fqn_to_index_mapping is not None
             consolidate_safetensors_files_on_every_rank(
                 input_dir=os.path.join(checkpoint_id, "sharded"),
                 output_dir=checkpoint_id,
@@ -433,13 +441,6 @@ class CheckpointManager(BaseCheckpointManager):
             if MODEL in states:
                 states[MODEL].load_state_dict(state_dict)
 
-        # Reseed EMA from the just-loaded weights if it wasn't itself restored
-        # (excluded, or a model_only load). MODEL is never excludable, so its
-        # presence rules out torchft's per-replica dataloader-only load, which
-        # also calls _load_checkpoint but never includes MODEL.
-        if MODEL in states and EMA in self.states and EMA not in states:
-            self.states[EMA].load_state_dict({})
-
     def _save(self, curr_step: int, last_step: bool = False) -> bool:
         """Save the checkpoint for the current step.
 
@@ -495,6 +496,12 @@ class CheckpointManager(BaseCheckpointManager):
                         use_non_blocking_copy=True,
                     )
                 )
+            # DefaultStager copies on its own stream, which does not wait for the
+            # current stream. Without this wait, it can copy weights and optimizer
+            # state before the optimizer step finishes writing them.
+            staging_stream = self.stager._staging_stream
+            assert staging_stream is not None
+            staging_stream.wait_stream(torch.accelerator.current_stream())
 
             async_save_started_at = time.monotonic()
             result = self.dcp_save(
@@ -655,20 +662,15 @@ class CheckpointManager(BaseCheckpointManager):
                 self.last_save_model_only
             ), "Only model can be saved when saving in HF safetensors format."
 
+        checkpoint_id = self._create_last_step_id(curr_step)
         if self.last_save_model_only:
-            states = self.states[MODEL].state_dict()
-
-            states = {
-                k: v.to(self.export_dtype)
-                if isinstance(v, torch.Tensor)
-                and v.is_floating_point()
-                and v.dtype != self.export_dtype
-                else v
-                for k, v in states.items()
-            }
+            model = self.states[MODEL]
+            states = export_state_dict(
+                model.state_dict(), dtype=self.export_dtype, model_parts=model.model
+            )
             logger.info(
                 f"Saving a model only checkpoint in {self.export_dtype} "
-                f"at last step, step {curr_step}."
+                f"at last step, step {curr_step}, to {checkpoint_id}."
             )
         else:
             logger.info(f"Saving a full checkpoint at last step, step {curr_step}.")
@@ -676,7 +678,7 @@ class CheckpointManager(BaseCheckpointManager):
 
         self.dcp_save(
             states,
-            checkpoint_id=self._create_checkpoint_id(curr_step),
+            checkpoint_id=checkpoint_id,
             async_mode=AsyncMode.DISABLED,
             enable_garbage_collection=True,
             to_hf=self.last_save_in_hf,

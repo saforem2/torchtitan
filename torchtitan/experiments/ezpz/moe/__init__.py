@@ -533,11 +533,19 @@ def _make_moe_attn_config(
     # existing ezpz MoE runs do not change silently.
     for norm in (upstream_cfg.q_norm, upstream_cfg.kv_norm):
         norm.eps = RMSNorm.Config(normalized_shape=1).eps
+    # Upstream wraps the inner attention in an MLAAttention backend that owns
+    # wkv_b (#4760). ezpz's Attention keeps wkv_b flat (see moe/model.py), so
+    # unwrap it; moe/sharding.py sets both shardings.
+    mla_backend = upstream_cfg.inner_attention
+    fields = {
+        f.name: getattr(upstream_cfg, f.name)
+        for f in dataclasses.fields(upstream_cfg)
+        if f.name != "inner_attention"
+    }
     return Attention.Config(
-        **{
-            f.name: getattr(upstream_cfg, f.name)
-            for f in dataclasses.fields(upstream_cfg)
-        }
+        **fields,
+        wkv_b=mla_backend.wkv_b,
+        inner_attention=mla_backend.inner_attention,
     )
 
 

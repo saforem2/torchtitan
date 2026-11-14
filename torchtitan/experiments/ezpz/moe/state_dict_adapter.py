@@ -31,3 +31,11 @@ class moeStateDictAdapter(DeepSeekV3StateDictAdapter):  # noqa: N801
         hf_assets_path: str | None,
     ):
         super().__init__(model_config, hf_assets_path)  # type: ignore[arg-type]
+        # ezpz's MLA keeps wkv_b as a direct child of the attention module
+        # (moe/model.py); upstream maps kv_b_proj to inner_attention.wkv_b (#4760).
+        self.from_hf_map = {
+            hf_key: native_key.replace(
+                ".attention.inner_attention.wkv_b.", ".attention.wkv_b."
+            )
+            for hf_key, native_key in self.from_hf_map.items()
+        }

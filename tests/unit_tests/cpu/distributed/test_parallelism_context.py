@@ -16,6 +16,7 @@ from unittest.mock import patch
 import spmd_types as spmd
 import torch
 import torch.distributed as dist
+import torch.distributed._functional_collectives as funcol
 from spmd_types import SpmdType
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import Replicate
@@ -477,10 +478,30 @@ class TestSpmdLayout(DTensorTestBase):
                 mesh,
                 src,
                 dst,
+                async_op=False,
             )
 
         self.assertEqual(comm_mode.get_total_counts(), 1)
         self.assertTrue(torch.equal(result, torch.ones(8, 2, device=self.device_type)))
+
+    @with_comms
+    def test_spmd_redistribute_per_axis_async_op(self):
+        """async_op=True returns the forward collective's result unwaited."""
+        mesh = init_device_mesh(
+            self.device_type,
+            (1, 1, 4),
+            mesh_dim_names=("dp", "cp", "tp"),
+        )
+        x = torch.ones(2, 2, device=self.device_type)
+        src = dense_sequence_parallel_placement()
+        dst = dense_activation_placement(tp=spmd.I, cp=spmd.S(0))
+
+        waited = spmd_redistribute_per_axis(x, mesh, src, dst, async_op=False)
+        deferred = spmd_redistribute_per_axis(x, mesh, src, dst, async_op=True)
+
+        self.assertNotIsInstance(waited, funcol.AsyncCollectiveTensor)
+        self.assertIsInstance(deferred, funcol.AsyncCollectiveTensor)
+        self.assertTrue(torch.equal(deferred, waited))
 
     @with_comms
     def test_spmd_redistribute_per_axis_shards_token_ids(self):
@@ -502,7 +523,7 @@ class TestSpmdLayout(DTensorTestBase):
 
         comm_mode = CommDebugMode()
         with comm_mode:
-            result = spmd_redistribute_per_axis(x, mesh, src, dst)
+            result = spmd_redistribute_per_axis(x, mesh, src, dst, async_op=False)
 
         # convert(R, S(0)) is a local chunk, not a collective.
         self.assertEqual(comm_mode.get_total_counts(), 0)
@@ -913,6 +934,34 @@ class TestOneDimensionalMeshesSkipFakeAxes(DTensorTestBase):
                 self.assertNotEqual(
                     dist.get_backend(mesh.get_group()), "fake", f"axis {name}"
                 )
+
+    @with_comms
+    def test_size_one_shard_axes_are_fake_but_available(self):
+        """Size-1 dp_shard and edp_shard are fake-backed but kept for FSDP."""
+        with patch(
+            "torchtitan.distributed.parallelism_context.device_type", self.device_type
+        ):
+            pd = ParallelismContext(
+                dp_replicate=1,
+                dp_shard=1,
+                cp=1,
+                tp=8,
+                pp=1,
+                ep=8,
+                world_size=8,
+                enable_sequence_parallel=False,
+            )
+            pd.build_mesh()
+
+            # dp_shard = 1 and edp_shard = dp_shard * cp * tp / ep = 8 / 8 = 1.
+            # FSDP still shards on both axes, but one rank needs no communicator.
+            one_d_meshes = pd.get_all_one_dimensional_meshes()
+            for axis in ("dp_shard", "edp_shard"):
+                mesh = pd.get_optional_mesh(axis)
+                self.assertIsNotNone(mesh, axis)
+                self.assertEqual(mesh.size(), 1, axis)
+                self.assertEqual(dist.get_backend(mesh.get_group()), "fake", axis)
+                self.assertNotIn(axis, one_d_meshes)
 
 
 class TestParallelismContextWorld8MeshOperations(DTensorTestBase):

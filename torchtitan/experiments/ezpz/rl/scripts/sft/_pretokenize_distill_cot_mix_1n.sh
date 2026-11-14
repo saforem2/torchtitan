@@ -77,13 +77,15 @@ export DISTILL_MAX_THINK_CHARS="${DISTILL_MAX_THINK_CHARS:-16000}"
 # Single-rank data job — skip ezpz_setup_job MPI wrapping (it shadows python3
 # through mpiexec and segfaults train_sft on XPU; 12483367/393/403 all died
 # there). Direct single-rank needs no hostfile, no allreduce, no CCL.
-# Explicitly pin PBS_O_WORKDIR to the torchtitan clone so PYTHONPATH resolves
-# even when submitted from $HOME or UAN (12483417 died on ModuleNotFoundError
-# from WORKDIR=/home/foremans with no torchtitan/ on PYTHONPATH).
-REPO_ROOT="/home/foremans/torchtitan"
-SUBMIT_DIR="${PBS_O_WORKDIR:-$REPO_ROOT}"
-[[ -d "${SUBMIT_DIR}/torchtitan" ]] || SUBMIT_DIR="$REPO_ROOT"
-export PBS_O_WORKDIR="$SUBMIT_DIR"
+# Submit from the torchtitan checkout: PYTHONPATH is the submit dir, and
+# 12483417 died on ModuleNotFoundError after a submit from $HOME. Override
+# with REPO_ROOT=/path/to/torchtitan (qsub -v) when submitting from elsewhere.
+SUBMIT_DIR="${REPO_ROOT:-${PBS_O_WORKDIR:-$(pwd)}}"
+if [[ ! -d "${SUBMIT_DIR}/torchtitan" ]]; then
+  echo "FATAL: ${SUBMIT_DIR} is not a torchtitan checkout; submit from one or set REPO_ROOT" >&2
+  exit 1
+fi
+cd "${SUBMIT_DIR}" || exit 1
 VENV="${VENV:-/lus/tegu/projects/datascience/foremans/venvs/rl-monarch-torch214-locality-20261001}"
 if [[ -d "${VENV}/lib" ]]; then
   _ld_first="${SUBMIT_DIR}/.cache/xpu-ld-first/$(basename "${VENV}")"
@@ -99,6 +101,8 @@ hash -r
 python3 -c "import trl; print('trl', trl.__version__)" || { echo "FATAL: trl missing in ${VENV}"; exit 1; }
 
 # num_proc override knob: walk down (e.g. NPROC=16) if the packing map OR the
+# decontam map SIGBUSes / a subprocess dies -- see header. Default 1: job
+# 12483443 landed at NPROC=1.
 NPROC="${NPROC:-1}"
 BASE_MODEL="${HOME}/global_step138650"
 OUT_DIR="/tegu/datasets/datasets/agpt2b-distill-cot-mix-len8192"

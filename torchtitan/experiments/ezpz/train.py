@@ -528,11 +528,19 @@ def main(args: list[str] | None = None) -> None:
             _log_rank0_abort_chain("config.build()", build_exc)
             raise
 
-        # SophiaG requires a hessian EMA update each step before the param update
+        # Keep the production default of updating the SophiaG Hessian EMA, but
+        # allow matched runs to reproduce implementations that omit this hook.
         if isinstance(trainer.optimizers, SophiaGOptimizersContainer):
-            trainer.optimizers.register_step_pre_hook(
-                lambda *_args, **_kwargs: trainer.optimizers.update_hessian()
-            )
+            if getattr(config.optim.optimizer, "update_hessian_before_step", True):
+                trainer.optimizers.register_step_pre_hook(
+                    lambda *_args, **_kwargs: trainer.optimizers.update_hessian()
+                )
+            elif ezpz.distributed.get_rank() == 0:
+                logger.warning(
+                    "SophiaG Hessian pre-step update is disabled. With fresh "
+                    "optimizer state, its Hessian buffers remain zero, matching "
+                    "the pinned MDS no-update path."
+                )
 
         if ezpz.distributed.get_rank() == 0 and ezpz.distributed.verify_wandb():
             try:

@@ -43,7 +43,7 @@ import spmd_types as spmd
 import torch
 from torch.distributed.tensor import DTensor, Replicate, Shard
 
-from torchtitan.components.loss import BaseLoss, CrossEntropyLoss
+from torchtitan.components.loss import CrossEntropyLoss, Loss
 from torchtitan.distributed.spmd_types import spmd_mesh_size
 
 
@@ -118,7 +118,7 @@ def z_loss_term(logits: torch.Tensor, coef: float) -> torch.Tensor:
     return coef * (log_z**2).sum()
 
 
-class CrossEntropyWithZLoss(BaseLoss):
+class CrossEntropyWithZLoss(Loss[torch.Tensor]):
     """Cross entropy plus an output z-loss penalty.
 
     Delegates the cross-entropy term to core's ``CrossEntropyLoss`` rather
@@ -131,7 +131,7 @@ class CrossEntropyWithZLoss(BaseLoss):
     """
 
     @dataclass(kw_only=True, slots=True)
-    class Config(BaseLoss.Config):
+    class Config(Loss.Config):
         z_loss_coef: float = 0.0
         """Weight on (log Z)^2. PaLM and Chinchilla use 1e-4. 0.0 disables it
         entirely (bit-identical to plain cross entropy)."""
@@ -148,7 +148,6 @@ class CrossEntropyWithZLoss(BaseLoss):
             )
         ce_config = CrossEntropyLoss.Config(global_vocab_size=config.global_vocab_size)
         self._ce = CrossEntropyLoss(ce_config)
-        self.fn = self._ce.fn
         self.z_loss_coef = float(config.z_loss_coef)
 
     def __call__(

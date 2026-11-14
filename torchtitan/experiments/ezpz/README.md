@@ -1,73 +1,46 @@
 # TorchTitan + 🍋 `ezpz`
 
-Pre-training AuroraGPT (dense + MoE) on ALCF systems
-(Aurora / Sunspot / Polaris) with **PyTorch >= 2.14 on XPU** (see the
-floor note below; >= 2.13 elsewhere). This folder is
-an opinionated experiment harness on top of upstream `torchtitan`
-that adds:
+Pre-training and post-training AuroraGPT (dense + MoE) on ALCF systems:
+Aurora and Sunspot (XPU), Polaris and Sirius (CUDA). This folder is an
+experiment harness on top of upstream `torchtitan` that adds:
 
 - Fault-tolerant training (bad-node failover wrapper)
 - Per-machine launch scripts + venv broadcast (`ezpz yeet-env`)
 - Custom optimizers (Mano, SPAM, Muon, SophiaG, ADOPT)
 - A `BlendCorpusDataLoader` for olmo-mix-1124 + arbitrary HF datasets
 - Eval pipeline (DCP → HF safetensors → lm-eval)
-- Detailed production / eval / scaling tracking under [`docs/`](docs/)
+- RL: Monarch GRPO with a vLLM generator and TorchStore weight sync, on XPU and CUDA
+- Production / eval / scaling tracking under [`docs/`](docs/)
 
-This file is the **landing page** — quickstart + an index of where
-everything lives. For day-to-day work, jump straight to the more
-specific pages linked below.
+This file is the **landing page**: quickstart + an index of where
+everything lives.
 
 > [!NOTE]
 > This is the [`saforem2/torchtitan@ezpz`](https://github.com/saforem2/torchtitan/tree/ezpz)
-> fork. Upstream is [`pytorch/torchtitan`](https://github.com/pytorch/torchtitan)
-> and we [resync against it regularly](docs/upstream-sync.md).
+> fork. Upstream is [`pytorch/torchtitan`](https://github.com/pytorch/torchtitan).
+> Last sync: upstream `8e63247c`, merged 2026-11-14 (#79). Every sync is logged in
+> [`docs/upstream-sync.md`](docs/upstream-sync.md).
 
-> [!IMPORTANT]
-> **torch 2.10 (the `frameworks/2025.3.1` module) no longer works.** Upstream
-> `torchtitan/distributed/fsdp.py` imports `DataParallelMeshDims` from
-> `torch.distributed.fsdp`, which does not exist before 2.13:
->
-> ```
-> ImportError: cannot import name 'DataParallelMeshDims' from 'torch.distributed.fsdp'
-> ```
->
-> Verified on Aurora 2026-08-11: torch 2.13.0.dev20260428+xpu has the symbol,
-> torch 2.10.0a0+git449b176 (frameworks/2025.3.1) does not. This is CORE
-> torchtitan, not ezpz -- it arrives via `agpt/parallelize.py` -> `distributed/fsdp.py`
-> and came in with upstream #3159. Use the torch 2.13 venv (step 3 below), not a
-> bare `module load frameworks/2025.3.1`.
->
-> `ConfigManager._load_config` catches the `ImportError` and re-raises the
-> generic `Cannot import config_registry for module 'ezpz.agpt'`, which hides
-> this and every other missing-dependency cause. To see the real error, from the
-> repo root run:
->
-> ```bash
-> python3 -c "import torchtitan.experiments.ezpz.agpt.config_registry"
-> ```
+## Versions (as of 2026-11-14)
 
-> [!IMPORTANT]
-> **On XPU, sync 84 needs torch 2.14 -- the `frameworks/2026.1.0` module is
-> NOT enough.** That module ships `2.13.0a0+gitcf30153`, which predates
-> pytorch [#181519](https://github.com/pytorch/pytorch/pull/181519). Without
-> that patch every run dies at FSDP wrapping, before step 1:
->
-> ```
-> RuntimeError: ... full SPMD ... expected DTensor, got plain tensor
-> ```
->
-> `torch 2.14.0+xpu` (a stable release, `--index-url
-> https://download.pytorch.org/whl/xpu`) carries it and trains. Established by
-> controlled A/B on sunspot `workq`, same tree and script and node shape, only
-> torch differing: 2.13 fails at wrapping, 2.14 goes 3/3 (job `12477670`).
->
-> Do not detect the patch by grepping for `"full SPMD"` or `"plain tensor"` --
-> that is the text of the raise it removes, so it matches the BROKEN build.
-> Grep the symbols the patch adds (`_resolve_spmd_types_for_storage`,
-> `is_spmd_types`, `get_local_type`).
->
-> Build details and the six-build table:
-> [`docs/experiments/sync84-xpu-smoke.md`](docs/experiments/sync84-xpu-smoke.md).
+The venvs the last sync was validated on:
+
+| Machine | Venv | torch |
+|---|---|---|
+| Sunspot | `/lus/tegu/projects/datascience/foremans/venvs/xpu-torch216-sync-5a7a622f16` | `2.16.0.dev20261015+xpu` |
+| Aurora | `/flare/AuroraGPT/foremans/venvs/xpu-torch216-sync-5a7a622f16` | same |
+| Polaris | `/eagle/AuroraGPT/foremans/venvs/cuda-torch215-cu132` | `2.15.0+cu132` |
+| Sirius | `/home/foremans/torchtitan/.venv` | `2.15.0+cu132` |
+
+- **XPU needs torch >= 2.14.** `frameworks/2026.1.0` ships `2.13.0a0+gitcf30153`, which
+  lacks pytorch [#181519](https://github.com/pytorch/pytorch/pull/181519) and dies at FSDP
+  wrapping ([`docs/experiments/sync84-xpu-smoke.md`](docs/experiments/sync84-xpu-smoke.md)).
+- **torch 2.10 (`frameworks/2025.3.1`) does not work anywhere**: core `distributed/fsdp.py`
+  imports `DataParallelMeshDims`, added in 2.13.
+- **TP > 1 needs `spmd_types==0.3.1`.**
+- `Cannot import config_registry for module 'ezpz.agpt'` hides the real import error.
+  Run `python3 -c "import torchtitan.experiments.ezpz.agpt.config_registry"` from the
+  repo root to see it.
 
 ## Quickstart (2B dense training, 2 nodes)
 
@@ -94,180 +67,48 @@ MODEL=2b bash torchtitan/experiments/ezpz/run_train.sh
 For other models / machines / data files, see
 [`run_train.sh`](run_train.sh) and the detailed setup guide above.
 
-## Aurora frameworks RC (`frameworks/2026.1.0`)
+## Smoke test (all four machines)
 
-> [!IMPORTANT]
-> **Validation-queue only, as of 2026-08-26.** `/opt/aurora/26.181.0` exists
-> only in the validation-node image -- `module avail frameworks` on a login
-> node shows just `2025.3.1`, and you cannot build or test against the RC from
-> there. When the RC goes live cluster-wide this section becomes the normal
-> path; until then every command below must run **on a validation node**.
-
-The RC bundles its own python 3.12.12 with torch `2.13.0a0+gitcf30153`
-(xpu available, 12 devices, `dist.is_xccl_available()` True). What it does
-**not** bundle is our stack -- `ezpz`, `spmd_types`, `grain`, `blendcorpus`
-and friends are all absent, so a bare `module load` gets you a working torch
-and nothing that can train.
-
-### Setup
+[`scripts/sync_smoke_alcf.sh`](scripts/sync_smoke_alcf.sh) is the 2-node check run after
+every upstream sync: agpt and MoE debug configs, local batch 2, and an exact resume
+check. The wrappers `sync_smoke_{sunspot,aurora,polaris,sirius}.sh` carry only the
+`#PBS` headers:
 
 ```bash
-# 1. Load the module at TOP LEVEL. Never pipe it (see traps below).
-module load frameworks/2026.1.0
-
-# 2. libglog.so.0 lives inside the module tree but is not on the path.
-#    Every `import torch` dies without this. Full writeup:
-#    docs/guides/known-bugs/fw-rc-libglog-not-on-loader-path.md
-#    Without this every `import torch` dies in torchcomms.
-FW=/opt/aurora/26.181.0/frameworks/aurora_frameworks-2026.1.0
-export LD_LIBRARY_PATH="$FW/lib:$LD_LIBRARY_PATH"
-
-# 3. Compute nodes need the proxy for any install.
-export http_proxy=http://proxy.alcf.anl.gov:3128
-export https_proxy=http://proxy.alcf.anl.gov:3128
-
-# 4. Build the overlay venv on the RC python.
-source <(curl -fsSL https://ezpz.cool/utils.sh) && ezpz_setup_env
-#    -> venvs/aurora/torchtitan-ezpz-aurora_frameworks-2026.1.0
-
-# 5. Dependencies. -P pins the torch family out of the resolver's reach;
-#    the XPU build is on no index and would be replaced by a CUDA wheel.
-uv pip install --no-cache --link-mode=copy \
-    -P torch -P pytorch-triton-xpu -P torchvision -P torchaudio \
-    tensorboard tyro grain 'etils[epath,epy]' xarray absl-py \
-    array-record cloudpickle portpicker 'protobuf>=5.28.3' \
-    'spmd_types==0.2.1' wandb \
-    'git+https://github.com/saforem2/ezpz' \
-    'git+https://github.com/saforem2/blendcorpus@feat/remove-deepspeed'
-
-# 6. torchtitan is NEVER pip-installed -- it is imported from the repo tree,
-#    and a PYTHONPATH export does not reach ranks. Drop a .pth instead.
-SP=$(python3 -c 'import site; print(site.getsitepackages()[0])')
-echo "$PWD" > "$SP/_torchtitan_repo.pth"
+qsub -A <account> -q debug -l select=2 -l walltime=01:00:00 \
+  -l filesystems=<fs> torchtitan/experiments/ezpz/scripts/sync_smoke_sunspot.sh
 ```
 
-Then verify, **with the venv python** (not the login one):
+The last line is `VERDICT: ok`, `ok_with_known_failures` or `failed`.
+
+## RL (Monarch GRPO)
+
+Two-host GRPO (trainer on host 0, vLLM generator on host 1, TorchStore weight sync)
+trains on all four machines. AGPT-2B LoRA on GSM8K, 3 steps, exit 0 on Sirius `33518`,
+Sunspot `12483743` and Aurora `9089138`.
 
 ```bash
-python3 -c "import torch; print(torch.__version__, torch.xpu.is_available())"
-python3 -c "import importlib; importlib.import_module(
-    'torchtitan.experiments.ezpz.agpt.config_registry')"
+qsub -A <account> -q <queue> -l filesystems=<fs> \
+  -v V=/path/to/rl-venv,CKPT=/path/to/hf-checkpoint \
+  torchtitan/experiments/ezpz/rl/scripts/grpo/multihost_grpo_e2e.pbs
 ```
 
-A ready-made script that does all of the above plus a 2N collectives smoke and
-a real training run is
-[`scripts/val-rc-full.sh`](scripts/val-rc-full.sh).
+The RL venvs are separate from the training venvs above: `rl-monarch-torch216-sync-20261112`
+on Aurora (`/flare/AuroraGPT/foremans/venvs/`) and Sunspot
+(`/lus/tegu/projects/datascience/foremans/venvs/`), `rl-cuda132-sync-20261113` on Sirius
+(`/home/foremans/venvs/`). XPU RL venvs need `vllm-xpu-kernels` built for PVC without its Xe2-only kernels
+([`rl/scripts/build_vllm_xpu_kernels_pvc.pbs`](rl/scripts/build_vllm_xpu_kernels_pvc.pbs))
+and `torchvision`. CUDA uses upstream's `scripts/install_rl_env.sh`. Details and
+timings: the 2026-11-12 entry in [`docs/upstream-sync.md`](docs/upstream-sync.md) and
+[`docs/production/rl/monarch.md`](docs/production/rl/monarch.md).
 
-### Why each dependency is here
+## Aurora `frameworks/2026.1.0`
 
-| Package | Needed by |
-|---|---|
-| `grain` + `etils[epath,epy]`, `xarray`, `absl-py`, `array-record`, `cloudpickle`, `portpicker`, `protobuf` | core `torchtitan/components/data/loader.py` imports `grain.python`; the rest are grain's own deps |
-| `tyro` (pulls `typeguard`) | config parsing -- `config_manager.parse_args()` |
-| `tensorboard` | `torchtitan/components/metrics.py` |
-| `spmd_types` | sharding specs (`spmd.S(n)`, `spmd.R`) |
-| `blendcorpus` @ `feat/remove-deepspeed` | the production dataloader; that branch because the RC has no deepspeed |
-| `wandb` | the RC base ships a `wandb` that is importable but has **no `.api`**, which `ezpz.verify_wandb()` calls. Installing a real one into the overlay shadows it |
-| `ezpz` from **git** | PyPI `ezpz` is an unrelated package (v0.1.2) |
-
-### Traps, all of which report success
-
-Every one of these cost a job. They share a failure mode: the command exits 0
-or prints nothing alarming, and you only find out at the next stage.
-
-1. **`module load ... | tail -3`** runs the load in a subshell, which silently
-   evaporates. Python stays 3.6.15 and every import fails with a misleading
-   `No module named 'torch'`. Load at top level.
-2. **`uvi` and `ezpz` are interactive-shell only.** `uvi` is an atuin alias
-   (`uv pip install --no-cache --link-mode=copy`); neither is defined in a PBS
-   batch shell, where you get `command not found` and rc 127. Use `uv pip`
-   directly.
-3. **`uv pip` from a login node** against the overlay venv fails with
-   `No virtual environment found` -- the venv's interpreter symlinks into
-   `/opt/aurora/26.181.0`, which is not there -- and **still exits 0**. Install
-   on the node.
-4. **Neither blanket install policy works.** `--no-deps` on everything skips
-   legitimate pure-python deps -- chasing them one failed job at a time cost
-   four runs (`etils`, `xarray`, `portpicker`, `typeguard`). But letting the
-   resolver run pulled a generic PyPI **`torch-2.13.0`** into the overlay,
-   shadowing the RC's XPU build, **even with `-P torch -P pytorch-triton-xpu`
-   pins**: all 14 installs printed `ok` and only an explicit
-   `torch.__version__` assertion caught it (job `8784535`). Use the resolver
-   for leaf packages, `--no-deps` for anything that declares torch, and assert
-   on the torch version afterwards.
-5. **Evicting a stray torch is not enough -- take `triton` with it.** The same
-   pull brings a generic `triton-3.7.1` that shadows the RC's Intel-enabled
-   build; removing torch alone leaves `config_registry` dying on
-   `No module named 'triton.backends.intel'` (job `8784572`).
-6. **`import torchtitan.experiments.ezpz.agpt` is not a readiness gate** -- it
-   succeeds while `config_registry` is still broken, because
-   `config/manager.py` catches every exception and re-raises one generic
-   `Cannot import config_registry`. Gate on `config_registry` itself, with
-   `PYTHONPATH` unset from a neutral cwd, which is what ranks see.
-7. **Rank errors are not on stdout.** A launch that prints only
-   `Execution finished with 143` usually has the real traceback in
-   `logs/<module>/<timestamp>-rank0.jsonl`.
-
-### Status
-
-| Check | Result |
-|---|---|
-| torch / XPU / XCCL on the RC | **PASS** -- `2.13.0a0+gitcf30153`, 12 devices, xccl True |
-| compiled SDPA fwd+bwd | **PASS** (job `8781129`, 1N) |
-| all deps import in the overlay | **PASS** (job `8784615`) |
-| `config_registry` | **PASS** (job `8784615`) |
-| 2N collectives (`ezpz.examples.test`) | **PASS** -- rc=0, 24 ranks, 268s (job `8784615`) |
-| **2N x 12 distributed training** | **PASS** -- 10/10 steps, loss 10.865 -> 9.059 (job `8784615`) |
-| W&B from a real run | **PASS** -- `torchtitan.ezpz.train/runs/70fumwgc` |
-| **agpt TP=2, eager** | **PASS** -- 10.88838 -> 10.43820 (job `8789506`) |
-| **agpt TP=2, COMPILED** | **PASS** -- the torch-2.13 `DeviceMesh` AOT assertion does NOT fire on the RC |
-| **moe TP=1** | **PASS** -- 12.93609 -> 11.32376 |
-| **moe TP=2** | **PASS** -- 12.94930 -> 11.49335, with the `6e4e1996f` wrapper fix |
-
-Coverage matrix run: [`scripts/rc-matrix.sh`](scripts/rc-matrix.sh), 2N x 4
-ranks, 5 steps each, all five arms monotonic with finite grad norms.
-
-Two results worth calling out:
-
-**Compiled agpt at TP=2 works on the RC.** On the production `.venv` stack
-(torch `2.13.0.dev20260519+xpu`) that corner dies in
-`tensors_saved_with_vc_check` with a `DeviceMesh` in saved-for-backward -- the
-assertion documented for the 80B family, which also fires at debugmodel scale.
-It does not fire here. Compiled and eager agree to `3.6e-4` over five steps
-(10.88838 vs 10.88835 at step 1), so this is a real pass and not a silently
-different code path. **If the RC ships, the `compile=OFF` workaround can be
-retired** -- but confirm at 80B before acting on it, since that is where the
-assertion was originally characterised.
-
-**The moe TP>1 fix holds on the RC.** Both moe arms reproduce the
-production-stack losses (job `8787243`) to the five decimals stdout prints,
-across a different torch build and oneCCL. That is the reported precision, not
-a bitwise check. The fix is a reshape, so version-independence is what you
-would expect.
-
-Full trajectory, `agpt_debugmodel`, 2 nodes x 12 ranks:
-
-```
-step:  1  loss: 10.86492  grad_norm: 0.5543
-step:  5  loss: 10.50758  grad_norm: 0.7077
-step: 10  loss:  9.05897  grad_norm: 1.0462
-```
-
-Monotonic descent, finite grad norms throughout. MFU is ~0.05% because
-`agpt_debugmodel` at `max_context_length=512` is a plumbing check, not a
-performance measurement -- do not read a throughput number off this run.
-
-Note the 2B / MoE / 80B results in
-[`docs/guides/frameworks-rc-validation.md`](docs/guides/frameworks-rc-validation.md)
-are **Sunspot** (`1247xxxx`), a different machine. The rows above are the
-first training on Aurora's RC.
-
-> [!TIP]
-> To suppress the `UserWarning: Torchinductor` error seen when using
-> `--compile.enable` on Aurora:
-> ```bash
-> export SYCL_DISABLE_FSYCL_SYCLHPP_WARNING=1
-> ```
+The module is visible from Aurora login nodes as of 2026-11-14 (it was
+validation-node only in August). It bundles torch `2.13.0a0+gitcf30153`, below the XPU
+floor above, and none of our stack. The overlay-venv recipe, the seven traps that each
+report success, and the August RC results are in
+[`docs/guides/frameworks-rc-validation.md`](docs/guides/frameworks-rc-validation.md).
 
 ## Documentation index
 
@@ -283,13 +124,14 @@ structural map of every file under `docs/`, see
 | [Production index](docs/production/README.md) | Snapshot of every active training trajectory — 2B / 20B / 80B at 256N / 512N / 1024N+ |
 | [Eval index](docs/evals/README.md) | lm-eval scores per model with v1-vs-v2 plots (the bf16-master fix is decisively validated) |
 | [Journal](docs/journal.md) | Day-by-day session log |
+| [Upstream sync log](docs/upstream-sync.md) | What each upstream sync changed, how it was validated, what it left open |
 
 ### Setup + running
 
 | Page | What's there |
 |------|--------------|
 | [Running with newer PyTorch](docs/guides/running-with-newer-pytorch.md) | Module loads, venv install, tokenizer download, large-scale (>512 nodes) workflow |
-| [`scripts/submit_agpt_{2b,20b,80b}_aurora_venv*.sh`](scripts/) | Current (torch 2.13 venv) PBS production submitters |
+| [`scripts/submit_agpt_{2b,20b,80b}_aurora_venv*.sh`](scripts/) | Aurora PBS production submitters (venv + failover wrapper) |
 | [`submit/README.md`](submit/README.md) | Legacy torch-2.10-conda submit scripts (kept for v1 reproduction only) |
 
 ### Big findings + workarounds
@@ -312,7 +154,7 @@ structural map of every file under `docs/`, see
 | [`optimizer/`](optimizer/) | Mano, SPAM, Muon, SophiaG, ADOPT |
 | [`blendcorpus/`](blendcorpus/) | olmo-mix-1124 dataloader with train/validation splits |
 | [`eval/`](eval/) | DCP → HF converter + lm-eval pipeline |
-| [`rl/`](rl/) | GRPO experimental task registry |
+| [`rl/`](rl/) | AuroraGPT RL registries, `train_upstream.py`, Monarch launchers, XPU compatibility shims |
 | [`scripts/`](scripts/) | Production submission scripts + interactive launchers + benchmarks |
 | [`competition/`](competition/) | Loss-speedrun harness for the optimizer competitions |
 | [`tests/`](tests/) | CPU/XPU unit tests (run with `python3 -m unittest`) |

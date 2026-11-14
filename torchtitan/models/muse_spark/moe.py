@@ -16,6 +16,7 @@ from torchtitan.models.common.linear import Linear
 from torchtitan.models.common.moe import MoE
 from torchtitan.models.common.moe.token_dispatcher import (
     AllToAllTokenDispatcher,
+    HybridEPTokenDispatcher,
     LocalTokenDispatcher,
 )
 
@@ -65,10 +66,11 @@ class MuseSparkMoE(MoE):
             elif dispatcher._owner not in (
                 LocalTokenDispatcher,
                 AllToAllTokenDispatcher,
+                HybridEPTokenDispatcher,
             ):
                 raise ValueError(
-                    "Muse Spark MoE requires LocalTokenDispatcher or "
-                    "AllToAllTokenDispatcher, "
+                    "Muse Spark MoE requires LocalTokenDispatcher, "
+                    "AllToAllTokenDispatcher, or HybridEPTokenDispatcher, "
                     f"got {type(dispatcher).__qualname__}"
                 )
 
@@ -119,7 +121,6 @@ class MuseSparkMoE(MoE):
             **router_kwargs,
         )
         remat.recompute_needs_tensor(routing_map_TE)
-        num_local_tokens_per_expert_E = routing_map_TE.sum(dim=0)
 
         expert_input_TC = self.pooler(x_TD)
         expert_input_TC = remat.region(
@@ -135,7 +136,7 @@ class MuseSparkMoE(MoE):
             expert_input_TC,
             topk_scores_TK,
             topk_expert_ids_TK,
-            num_local_tokens_per_expert_E,
+            routing_map_TE,
             padding_mask_T=padding_mask_T,
         )
         output_TD = self.unpooler(out_TC)

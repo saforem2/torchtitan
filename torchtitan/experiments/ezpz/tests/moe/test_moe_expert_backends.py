@@ -92,7 +92,9 @@ class TestMoEExpertBackends(unittest.TestCase):
         routing_cases = {
             "balanced": torch.tensor([[0, 1], [2, 0], [1, 2]]),
             "empty_expert": torch.tensor([[0, 1], [1, 0], [0, 1]]),
-            "imbalanced": torch.tensor([[2, 2], [2, 0], [2, 1]]),
+            # Top-k never repeats an expert within a row, and the one-hot
+            # routing map (#5516) cannot represent a repeat.
+            "imbalanced": torch.tensor([[2, 0], [2, 1], [2, 0]]),
         }
         for compute_backend in ("for_loop", "bmm_nodrop"):
             for score_before_experts in (False,):  # True mode removed upstream
@@ -124,10 +126,12 @@ class TestMoEExpertBackends(unittest.TestCase):
             dtype=torch.float32,
             requires_grad=True,
         )
-        counts = torch.bincount(expert_ids.flatten(), minlength=3)
+        # #5516: the router hands RoutedExperts / the dispatcher a one-hot
+        # (T, E) routing map, not per-expert counts.
+        routing_map = torch.zeros(3, 3, dtype=torch.bool).scatter_(1, expert_ids, True)
 
         routed_input, routed_counts, metadata = module.token_dispatcher.dispatch(
-            x, scores, expert_ids, counts
+            x, scores, expert_ids, routing_map
         )
         expert_output = module._run_backend(routed_input, routed_counts)
         assert module.output_postprocess is not None
@@ -137,7 +141,7 @@ class TestMoEExpertBackends(unittest.TestCase):
         wrong_order = module.output_postprocess(
             module.token_dispatcher.combine(expert_output, metadata, x)
         )
-        actual = module(x, scores, expert_ids, counts)
+        actual = module(x, scores, expert_ids, routing_map)
 
         assert_close(actual, expected)
         self.assertFalse(torch.equal(actual, wrong_order))
