@@ -23,7 +23,7 @@ is batch-dependent, and for large models the small-batch number is actively
 ### 5B/10B at GBS=128 on Sirius — OLMo-3-1K (Nov 11-12, direct Polaris input)
 
 Sirius H100, 8N 32 GPUs, GBS=128 (524k tok), sweep `1e-08 -> 1e-01` 150 steps, `mult=1.114243`, FSDP2 `tp=1`.
-All four arms 150/150 exit 0, finite throughout. Full report: [2026-11-12 OLMo-3 GBS128 Sirius](../2026-11-12-olmo3-gbs128-sirius.md).
+All four arms 150/150 exit 0, finite throughout. Full report: [2026-11-12 OLMo-3 GBS128 Sirius](2026-11-12-olmo3-gbs128-sirius.md).
 
 | model | AdamW suggested (blow-up) | Mano suggested (blow-up) | note |
 |---|---:|---:|---|
