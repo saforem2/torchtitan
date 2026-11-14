@@ -70,15 +70,42 @@ already broken at `959b851a` (removed `rollout.environment`, moved `Controller`)
 last passing RL gate is Sunspot `12479177` (2026-09-30). A post-sync RL venv now exists on
 Sunspot, `rl-monarch-torch216-sync-20261112`: torch `2.16.0.dev20261015+xpu`,
 `torchmonarch` `0.7.0` (+ `torchx-nightly`), TorchStore songhappy `xpu-all` @ `3edc47f`,
-vLLM `b46907cce` built for XPU, `vllm-xpu-kernels` `v0.1.16.3` built for `pvc` only.
+vLLM `b46907cce` built for XPU, `vllm-xpu-kernels` `4e38707` (`0.1.16.4.dev0`).
 Monarch GRPO attempts on it (2 nodes, AGPT-2B, GSM8K) found and fixed: torchmonarch 0.7
 dropping `host_mesh_from_store` (`rl/monarch_compat.py`, `StoreJob`), tyro on
 `VllmOtelStatLogger.Config`, the renderer's `vision_processor`, the AGPT adapter's
 quantized-layout kwargs, and vLLM-XPU's missing `PretrainedConfig` re-export.
 Aurora `9087154` then reached generator setup and failed on `PassConfig(enable_sp=...)`:
 vLLM removed the SP pass in `194bd72be`, so `xpu_overrides.py` drops those two fields
-on that vLLM. No XPU run has trained yet: Sunspot stopped starting jobs for the
-account and Aurora went into maintenance.
+on that vLLM.
+
+Aurora `9087211` and `9088919` got past that and failed in `DeviceConfig`:
+`Device string must not be empty`. vLLM picked `UnspecifiedPlatform` on both hosts,
+outside Monarch too, while `torch.xpu` saw 12 tiles. `vllm/platforms/xpu.py` imports
+`vllm_xpu_kernels._xpu_C`, and that import failed (`9088933`) on
+`undefined symbol: mhc_fused_post_pre`; vLLM treats the failed import as no XPU.
+`vllm-xpu-kernels` `4e38707` adds `-DVLLM_MHC_ENABLED`, `-DVLLM_MQA_LOGITS_ENABLED`
+and `-DVLLM_GDN_ENABLED` whenever those kernel options are on (the default), but
+compiles those kernels only under `VLLM_XPU_ENABLE_XE2`. A PVC build has Xe2 off, so
+`_xpu_C` binds three functions that were never built. The Sunspot wheel had the same
+hole. Rebuilt wheel, `0.1.16.4.dev0+g4e38707.pvconly`, on an Aurora compute node:
+
+```bash
+MHC_KERNELS_ENABLED=0 MQA_LOGITS_KERNELS_ENABLED=0 GDN_KERNELS_ENABLED=0 \
+VLLM_XPU_ENABLE_XE2=0 VLLM_XPU_ENABLE_XE3P=0 VLLM_XPU_ENABLE_XE_DEFAULT=1 \
+VLLM_XPU_AOT_DEVICES=pvc VLLM_XPU_XE2_AOT_DEVICES=pvc MAX_JOBS=96 \
+python setup.py bdist_wheel
+```
+
+AGPT uses none of the three kernels. `VLLM_XPU_AOT_DEVICES=pvc` is needed too: the
+default list includes `bmg-g31-a0`, which the compute-node `ocloc` rejects
+(`9088980`). Build-time pitfalls: the venv's SYCL/UR libs must be first on
+`LD_LIBRARY_PATH` before `import torch` (`urGraphGetIdExp`), and a source tree copied
+from another machine must drop `.deps/*-subbuild` and `.deps/*-build`, whose CMake
+caches keep the old absolute paths. With the rebuilt wheel all five extensions import
+and vLLM reports `XPUPlatform` (`9089010`). It is installed in the Aurora and Sunspot
+`rl-monarch-torch216-sync-20261112` venvs; the old wheel is kept beside each. GRPO
+reruns: Aurora `9089026`, Sunspot `12483730`.
 
 The same Monarch GRPO path trains on CUDA. Sirius `33518`, 2 A100 nodes (trainer on
 host 0, vLLM generator on host 1), AGPT-2B LoRA, GSM8K, 3 steps, exit `0`:
