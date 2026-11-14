@@ -1,6 +1,6 @@
 # Verified OLMo-3-1K GBS=128 Sirius evidence — 2026-11-11 to 2026-11-12
 
-Immutable copies of LR-finder CSV artifacts used by the [campaign report](../2026-11-12-olmo3-gbs128-sirius.md).
+Immutable copies of LR-finder CSV artifacts used by the [campaign report](../../2026-11-12-olmo3-gbs128-sirius.md).
 All four files have 150 unique LR samples, finite LR/loss fields, and exit-0 terminal logs.
 The finder ran the full training step (forward + backward + optimizer) at each swept LR with
 exponential increase (Smith/Gugger, `find_optimal_lr` derivative crossing).
