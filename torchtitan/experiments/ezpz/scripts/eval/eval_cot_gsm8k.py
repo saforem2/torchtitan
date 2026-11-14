@@ -24,7 +24,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
+
 
 # gsm8k gold answers end in "#### N"; strip commas and $.
 _GOLD_RE = re.compile(r"####\s*(-?[\d,]+(?:\.\d+)?)")

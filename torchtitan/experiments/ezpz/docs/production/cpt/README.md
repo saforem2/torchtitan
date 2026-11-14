@@ -1,6 +1,6 @@
 # Continued Pre-Training (CPT) — 2B olmo x dolmino mixing-ratio sweep
 
-> **Living document** — updated as CPT runs complete and are evaluated.
+> **Update 2026-11-11:** a **live** kind-shift CPT `60/40 FineWeb-Edu` is running on Sunspot (`agpt_2b_mds_mix_owm_edu_6040`, `12483245 R` step 10k+; chain `12483048→12483075→12483245`) — see [journal](../../journal.md) and [production/README post-training table](../README.md#post-training-stages-cptsft-rl). Everything else on this page is historical.
 >
 > Last updated: 2026-08-31
 >
@@ -15,7 +15,7 @@
 > whose step-3801..6600 checkpoints are NaN-poisoned. Do not read one for the
 > other.
 >
-> **Nothing on this page is running.** The two 300B pilots finished
+> **Nothing else on this page is running.** The two 300B pilots finished
 > 2026-07-06 and are the durable result. Everything launched after them
 > stopped in July and none of it has restarted: the olmo50-dolmino50
 > constant-2e6 stage-2 chain last wrote a checkpoint 2026-07-18, the
