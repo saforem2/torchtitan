@@ -29,7 +29,7 @@ descends — attention/FFN are unfrozen — but the divergence shows up at
 
 ### 2B
 
-![2B v1 vs v2 overlay](figures/overlay_2b_v1_vs_v2.png)
+![2B v1 vs v2 overlay](figures/overlay_2b_v1_vs_v2.svg)
 
 ### 20B
 
@@ -63,15 +63,15 @@ python3 torchtitan/experiments/ezpz/utils/plot_production_wandb.py --overlay 20b
 
 ### Loss / Throughput / MFU
 
-![2B v1 256N Training](figures/production_2b_v1_256n.png)
+![2B v1 256N Training](figures/production_2b_v1_256n.svg)
 
 ### Diagnostics (grad_norm / lr / max_loss)
 
-![2B v1 256N Diagnostics](figures/training_diagnostics_2b_v1_256n.png)
+![2B v1 256N Diagnostics](figures/training_diagnostics_2b_v1_256n.svg)
 
 ### Tokens vs Wall Clock
 
-![2B v1 256N Tokens vs Time](figures/tokens_vs_time_2b_v1_256n.png)
+![2B v1 256N Tokens vs Time](figures/tokens_vs_time_2b_v1_256n.svg)
 
 ### Progress
 
@@ -153,15 +153,15 @@ got past the first step.)
 
 ### Loss / Throughput / MFU
 
-![20B v1 256N Training](figures/production_20b_v1_256n.png)
+![20B v1 256N Training](figures/production_20b_v1_256n.svg)
 
 ### Diagnostics (grad_norm / lr / max_loss)
 
-![20B v1 256N Diagnostics](figures/training_diagnostics_20b_v1_256n.png)
+![20B v1 256N Diagnostics](figures/training_diagnostics_20b_v1_256n.svg)
 
 ### Tokens vs Wall Clock
 
-![20B v1 256N Tokens vs Time](figures/tokens_vs_time_20b_v1_256n.png)
+![20B v1 256N Tokens vs Time](figures/tokens_vs_time_20b_v1_256n.svg)
 
 ### Progress
 
