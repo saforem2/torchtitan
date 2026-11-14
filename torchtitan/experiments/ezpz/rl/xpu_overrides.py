@@ -1182,6 +1182,37 @@ def patch_vllm_pretrained_config_alias() -> None:
     vllm_config.PretrainedConfig = PreTrainedConfig
 
 
+def _is_quantized_kv_cache(kv_cache_dtype: str) -> bool:
+    # Same test as vllm.utils.torch_utils.is_quantized_kv_cache in the vLLM
+    # upstream pins (1.0.0.dev20261107).
+    return (
+        kv_cache_dtype.startswith("fp8")
+        or kv_cache_dtype.endswith("per_token_head")
+        or kv_cache_dtype.startswith("nvfp4")
+    )
+
+
+def patch_vllm_is_quantized_kv_cache() -> None:
+    """Add ``is_quantized_kv_cache`` to ``vllm.utils.torch_utils`` when missing.
+
+    Upstream ``rl/generator/vllm/attention/mla.py`` imports it, and
+    ``model_wrapper.py`` imports that module for every model. The vLLM-XPU
+    build (``b46907cce``) predates the helper, so the generator actor fails
+    with ImportError (Sunspot 12483730). A vLLM that has it is left alone.
+    """
+    import importlib.util
+
+    if importlib.util.find_spec("vllm") is None:
+        return
+    try:
+        import vllm.utils.torch_utils as torch_utils
+    except Exception:
+        return
+    if hasattr(torch_utils, "is_quantized_kv_cache"):
+        return
+    torch_utils.is_quantized_kv_cache = _is_quantized_kv_cache
+
+
 _SP_PASS_FIELDS = ("enable_sp", "sp_min_token_num")
 
 
@@ -1254,6 +1285,7 @@ def apply_all_xpu_patches() -> None:
     patch_vllm_xpu_skip_oneccl_warmup()
     patch_vllm_xpu_attention_backend()
     patch_vllm_pretrained_config_alias()
+    patch_vllm_is_quantized_kv_cache()
     patch_vllm_pass_config_without_sp()
     patch_create_block_mask_separate_full_blocks_for_xpu()
     patch_vllm_xpu_no_alias_current_stream()

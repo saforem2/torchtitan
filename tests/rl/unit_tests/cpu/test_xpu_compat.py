@@ -120,3 +120,51 @@ def test_xpu_flex_attention_uses_triton_backend():
         )
         == triton_path
     )
+
+
+def _fake_vllm_torch_utils(monkeypatch, **attrs):
+    import importlib.machinery
+    import sys
+    import types
+
+    vllm = types.ModuleType("vllm")
+    vllm.__spec__ = importlib.machinery.ModuleSpec("vllm", None)
+    vllm.__path__ = []
+    utils = types.ModuleType("vllm.utils")
+    utils.__path__ = []
+    torch_utils = types.ModuleType("vllm.utils.torch_utils")
+    for name, value in attrs.items():
+        setattr(torch_utils, name, value)
+    vllm.utils = utils
+    utils.torch_utils = torch_utils
+    monkeypatch.setitem(sys.modules, "vllm", vllm)
+    monkeypatch.setitem(sys.modules, "vllm.utils", utils)
+    monkeypatch.setitem(sys.modules, "vllm.utils.torch_utils", torch_utils)
+    return torch_utils
+
+
+def test_is_quantized_kv_cache_added_when_vllm_lacks_it(monkeypatch):
+    from torchtitan.experiments.ezpz.rl import xpu_overrides
+
+    torch_utils = _fake_vllm_torch_utils(monkeypatch)
+    xpu_overrides.patch_vllm_is_quantized_kv_cache()
+
+    check = torch_utils.is_quantized_kv_cache
+    assert not check("auto")
+    assert not check("bfloat16")
+    assert check("fp8")
+    assert check("fp8_e4m3")
+    assert check("int8_per_token_head")
+    assert check("nvfp4")
+
+
+def test_is_quantized_kv_cache_keeps_vllm_version(monkeypatch):
+    from torchtitan.experiments.ezpz.rl import xpu_overrides
+
+    def native(kv_cache_dtype):
+        return kv_cache_dtype == "native"
+
+    torch_utils = _fake_vllm_torch_utils(monkeypatch, is_quantized_kv_cache=native)
+    xpu_overrides.patch_vllm_is_quantized_kv_cache()
+
+    assert torch_utils.is_quantized_kv_cache is native
