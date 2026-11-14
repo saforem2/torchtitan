@@ -4,7 +4,7 @@
 > Run `scripts/refresh_all.sh` to regenerate the tables/charts below from
 > disk + W&B.
 >
-> Last updated: 2026-10-29 (restart status; historical generated metrics remain labeled below)
+> Last updated: 2026-11-14 (restart status; historical generated metrics remain labeled below)
 
 > **Polaris (A100) production** is tracked separately (different hardware,
 > `dolma` dataset, `72xxxxx` job IDs): see
@@ -64,6 +64,13 @@ one PBS job per seat: `9076330` (20B-512), `9076346` (20B-256), `9076358` (4B),
 `9076371` (10B, now 512N). See the
 [umbrella post-mortem and resubmission](2026-11-11-umbrella-2088n.md).
 
+Before that, umbrella `8938159` (Oct 18-19) took the 20B-256 to `step-20900` and
+sent the 20B-512 NaN from step 11,101. Both 20B chains now resume from
+`-fixedpos` forks that restore the BlendCorpus data position (PR #66,
+[resume-position analysis](../guides/blendcorpus-resume-position.md)); the
+20B-512's head moved back to `step-10800` as a result. Per-chain detail:
+[20B 512N](agpt/20b/n512/README.md), [20B 256N](agpt/20b/n256/README.md).
+
 ## Restart gate — 2026-10-29
 
 Monday umbrella `8951415` failed before training. The corrected two-seat 20B
@@ -88,8 +95,10 @@ per-dispatch history is in the linked pages.
 |------------|-------|---------------:|-----:|---------:|-------|
 | [**2B 256N**](agpt/2b/n256/README.md) async | **COMPLETE** ✅ | **92,859** | 2.652 | **100.0%** | 🏁 target reached (4.674T) |
 | [2B 512N](agpt/2b/n512/README.md) sync | **COMPLETE** | 46,429 | **2.687** | **100.0%** | ✅ **finished 2026-08-13 19:11 UTC** as umbrella 8744247 t0, exit 0. Full 4.674T olmo-mix-1124 budget. Final eval: MMLU 0.2511 (chance), and the last 500B tokens moved no metric. Stage 2 (dolmino CPT) seeded from step-46429 **has since run** (8756070 t0 then 8756957 t0) and sits at step 7,728, also idle. |
-| [20B 256N](agpt/20b/n256/README.md) | **idle** since 08-26 | **12,000**[^head] | 2.372 | 12.9% | ⏸️ the only pre-training chain `8773440` actually advanced: seat `t2`, **+201 steps, 2.31488 -> 2.24577**. Nothing since. |
-| [20B 512N](agpt/20b/n512/README.md) | **idle** since 08-26 | **10,600**[^head] | 2.400 | 22.8% | ⏸️ seat `t1` of `8773440` **never started** (0 steps). Last advance was `8764675` on 08-20. |
+| [20B 256N](agpt/20b/n256/README.md) | **queued** (`9076346`) | **21,100** | 2.440 | 22.7% | ⏸️ `9053470` (Nov 9-11) advanced 20,901 -> 21,143 on the fixedpos fork and persisted step-21,100 (1,062.0B tokens). |
+| [20B 512N](agpt/20b/n512/README.md) | **running** (`9076330`, started 2026-11-14) | **10,800** (fixedpos) | 2.462 | 23.3% | ⏸️ the constant-LR chain went NaN from 11,101 (`8938159`, Oct 18-19); forked from step-10,800 with the data position fixed. `9053470` logged 10,801 -> 10,882, no new checkpoint. |
+| [agpt 4B, OLMo-3, 4K](agpt/4b/README.md) | **running** (`9076358`, Aurora 512N) | **2,600** | 3.311 | 1.4% | Aurora umbrella `9053470` logged 1 -> 2,698. Sirius 2N hedge at step 7,454; Polaris 16N/32N queued. |
+| [agpt 10B, OLMo-3, 4K](agpt/10b/README.md) | **queued** (`9076371`, Aurora 512N, fresh) | -- | -- | -- | 768N attempts diverged at step 1 (loss 17788+). Sirius 8N hedge restarted fresh; Polaris 16N/32N queued. |
 | [**80B**](agpt/80b/README.md) | **blocked** (dp wall) | — | nan | — | 🔴 optimizer-independent grad-path overflow at dp>~186; not a SophiaG bug |
 | [2B 512N stage-2 dolmino](cpt/README.md) | **idle** since 08-26 | **7,728**[^head] | 2.519 | n/a (CPT) | ⏸️ a 2B-512 seat of `8773440` logged **0 steps**. Seeded from 2B-512 step-46429. |
 | [2B 512N constlr fork](agpt/2b/n512/README.md) | **idle** since 08-26 | **21,307**[^head] | 2.745 | n/a (fork) | ⏸️ a 2B-512 seat of `8773440` ran **+504 steps, 2.74535 -> 2.73836**. Constant-LR fork branched at step 9,201. |
