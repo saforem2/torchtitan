@@ -27,6 +27,8 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-11-14 | [Production Training Runs — Aurora](./production/README.md) |
 | 2026-11-14 | [AuroraGPT-2B post-training: complete status](./production/POST-TRAINING-2B.md) |
 | 2026-11-14 | [Development Journal](./journal.md) |
+| 2026-11-14 | [Frameworks RC (oneAPI 2026.1.0) -- validation status](./guides/frameworks-rc-validation.md) |
+| 2026-11-14 | [Pre-Training AuroraGPT with TorchTitan + 🍋 ezpz](./README.md) |
 | 2026-11-12 | [FineWeb-Edu 60/40 kind-shift: the next pre-training lever for agpt-2B](./production/sft/fineweb-edu-60-40-kind-shift.md) |
 | 2026-11-12 | [Production SFT](./production/sft/README.md) |
 | 2026-11-12 | [Production RL with Monarch, TorchStore, and vLLM on XPU](./production/rl/monarch.md) |
@@ -45,14 +47,14 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-11-01 | [AuroraGPT-2B: same-allocation MDS and TorchTitan comparison](./experiments/agpt/sunspot/2026-11-01-paired-performance.md) |
 | 2026-11-01 | [AuroraGPT-2B MDS/TT: recovered comparison and handoff audit](./experiments/agpt/sunspot/2026-11-01-handoff-audit.md) |
 | 2026-11-01 | [AuroraGPT-2B: replicated TT versus MDS ZeRO-0](./experiments/agpt/sunspot/2026-10-31-replicated-comparison.md) |
-| 2026-10-31 | [Production Training Runs -- Polaris (A100)](./production/polaris/README.md) |
-| 2026-10-31 | [Sunspot AuroraGPT-2B: Megatron-DeepSpeed versus TorchTitan](./experiments/agpt/sunspot/2026-10-29-native-checkpoint-closure.md) |
 
 <details>
 <summary>Next 25 (#26-50)</summary>
 
 | Modified | Doc |
 |---------:|-----|
+| 2026-10-31 | [Production Training Runs -- Polaris (A100)](./production/polaris/README.md) |
+| 2026-10-31 | [Sunspot AuroraGPT-2B: Megatron-DeepSpeed versus TorchTitan](./experiments/agpt/sunspot/2026-10-29-native-checkpoint-closure.md) |
 | 2026-10-31 | [Why the MDS ZeRO1 run outperformed TorchTitan HSDP](./experiments/agpt/sunspot/2026-10-24-zero1-hsdp-diagnosis.md) |
 | 2026-10-31 | [Sunspot FLAT runs: timing complete, checkpoint weights differ](./experiments/agpt/sunspot/2026-10-24-matched-flat-execution.md) |
 | 2026-10-31 | [AuroraGPT-2B: TorchTitan and Megatron-DeepSpeed on Sunspot](./experiments/agpt/sunspot/2026-10-23-compile-sharding.md) |
@@ -68,7 +70,6 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-10-29 | [Matched dense 2B and MoE 12B2A HF evaluation](./experiments/moe/aurora/2026-10-06-hf-dense-moe-paired.md) |
 | 2026-10-29 | [MoE (Mixture of Experts) Benchmarks](./experiments/moe/README.md) |
 | 2026-10-29 | [Mano LR finder at 30B (Sunspot, 2026-08-23)](./experiments/lr-finder/agpt/2026-08-23-30b-mano-sunspot.md) |
-| 2026-10-29 | [Pre-Training AuroraGPT with TorchTitan + 🍋 ezpz](./README.md) |
 | 2026-10-19 | [Follow-up umbrella: Monday boost (>2048N) — 2026-10-20](./production/followup-umbrella-boost-20261020.md) |
 | 2026-10-16 | [Ten days ending 2026-09-26](./summaries/2026-09-26.md) |
 | 2026-10-16 | [Production Training — agpt 2B @ 256 nodes](./production/agpt/2b/n256/README.md) |
@@ -77,7 +78,6 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-10-16 | [Evaluation Results — agpt 20B](./evals/agpt/20b/README.md) |
 | 2026-10-15 | [BlendCorpus restarts replay the data stream](./guides/blendcorpus-resume-position.md) |
 | 2026-10-01 | [Sunspot multi-host Monarch, TorchStore, and vLLM validation](./experiments/2026-09-25-sunspot-multihost-rl-validation.md) |
-| 2026-09-30 | [Summaries](./summaries/README.md) |
 
 </details>
 <!-- END recently-updated (auto-generated) -->
