@@ -8,12 +8,23 @@
 #PBS -j oe
 # Fixed-LR convergence on Sirius — validates finder suggested LRs at 1000 steps
 # constant LR (NOT LR finder). Model at GBS=128 seq 4096, 8N 32 GPUs.
+# GBS tokens = GBS*4096 (GBS=128 -> 524288 tokens/step, seq_len 4096).
+# Config: agpt_${MODEL_SIZE}_olmo2tok_smoke at seq_len 4096
+# Launch: ezpz launch --nproc 32 --nproc_per_node 4 --no-transfer with
+#   python -m torchtitan.experiments.ezpz.train --module ezpz.agpt
+#   --config agpt_${MODEL_SIZE}_olmo2tok_smoke --optimizer adamw
+#   --training.steps 1000 --training.num-tokens-per-microbatch-per-dp-rank 4096
+#   --training.num-tokens-per-train-step GBS*4096 --training.max-context-length 4096
+# Fixed LR via: --optimizer adamw --optimizer.lr=${FIXED_LR}
+# TODO: wire --optim.lr via TT_CONFIG_JSON or config_registry override
+# Default FIXED_LR examples: 5B 2.48e-04 / 10B 1.28e-04
+# Outputs: tee outputs/fixed_lr_${MODEL_SIZE}_${FIXED_LR}_${PBS_JOBID}.log
+# (actual log is ${OUT}/run.log which resolves to that path; see OUT/LOG below)
 # Usage: FIXED_LR=2.48e-04 MODEL_SIZE=5b qsub -v FIXED_LR=2.48e-04,MODEL_SIZE=5b torchtitan/experiments/ezpz/scripts/submit_fixed_lr_sirius.sh
 # Or test locally: DRY_RUN=1 bash torchtitan/experiments/ezpz/scripts/submit_fixed_lr_sirius.sh
 #
 # Defaults: 5B 2.48e-04 / 10B 1.28e-04 (Sirius GBS=128 Nov 11-12 findings).
 # Pattern mirrors fixed_lr_30b_sunspot.pbs (validated 30B fixed-LR validation).
-set -o pipefail
 cd "${PBS_O_WORKDIR:-$(pwd)}" || exit 1
 
 if [[ -f "${PBS_O_WORKDIR:-.}/.ezpz-utils-cache/ezpz-utils.sh" ]]; then
