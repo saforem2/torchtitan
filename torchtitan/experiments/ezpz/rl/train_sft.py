@@ -610,38 +610,35 @@ def main() -> None:
                 for column in ("assistant_masks", "completion_mask")
                 if column in dataset.column_names
             ]
-            # FAST PATH: vectorized batch labels build. Python listcomp over
-            # 2.7M x 8192 = 22B inner iterations never flushes (spool frozen
-            # at 16:36 on 12483770, 22 min stale, cput 14s/24m wall). Use
-            # numpy per-batch (batch_size=2048 -> 1320 batches) so each batch
-            # does one 2048x8192 allocation + where in C. No num_proc arg:
-            # num_proc=1 still spawns a Manager on HSN and EOFError's all 12
-            # ranks on PVC/FLAT (12483758/63). Omit it for single-process map.
-            # Fallback to pure-Python add_column if numpy missing (unlikely).
+            # FAST PATH: vectorized labels build. Two prior failures:
+            #   - pure-Python add_column: 2.7M x 8192 = 22B iters, spool frozen at 16:36, 22m stale (12483770 Exit 143)
+            #   - dataset.map w/ num_proc=1 still spawns Manager on HSN -> EOFError on all 12 ranks (12483758/63, 12483786)
+            # Fix: bypass datasets.map entirely. Use add_column with numpy-batched construction (no Manager).
             try:
                 import numpy as np
 
-                def _batch_labels(batch):
-                    ids = batch["input_ids"]  # list[list[int]] len=batch_size
-                    masks = batch[mask_column]
-                    # Stack to 2D (batch_size, seq_len) in one alloc each.
-                    # seq_len is 8192 packed; batch 2048 -> 16M ints ~64MB.
-                    ids_arr = np.array(ids, dtype=np.int32)
-                    masks_arr = np.array(masks, dtype=np.bool_)
-                    labels_arr = np.where(masks_arr, ids_arr, -100)
-                    return {"labels": labels_arr.tolist()}
-
-                # beacon so log visibly progresses during ~2-4 min build
                 _t0 = __import__("time").monotonic()
                 log.info(
-                    f"[rank {rank}] building labels via vectorized map "
-                    f"(2.7M rows, batch=2048, expect ~2-4 min)..."
+                    f"[rank {rank}] building labels via numpy add_column "
+                    f"(2.7M rows, batched 2048, expect ~2-4 min)..."
                 )
-                dataset = dataset.map(
-                    _batch_labels, batched=True, batch_size=2048
-                )
+                # Build labels_col in numpy-batched chunks to bound peak RAM.
+                # Each batch: 2048 x 8192 int32 = 64 MB for ids + masks + labels ~192 MB.
+                _batch = 2048
+                labels_col: list[list[int]] = []
+                _n = len(dataset)
+                for _s in range(0, _n, _batch):
+                    _e = min(_s + _batch, _n)
+                    _ids = dataset[_s:_e]["input_ids"]
+                    _masks = dataset[_s:_e][mask_column]
+                    ids_arr = np.array(_ids, dtype=np.int32)
+                    masks_arr = np.array(_masks, dtype=np.bool_)
+                    labels_col.extend(np.where(masks_arr, ids_arr, -100).tolist())
+                    if _s % (20 * _batch) == 0:
+                        log.info(f"[rank {rank}] labels progress {_e}/{_n} ({100*_e/_n:.1f}%)")
+                dataset = dataset.add_column("labels", labels_col)
                 log.info(
-                    f"[rank {rank}] vectorized labels done in "
+                    f"[rank {rank}] labels add_column done in "
                     f"{__import__('time').monotonic()-_t0:.0f}s"
                 )
             except ImportError:
