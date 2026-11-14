@@ -1,5 +1,19 @@
 # Development Journal
 
+## 2026-11-14: Monarch GRPO trains on XPU and CUDA after the upstream sync
+
+Two-host Monarch GRPO (trainer host 0, vLLM generator host 1, TorchStore weight sync), AGPT-2B LoRA on GSM8K, 3 steps, on the `8e63247c` sync branch (#79). All three exit `0`; validation response length `117.9` at steps 0 and 3 on each.
+
+| Run | loss (steps 1-3) | reward (steps 1-3) | wall |
+|---|---|---|---|
+| Sirius `33518` (A100) | `0.0022` / `-0.037` / `0.062` | `0.43` / `0.54` / `0.44` | ~18 min |
+| Sunspot `12483743` | `0.024` / `0.054` / `0.093` | `0.47` / `0.52` / `0.42` | `851` s |
+| Aurora `9089138` | `0.017` / `0.082` / `0.11` | `0.47` / `0.46` / `0.48` | `1150` s |
+
+XPU blockers, in the order they surfaced: vLLM `PassConfig(enable_sp)` (`bd525d7f9`); `vllm-xpu-kernels` `4e38707` enables MHC/MQA-logits/GDN bindings on a PVC build but compiles them only for Xe2, so `_xpu_C` fails to import and vLLM picks no device (rebuilt wheel, `build_vllm_xpu_kernels_pvc.pbs`); vLLM `is_quantized_kv_cache` missing from the XPU vLLM (`bd2e0a95f`); `torchvision` for vLLM's warmup (`0.30.0.dev20261007+xpu`, `--no-deps`). CUDA needed three: workers advertised by IP on multi-NIC hosts, no `MPI_Init` in actors, rank 1 exits without `MPI_Finalize`.
+
+Open: XPU generator weight fetch is ~73 s per sync on both machines (CUDA `3.9` s). Smoke launcher: `rl/scripts/grpo/multihost_grpo_e2e.pbs`. Details: [upstream-sync](upstream-sync.md).
+
 ## 2026-11-14: Sirius hedge — 5B to 7091, 10B allocation exhausted
 
 `33487` `5B 2N` `R` `4900->7091` steady `loss 6.05->5.90 g6.3`, `tps 416 MFU 4.27%`, `71` ckpts (`step-600..7092`, `3.6T`) — +2191 steps since `15:18 UTC` Nov 13 restart, ~1h walltime left on `6h` slice. `33488` `10B 8N` `32 GPUs` `FSDP` proof done (`12.00->6.19` over `200` steps, `tps 182`), `Gloo` node crash `x3200c0s13b0` at `step 200` (`FAILOVER exhausted`), `ckpt step-100 106G` intact; resubmit rejected `No active allocation found for project AuroraGPT and resource sirius` — allocation spent. Polaris `7832130 Q 18N small` still `Q` `13:03 UTC` (`83 small / 43 medium` queued, down from `91/52` but `Not enough free nodes`). `5B` remains only forward mover until Polaris drains or allocation renewed.
