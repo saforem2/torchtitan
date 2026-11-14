@@ -33,7 +33,7 @@ descends — attention/FFN are unfrozen — but the divergence shows up at
 
 ### 20B
 
-![20B v1 vs v2 overlay](figures/overlay_20b_v1_vs_v2.png)
+![20B v1 vs v2 overlay](figures/overlay_20b_v1_vs_v2.svg)
 
 Regenerate via:
 

@@ -60,10 +60,31 @@ Full detail: [Sirius hedge report](../sirius-olmo3-5b-10b.md).
 |---|---|---|---|
 | `33469` | `1 -> 200` | `12.00 -> 6.38` | `E 143`, no spare node (`FAILOVER STOP exhausted`); `step-100` saved |
 | `33488` | `200` steps | `12.00 -> 6.19` | Gloo crash on `x3200c0s13b0` at step 200; resubmit rejected (allocation spent) |
-| `33527` | fresh `1 -> 197+` | `12.03 -> 6.31` | running at `15:44 UTC` Nov 14 under `-A datascience`; earlier `step-100` was corrupt (no `.metadata`) |
+| `33526` | fresh `1 -> 2` | `12.01 -> 11.86` | stopped |
+| `33527` | fresh `1 -> 200` | `12.03 -> 6.33` | died at step 200 |
+| `33528` | fresh `1 -> 19` | `12.02 -> 8.64` | stopped |
+| `33529` | fresh `1 -> 200` | `12.01 -> 6.30` | died at step 200 |
+| `33537` | fresh `1 -> 197+` | `12.02 -> 6.35` | running Nov 14 18:43 |
+
+**Every attempt dies at step 200.** `33469`, `33488`, `33527` and `33529` each reached
+exactly step 200 and stopped with `FAILOVER STOP`. In `33529` the traceback is in
+the async checkpoint path (`_wait_for_saving` -> DCP `save` -> `all_reduce("write")`
+-> Gloo `gather_object`): `Connection closed by peer`, then other ranks exit 1 or die
+on signal 15. Each restart begins at step 1 because the earlier `step-100` was left
+corrupt, so the run never gets past 200. Cause not established; one candidate is
+host memory while staging the ~100 GB checkpoint. A synchronous-checkpoint run would
+show whether the async path is the trigger.
 
 Throughput 182-186 TPS/GPU, MFU 3.8%. The run shows FSDP2 at 32 GPUs trains this
 geometry without the uneven-sharding error, which the Polaris 32N job needs.
+
+Charts (Sirius 8N, current attempt `e4ejewmg`, from W&B via `plot_production_wandb.py`):
+
+![Sirius 8N, current attempt `e4ejewmg`: loss, throughput, MFU](n8/figures/production_10b_sirius_8n.svg)
+
+![Sirius 8N, current attempt `e4ejewmg`: grad norm, learning rate, max loss](n8/figures/training_diagnostics_10b_sirius_8n.svg)
+
+![Sirius 8N, current attempt `e4ejewmg`: tokens vs time](n8/figures/tokens_vs_time_10b_sirius_8n.svg)
 
 ## Polaris: 16N and 32N on Dolma
 

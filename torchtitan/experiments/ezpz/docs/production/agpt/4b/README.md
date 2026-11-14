@@ -58,6 +58,14 @@ Nov 11, ~5.2 s/step. Logged values from
 
 Memory 36.5 GiB per tile (57%). Steps 1-10 include compile and warmup.
 
+Charts (Aurora 512N, from W&B via `plot_production_wandb.py`):
+
+![Aurora 512N: loss, throughput, MFU](n512/figures/production_4b_v2_512n.svg)
+
+![Aurora 512N: grad norm, learning rate, max loss](n512/figures/training_diagnostics_4b_v2_512n.svg)
+
+![Aurora 512N: tokens vs time](n512/figures/tokens_vs_time_4b_v2_512n.svg)
+
 - It stays on the **sorted** manifest to keep its data cursor valid. With that
   order every rank reads all of its non-code files before any code: no starcoder
   until each rank's fourth file. New runs use the seed-0 shuffle
@@ -82,9 +90,24 @@ Started while Polaris could not place its jobs. Full detail:
 |---|---|---|---|
 | `33471` | `2900 -> 5058` | `6.50 -> 6.14` | walltime |
 | `33487` | `5058 -> 7092` | `6.05 -> 5.90` | walltime; last good checkpoint `step-7000` |
-| `33525` | `7000 -> 7454+` | `5.97 -> 6.02` | running at `15:44 UTC` Nov 14, `-A datascience` |
+| `33525` | `7001 -> 8551` | `5.97 -> 6.07` | ended Nov 14 18:43; `-A datascience` |
 
+Earlier legs: `33376` (1-1080), `33456` (901-1260), `33460` (1101-3029). W&B runs, in
+resume order: `jm4cpxhz`, `senzi8jf`, `byb8t878`, `8fq5kilz`, `dorbtxse`, `m1vycznv`.
 Throughput 409-416 TPS/GPU, MFU 4.2-4.27%.
+
+**Not converging like Aurora.** Grad norm sits at 10-100 from step ~800 on (Aurora
+512N: ~1 falling to 0.35), and loss has stayed near 6 for 5,000 steps (Aurora: 3.3
+at step 2,698). Inference, not tested: the LR `6.58e-4` comes from the GBS=6144
+finder basin and this run uses GBS 8.
+
+Charts (Sirius 2N, from W&B via `plot_production_wandb.py`):
+
+![Sirius 2N: loss, throughput, MFU](n2/figures/production_4b_sirius_2n.svg)
+
+![Sirius 2N: grad norm, learning rate, max loss](n2/figures/training_diagnostics_4b_sirius_2n.svg)
+
+![Sirius 2N: tokens vs time](n2/figures/tokens_vs_time_4b_sirius_2n.svg)
 
 ## Polaris: 16N and 32N on Dolma
 
