@@ -23,9 +23,13 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | Modified | Doc |
 |---------:|-----|
 | 2026-11-14 | [Upstream Sync Log](./upstream-sync.md) |
+| 2026-11-14 | [Production Training Runs -- Polaris (A100)](./production/polaris/README.md) |
 | 2026-11-14 | [Continued Pre-Training (CPT) — 2B olmo x dolmino mixing-ratio sweep](./production/cpt/README.md) |
 | 2026-11-14 | [Sirius hedge: agpt 5B and 10B on the OLMo-3 tokenizer (Nov 2026)](./production/agpt/sirius-olmo3-5b-10b.md) |
 | 2026-11-14 | [Production Training — Dense (agpt) Models](./production/agpt/README.md) |
+| 2026-11-14 | [Production Training — agpt 20B @ 512 nodes](./production/agpt/20b/n512/README.md) |
+| 2026-11-14 | [Production Training — agpt 20B @ 256 nodes](./production/agpt/20b/n256/README.md) |
+| 2026-11-14 | [Production Training — agpt 20B](./production/agpt/20b/README.md) |
 | 2026-11-14 | [Production Training Runs — Aurora](./production/README.md) |
 | 2026-11-14 | [AuroraGPT-2B post-training: complete status](./production/POST-TRAINING-2B.md) |
 | 2026-11-14 | [Development Journal](./journal.md) |
@@ -43,19 +47,18 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-11-12 | [AuroraGPT MMLU sits at chance because the models answer with a letter prior](./evals/mmlu-letter-prior-at-chance.md) |
 | 2026-11-12 | [Evaluation Results](./evals/README.md) |
 | 2026-11-05 | [SFT recipe: agpt-2b-v2-256n-step92859 x tulu_math_uc_mix](./production/sft/agpt/2b-v2-256n/tulu_math_uc_mix/README.md) |
-| 2026-11-02 | [AuroraGPT-2B: recovered Sunspot MDS/TT comparison](./experiments/agpt/sunspot/2026-11-02-recovery-comparison.md) |
-| 2026-11-02 | [agpt (Dense AuroraGPT) Benchmarks](./experiments/agpt/README.md) |
-| 2026-11-01 | [Sunspot startup isolation: MDS/TT continuation](./experiments/agpt/sunspot/2026-11-01-startup-incident.md) |
-| 2026-11-01 | [AuroraGPT-2B: same-allocation MDS and TorchTitan comparison](./experiments/agpt/sunspot/2026-11-01-paired-performance.md) |
 
 <details>
 <summary>Next 25 (#26-50)</summary>
 
 | Modified | Doc |
 |---------:|-----|
+| 2026-11-02 | [AuroraGPT-2B: recovered Sunspot MDS/TT comparison](./experiments/agpt/sunspot/2026-11-02-recovery-comparison.md) |
+| 2026-11-02 | [agpt (Dense AuroraGPT) Benchmarks](./experiments/agpt/README.md) |
+| 2026-11-01 | [Sunspot startup isolation: MDS/TT continuation](./experiments/agpt/sunspot/2026-11-01-startup-incident.md) |
+| 2026-11-01 | [AuroraGPT-2B: same-allocation MDS and TorchTitan comparison](./experiments/agpt/sunspot/2026-11-01-paired-performance.md) |
 | 2026-11-01 | [AuroraGPT-2B MDS/TT: recovered comparison and handoff audit](./experiments/agpt/sunspot/2026-11-01-handoff-audit.md) |
 | 2026-11-01 | [AuroraGPT-2B: replicated TT versus MDS ZeRO-0](./experiments/agpt/sunspot/2026-10-31-replicated-comparison.md) |
-| 2026-10-31 | [Production Training Runs -- Polaris (A100)](./production/polaris/README.md) |
 | 2026-10-31 | [Sunspot AuroraGPT-2B: Megatron-DeepSpeed versus TorchTitan](./experiments/agpt/sunspot/2026-10-29-native-checkpoint-closure.md) |
 | 2026-10-31 | [Why the MDS ZeRO1 run outperformed TorchTitan HSDP](./experiments/agpt/sunspot/2026-10-24-zero1-hsdp-diagnosis.md) |
 | 2026-10-31 | [Sunspot FLAT runs: timing complete, checkpoint weights differ](./experiments/agpt/sunspot/2026-10-24-matched-flat-execution.md) |
@@ -75,9 +78,6 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-10-19 | [Follow-up umbrella: Monday boost (>2048N) — 2026-10-20](./production/followup-umbrella-boost-20261020.md) |
 | 2026-10-16 | [Ten days ending 2026-09-26](./summaries/2026-09-26.md) |
 | 2026-10-16 | [Production Training — agpt 2B @ 256 nodes](./production/agpt/2b/n256/README.md) |
-| 2026-10-16 | [Production Training — agpt 20B @ 512 nodes](./production/agpt/20b/n512/README.md) |
-| 2026-10-16 | [Production Training — agpt 20B @ 256 nodes](./production/agpt/20b/n256/README.md) |
-| 2026-10-16 | [Evaluation Results — agpt 20B](./evals/agpt/20b/README.md) |
 
 </details>
 <!-- END recently-updated (auto-generated) -->
@@ -93,8 +93,8 @@ going?" Tracking is per-model and per-node-count.
 | [Dense (agpt) Production](./production/agpt/README.md) | 2B / 20B / 80B chains, v1-vs-v2 overlays | 2026-11-14 |
 | [2B 256N](./production/agpt/2b/n256/README.md) | step-**92,859** (4.674T tokens, 100.0% of 4.67T), loss 2.6524. | 2026-10-16 |
 | [2B 512N](./production/agpt/2b/n512/README.md) | step-**46429** (4.67T tokens, 100.0% of 4.67T), loss 2.6869. | 2026-09-30 |
-| [20B 512N](./production/agpt/20b/n512/README.md) | step-**11,100** (11,100 x 12,288 x 8,192 = **1,117.4B tokens**), loss 2.31773. | 2026-10-16 |
-| [20B 256N](./production/agpt/20b/n256/README.md) | step-**17,500** (880.8B tokens, 18.8% of 4.67T), loss 2.41783. | 2026-10-16 |
+| [20B 512N](./production/agpt/20b/n512/README.md) | step-**10,800** (10,800 x 12,288 x 8,192 = **1,087.2B tokens**), loss 2.4661. | 2026-11-14 |
+| [20B 256N](./production/agpt/20b/n256/README.md) | step-**21,100** (21,100 x 6,144 x 8,192 = **1,062.0B tokens**), loss 2.4434. | 2026-11-14 |
 | [agpt 80B](./production/agpt/80b/README.md) | **Blocked at scale by a high-dp NaN; root cause unknown.** Optimizer-independent (SophiaG 512N, mano 62N); the earlier "bf16 residual-stream overflow" diagnosis is refuted ([what we know](./guides/known-bugs/80b-nan-what-we-know.md)). fp32 activations prevent it at ~3.4x cost; fp32-residual alone still NaNs at dp=192; no live 80B production, fp32-residual work dormant. Wall 2 (256N init segfault) separate + open. | 2026-10-29 |
 | [80B 512N NaN incident (2026-07-03)](./experiments/agpt/aurora/20260703-80b-512n-sophiag-nan.md) | Incident record of the 512N NaN + NaN-abort guard. NOTE: the SophiaG-Hessian attribution was later disproven (2026-07-14, task #21) -- the NaN is optimizer-independent; the follow-on residual-overflow diagnosis is also refuted, root cause unknown (see `guides/known-bugs/80b-nan-what-we-know.md`). | 2026-07-24 |
 | [20B 1024N](./production/agpt/20b/n1024/README.md) | First attempt (8463183) crashed at startup; not retried | 2026-06-24 |
