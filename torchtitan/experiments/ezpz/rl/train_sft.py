@@ -610,35 +610,36 @@ def main() -> None:
                 for column in ("assistant_masks", "completion_mask")
                 if column in dataset.column_names
             ]
-            # FAST PATH: vectorized labels build. Two prior failures:
-            #   - pure-Python add_column: 2.7M x 8192 = 22B iters, spool frozen at 16:36, 22m stale (12483770 Exit 143)
-            #   - dataset.map w/ num_proc=1 still spawns Manager on HSN -> EOFError on all 12 ranks (12483758/63, 12483786)
-            # Fix: bypass datasets.map entirely. Use add_column with numpy-batched construction (no Manager).
+            # FAST PATH: vectorized labels build. Failures so far:
+            #   - pure-Python add_column: 2.7M x 8192 = 22B iters, spool frozen 22m (12483770 Exit 143)
+            #   - dataset.map w/ num_proc=1: still spawns Manager on HSN -> EOFError (12483758/63, 12483786)
+            #   - np.array on batched list[list[int]]: ragged lengths (last seq 8134 vs 8192) -> inhomogeneous (12483800)
+            # Fix: per-row numpy (still 2.7M allocs but in C) via add_column with pure-Python outer loop.
+            # This avoids Manager AND handles ragged tails. Outer loop 2.7M is acceptable (~40-60s on UAN;
+            # on compute with numpy int32 it vectorizes the inner 8192 in C so real cost is Python for-loop
+            # overhead only, ~8-10 min worst case — still within 12h, and no SIGBUS). Fallback if numpy absent.
             try:
                 import numpy as np
 
                 _t0 = __import__("time").monotonic()
                 log.info(
-                    f"[rank {rank}] building labels via numpy add_column "
-                    f"(2.7M rows, batched 2048, expect ~2-4 min)..."
+                    f"[rank {rank}] building labels via numpy-per-row "
+                    f"({len(dataset)} rows, expect ~5-8 min)..."
                 )
-                # Build labels_col in numpy-batched chunks to bound peak RAM.
-                # Each batch: 2048 x 8192 int32 = 64 MB for ids + masks + labels ~192 MB.
-                _batch = 2048
                 labels_col: list[list[int]] = []
-                _n = len(dataset)
-                for _s in range(0, _n, _batch):
-                    _e = min(_s + _batch, _n)
-                    _ids = dataset[_s:_e]["input_ids"]
-                    _masks = dataset[_s:_e][mask_column]
-                    ids_arr = np.array(_ids, dtype=np.int32)
-                    masks_arr = np.array(_masks, dtype=np.bool_)
-                    labels_col.extend(np.where(masks_arr, ids_arr, -100).tolist())
-                    if _s % (20 * _batch) == 0:
-                        log.info(f"[rank {rank}] labels progress {_e}/{_n} ({100*_e/_n:.1f}%)")
+                for _i, _ex in enumerate(dataset):
+                    _ids = np.array(_ex["input_ids"], dtype=np.int32)
+                    _mask = np.array(_ex[mask_column], dtype=np.bool_)
+                    _ids[~_mask] = -100
+                    labels_col.append(_ids.tolist())
+                    if _i and _i % 500000 == 0:
+                        log.info(
+                            f"[rank {rank}] labels progress {_i}/{len(dataset)} "
+                            f"({100*_i/len(dataset):.0f}%, {__import__('time').monotonic()-_t0:.0f}s)"
+                        )
                 dataset = dataset.add_column("labels", labels_col)
                 log.info(
-                    f"[rank {rank}] labels add_column done in "
+                    f"[rank {rank}] labels done in "
                     f"{__import__('time').monotonic()-_t0:.0f}s"
                 )
             except ImportError:
@@ -647,8 +648,6 @@ def main() -> None:
                     for ex in dataset
                 ]
                 dataset = dataset.add_column("labels", labels_col)
-            for col in mask_columns:
-                dataset = dataset.remove_columns(col)
             log.info(
                 f"[rank {rank}] built labels from {mask_column} for "
                 f"{len(dataset)} pre-tokenized samples"
