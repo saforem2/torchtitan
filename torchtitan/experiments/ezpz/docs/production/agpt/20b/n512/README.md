@@ -1,10 +1,30 @@
 # Production Training — agpt 20B @ 512 nodes
 
-> **Last updated:** 2026-09-30
+> **Last updated:** 2026-11-14
 >
 > **This is the canonical 20B production chain.**
 >
-> **Status: NOT RUNNING.** Umbrella `8870515` advanced the constant-LR fork to
+> **Current status (2026-11-14): queued, resumable head `step-10800` on the
+> fixedpos fork.** `9076330` (520 nodes, `small`, 12h) waits to resume it.
+>
+> - **Oct 18-19, umbrella `8938159`:** the constant-LR chain went NaN on every
+>   step from 11,101 through 11,148 (`loss=nan grad_norm=nan`, ~20% MFU), with
+>   the optimizer state corrupted rather than an infrastructure fault. Its
+>   step-11,200 save is empty (no shards, no `.metadata`). The last good
+>   checkpoint on that chain stays `step-11100`.
+> - **Oct 20, fixedpos fork (PR #66):** every 20B checkpoint had stored
+>   `consumed_samples=0`, so each restart replayed the data stream from sample 0
+>   ([resume-position analysis](../../../../guides/blendcorpus-resume-position.md)). The chain was forked from `step-10800`
+>   into `...-constlr-from9000-fixedpos` with the data position restored
+>   ([journal](../../../../journal.md#2026-10-20-aurora----umbrella-nan-fixedpos-fork-boost-queued)). The head is behind 11,100 on purpose.
+> - **Nov 9-11, umbrella `9053470`:** trained 10,801 -> 10,882 on
+>   `frameworks/2026.1.0` (loss 2.538 -> 2.462, 278 TPS/GPU, 13.9% MFU), hung
+>   once after 10,854, and saved nothing new ([write-up](../../../2026-11-11-umbrella-2088n.md)).
+>
+> The charts below include the NaN leg, so their "step 11,147" is the last logged
+> step, not the resumable head.
+>
+> **Previous status (2026-09-30): NOT RUNNING.** Umbrella `8870515` advanced the constant-LR fork to
 > a disk-verified **step 11,100** (**1,117.4B tokens**). It logged through step
 > 11,190, but step 11,200 is an empty placeholder and is not resumable. Tail
 > eval `8880564` finished with PBS exit 0 and a fresh seven-measurement result:
@@ -172,17 +192,21 @@ optimizer-update or checkpoint acceptance gate can run.
 | `8773440` t1 | 2026-08-26 | 12h | **0 steps** | -- | -- | -- | **Never started.** Both 512N seats in this umbrella failed to launch; the reason was not established at the time. The 20B-256 seat in the same job did train. |
 | umbrellas `8784462`..`8812215` t1 | 2026-09-05..12 | -- | 9,001 -> **10,593** | 2.26709 -> **2.41296** | -- | -- | Constant-LR fork legs. `8784462`, `8808931`, and `8812215` advanced the persisted head through step 10,500; `8784460` and `8808932` made no progress after startup failures. |
 | `8828611` t1 | 2026-09-16/17 | -- | 10,501 -> **10,905** | 2.26607 -> **2.31773** | -- | -- | Three attempts; the first two logged 10 and 41 steps without a save, and attempt 3 persisted step 10,900. |
-| `8828612` t1 | 2026-09-19/20 | -- | **0 steps** | -- | -- | -- | **Latest umbrella outcome.** Both attempts died during startup with `std::bad_alloc`; the checkpoint head remained 10,900. The sibling 20B-256 seat advanced to persisted step 16,000. |
+| `8828612` t1 | 2026-09-19/20 | -- | **0 steps** | -- | -- | -- | Both attempts died during startup with `std::bad_alloc`; the checkpoint head remained 10,900. The sibling 20B-256 seat advanced to persisted step 16,000. |
+| `8870515` t1 | to 2026-09-25 | -- | 10,901 -> 11,190 | -- | -- | -- | Persisted step-11,100 (Sep 25); the step-11,200 save was interrupted. |
+| `8938159` | 2026-10-18/19 | 24h | 11,101 -> 11,148 | **nan** | -- | ~20% | NaN every step, optimizer corrupted; step-11,200 empty. Led to the fixedpos fork from step-10,800 ([journal](../../../../journal.md#2026-10-20-aurora----umbrella-nan-fixedpos-fork-boost-queued)). |
+| `9053470` t0 | 2026-11-09/11 | 4h26m (umbrella) | 10,801 -> 10,882 (fixedpos) | 2.538 -> 2.462 | 278 | 13.9% | **Latest outcome.** Hung once after 10,854; watchdog restart from step-10,800; no new checkpoint ([write-up](../../../2026-11-11-umbrella-2088n.md)). |
 
-**Latest checkpoint:** step-11,100 in the constant-LR fork (disk-audited on
-Aurora 2026-09-30; umbrella `8870515` logged through step 11,190)
+**Latest checkpoint:** step-10,800 in the fixedpos fork (disk-audited on Aurora
+2026-11-14). The previous constant-LR chain's last good checkpoint is step-11,100;
+its step-11,200 is an empty interrupted save.
 
-**Cumulative steps:** 11,100 (disk-confirmed)
+**Cumulative steps:** 10,800 resumable (disk-confirmed); 11,148 logged
 
-**Tokens consumed:** 11,100 x 12,288 x 8,192 = **1,117.4B tokens** (23.9% of 4.67T target)
+**Tokens consumed:** 10,800 x 12,288 x 8,192 = **1,087.2B tokens** (23.3% of 4.67T target)
 
-**Loss:** 2.31773 (last retained published value, step 10,905). This is a
-single-step value from the current constant-LR fork.
+**Loss:** 2.4661, the last value W&B holds for the Nov 11 fixedpos runs
+(`2gzsirm3`, `ez5oe0r6`). A single-step value.
 
 ### Recovery
 
