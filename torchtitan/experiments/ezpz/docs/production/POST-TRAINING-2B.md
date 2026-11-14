@@ -1,8 +1,16 @@
 # AuroraGPT-2B post-training: complete status
 
-**Last updated: 2026-11-05.** Every number is quoted from a run doc — links go to the source. Most recent first.
+**Last updated: 2026-11-12.** Every number is quoted from a run doc — links go to the source. Most recent first.
 
-> **One-line status:** B2 (`checkpoint-93`, 0.205 GSM8K-CoT) is still the best CoT model. Every attempt to beat it — single-stage rebuilds (B3/B4), and now more epochs on the same narrow data (B2v2) — made things worse. RL perfects format, not accuracy. The next lever is broader CoT data (pre-tokenized OpenThoughts distill mix), not more narrow SFT.
+> **One-line status (as of 2026-11-12):** B2 (`checkpoint-93`, 0.205 GSM8K-CoT) still the best CoT model. CPT-FW-Edu 4N at 34.3k/190k (17.8% budget, `12483437 R` MFU 17.1% healthy) via `afterany 12483446 H` to 50k. Pretok **landed** `12483443`: `91,481 -> 36,934 packed @8192` (3.4G, `/tegu/datasets/agpt2b-distill-cot-mix-len8192`, mix-cache `cba5c64` hit) — broad SFT unblocked but **parked to CPT 50k** per `POST-TRAINING-PLAN.md` phase 2.
+
+---
+
+## 2026-11-12 — CPT 34.3k/190k healthy + pretok landed (broad SFT parked to 50k)
+
+CPT-FW-Edu 4N (`agpt_2b_mds_mix_owm_edu_6040` 60/40 FW-Edu, `PPN=8 GBS=64 seq=8192`, 100B=190734 steps) now `12483437 R 00:34` `step 34298 loss 1.93 MFU 17.1%` `tps 4,571` — **17.8% of 100B budget**, healthy (MFU recovered 13.4%->17.1% across chain `12483388 step 26742` -> `12483416 32800->33303` -> `12483437`). Chaining every `02:00` via `afterany 12483446 H` to 50k then general SFT; latest on disk `step-34200`. Eval at `step-17000` was `0.000` GSM8K-CoT by design (pure CPT, no `chat_template`) vs B2 `0.205` which required stage-1 SFT first — not a regression. Narrow SFT-on-CPT (`agpt2b_b2v2_distill_cot_2n.sh` on CPT-17000 HF, LR 2e-5 3ep GBS 384) scored **0.015** vs B2 `0.165` — format collapse on FW-Edu-shifted manifold, hparams not CPT evidence.
+
+Pretok **landed**: `_pretokenize_distill_cot_mix_1n.sh` job `12483443` `Exit` (NPROC=1, `rl-monarch-torch214-locality-20261001`, bypass `ezpz_setup_job` MPI wrapping, `LOG_DIR=logs/pretokenize-distill-cot-mix-<id>`) — `91,481 rows -> 36,934 packed seqs @8192` (3.4G, `dataset_info.json` + 8x `data-*.arrow`), mix-cache **hit** `cba5c64` in 5.8s (6 prior jobs e.g. `12483441` segfaulted at NPROC=1 via `3553055 Segmentation fault` until VENV-path fix). Broad SFT via `sft_distill_cot_4n.sh --pretokenized_dataset /tegu/datasets/agpt2b-distill-cot-mix-len8192` now **ready but parked** to CPT 50k per `POST-TRAINING-PLAN.md` phase ordering — no training until 50k checkpoint converts to HF.
 
 ---
 
@@ -21,7 +29,13 @@ Base for everything below is the MDS stage-3 checkpoint `global_step138650` (not
 
 ---
 
-## 2026-11-05 — 16N Sunspot fanout wired (not yet executed)
+## 2026-11-11 — Sunspot CPT-FW-Edu 4N + pretok + GRPO launched — _provisional, jobs live_
+
+CPT-FW-Edu 4N (`agpt_2b_mds_mix_owm_edu_6040` 60/40 FW-Edu, `PPN=8 GBS=64 seq=8192`, 100B=190734 steps) chain `12483048 0→4091 → 12483075 4091→7869 → 12483245 7800→10143+ R` (walltime 02:00 chained, ckpt every 200, base `gs138650/step-0`, VENV `xpu-torch216-sync-5a7a622f16`) — new low **loss 1.856 at 10108** MBH, MFU 18.16%, `~5.3%` of budget. Pretok `12483253 R -- 1N` (`_pretokenize_distill_cot_mix_1n.sh` 50/50 OpenThoughts+gsm8k-r1cot → `/tegu/.../len8192 num_proc=4`, gate `dataset_info.json`+`[decontam]`) unblocks stage-2 SFT `sft_distill_cot_4n.sh`. GRPO `12483252 R -- 3(2+1) 06:00` on B2 `checkpoint-93-hf 0.205` (`gs=8 lr=5e-6 100 steps`) — Monarch TorchStore+XPU [monarch.md](rl/monarch.md). SFT narrow `12483074 10/10 11.02→10.72 completed`. _Provisional_: `R` numbers not exit-verified; finalize on `12483245/252/253` exit with pretok `dataset_info.json`+decontam + GSM8K-CoT delta vs `B2=0.205`. Journal: [journal](../../docs/journal.md).
+
+---
+
+## 2026-11-05 — 16N Sunspot fanout wired (CPT now executing, see 2026-11-11 above)
 
 `685ce083b` fans Sunspot to 16N: `scripts/cpt_fineweb_edu_4n.sh`, `cpt_olmo25_dolmino75_4n.sh`, `sft_distill_cot_4n.sh`, `rl_grpo_b2_2n.sh`, plus `sft_distill_cot_pretok_8n.sh` / `_pretokenize_distill_cot_mix_1n.sh`. CPT already streams correctly — Grain (`olmo-mix-1124` / FineWeb-Edu via `torchtitan/datasets`) streams + tokenizes on the fly with no pre-tokenize step and is verified for pre-training/CPT at 2N/8N. **SFT does not use Grain.** SFT goes through TRL `SFTTrainer` / HF `datasets` (`torchtitan/experiments/ezpz/rl/datasets_sft.py` → `train_sft.py`), which re-tokenizes the whole mix at job start and builds HF arrow caches per rank — that path hit both the multi-rank HF cache coherency race and the `~8.5h` re-tokenize walltime at 93M rows (killed `12470281`), so the distill mix was shelved 2026-11-04. The fanout fixes only the SFT data path: `train_sft.py --pretokenize_to` runs once, then training loads `input_ids` via `load_from_disk --pretokenized_dataset` (`skip_prepare_dataset` when `input_ids` present) from shared `/tegu/datasets/agpt2b-distill-cot-mix-len8192` — no HF streaming cache on compute, `HF_DATASETS_OFFLINE=1`.
 

@@ -74,8 +74,17 @@ export EZPZ_SFT_MIX_CACHE_DIR=/tegu/datasets/datasets/ezpz_sft_mixes
 # forces a fresh mix cache.
 export DISTILL_MAX_THINK_CHARS="${DISTILL_MAX_THINK_CHARS:-16000}"
 
-SUBMIT_DIR="${PBS_O_WORKDIR:-$(pwd)}"
-source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup_job
+# Single-rank data job — skip ezpz_setup_job MPI wrapping (it shadows python3
+# through mpiexec and segfaults train_sft on XPU; 12483367/393/403 all died
+# there). Direct single-rank needs no hostfile, no allreduce, no CCL.
+# Submit from the torchtitan checkout: PYTHONPATH is the submit dir, and
+# 12483417 died on ModuleNotFoundError after a submit from $HOME. Override
+# with REPO_ROOT=/path/to/torchtitan (qsub -v) when submitting from elsewhere.
+SUBMIT_DIR="${REPO_ROOT:-${PBS_O_WORKDIR:-$(pwd)}}"
+if [[ ! -d "${SUBMIT_DIR}/torchtitan" ]]; then
+  echo "FATAL: ${SUBMIT_DIR} is not a torchtitan checkout; submit from one or set REPO_ROOT" >&2
+  exit 1
+fi
 cd "${SUBMIT_DIR}" || exit 1
 VENV="${VENV:-/lus/tegu/projects/datascience/foremans/venvs/rl-monarch-torch214-locality-20261001}"
 if [[ -d "${VENV}/lib" ]]; then
@@ -86,32 +95,37 @@ fi
 export VIRTUAL_ENV="${VENV}"
 export PATH="${VENV}/bin:/opt/pbs/bin:${PATH}"
 export PYTHONPATH="${SUBMIT_DIR}:${PYTHONPATH:-}"
+export ONEAPI_DEVICE_SELECTOR=level_zero:gpu
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
 hash -r
 python3 -c "import trl; print('trl', trl.__version__)" || { echo "FATAL: trl missing in ${VENV}"; exit 1; }
 
 # num_proc override knob: walk down (e.g. NPROC=16) if the packing map OR the
-# decontam map SIGBUSes / a subprocess dies -- see header.
-NPROC="${NPROC:-4}"
+# decontam map SIGBUSes / a subprocess dies -- see header. Default 1: job
+# 12483443 landed at NPROC=1.
+NPROC="${NPROC:-1}"
 BASE_MODEL="${HOME}/global_step138650"
 OUT_DIR="/tegu/datasets/datasets/agpt2b-distill-cot-mix-len8192"
-LOG_DIR="logs/pretokenize-distill-cot-mix-${PBS_JOBID%%.*}"
+LOG_DIR="${SUBMIT_DIR}/logs/pretokenize-distill-cot-mix-${PBS_JOBID%%.*}"
 mkdir -p "${LOG_DIR}"
 
 echo "=== 1N DOWNLOAD+PRETOKENIZE: distill_cot_mix -> ${OUT_DIR} (len=8192, base=gs138650) ===" \
     | tee -a "${LOG_DIR}/run.log"
 echo "DISTILL_MAX_THINK_CHARS=${DISTILL_MAX_THINK_CHARS}" | tee -a "${LOG_DIR}/run.log"
-git log -1 --oneline -- torchtitan/experiments/ezpz/rl/train_sft.py \
+git -C "${SUBMIT_DIR}" log -1 --oneline -- torchtitan/experiments/ezpz/rl/train_sft.py \
     torchtitan/experiments/ezpz/rl/datasets_sft.py \
     torchtitan/experiments/ezpz/rl/decontam_traces.py 2>&1 | tee -a "${LOG_DIR}/run.log"
 echo "" | tee -a "${LOG_DIR}/run.log"
 
 # No MPI needed for single-rank data job — run directly to avoid ezpz.doctor->torchinfo->torch circular import in rl-monarch venv
-python3 -m torchtitan.experiments.ezpz.rl.train_sft \
+# Use $VENV/bin/python explicitly: `python3` is still shadowed by the preloaded
+# ezpz MPI wrapper on compute (12483424 segfaulted here even after bypass).
+"${VENV}/bin/python" -m torchtitan.experiments.ezpz.rl.train_sft \
     --sft_dataset distill_cot_mix \
     --model_name_or_path "${BASE_MODEL}" \
     --pretokenize_to "${OUT_DIR}" \
     --max_length 8192 \
-    --dataset_num_proc "${NPROC:-4}" \
+    --dataset_num_proc "${NPROC}" \
     --output_dir "${LOG_DIR}/_pretok_scratch" \
     --report_to none \
     2>&1 | tee -a "${LOG_DIR}/run.log"
