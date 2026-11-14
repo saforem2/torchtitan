@@ -20,6 +20,7 @@ set -o pipefail
 cd "${PBS_O_WORKDIR:-$(pwd)}" || exit 1
 
 # Shared-NFS mode (no yeet): mirror submit_lr_finder_sirius.sh setup exactly.
+# shellcheck source=/dev/null
 if [[ -f "${PBS_O_WORKDIR:-.}/.ezpz-utils-cache/ezpz-utils.sh" ]]; then
     source "${PBS_O_WORKDIR:-.}/.ezpz-utils-cache/ezpz-utils.sh"
 else
@@ -32,6 +33,7 @@ export EZPZ_MPI_LABEL=1
 export LD_LIBRARY_PATH="${HOME}/.local/mpi-compat:${LD_LIBRARY_PATH}"
 
 VENV_DIR="${HOME}/torchtitan/.venv"
+# shellcheck source=/dev/null
 source "${VENV_DIR}/bin/activate"
 log_message INFO "Sirius perf probe (shared-NFS): ${VENV_DIR}/bin/python — PERF_PROBE=${PERF_PROBE:-all}"
 

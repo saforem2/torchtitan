@@ -59,7 +59,7 @@ for label in baseline compile selective none lbs2; do
   fi
 done
 
-LAUNCH_COUNT=$(grep -c 'ezpz launch' "${PROBE}" || true)
+LAUNCH_COUNT=$(grep -c '^[[:space:]]*ezpz launch' "${PROBE}" || true)
 if [[ "$LAUNCH_COUNT" -eq 5 ]]; then
   echo "  PASS: exactly 5 ezpz launch blocks (one per probe, distinct --checkpoint.folder each)"
 else
