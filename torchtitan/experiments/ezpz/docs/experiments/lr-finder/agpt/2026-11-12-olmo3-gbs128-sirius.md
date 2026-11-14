@@ -89,7 +89,7 @@ SHA prefixes are from the canonical CSVs; full hashes in `.sha256` and the data 
 
 - This is a **finder**, not a fixed-LR training validation. Suggested LRs are detector heuristics; sustained training may prefer a different point in the basin. A fixed-LR matrix (like `5b/README.md`'s `1e-4..1e-2` chain) is still needed for production commitment.
 - Only **AdamW and Mano** were swept. SophiaG/Muon were not run at this batch; the Sep GBS=6144 campaign excluded them on XPU for 80B-scale reasons that do not necessarily apply here, but they remain open.
-- GBS=128 is small for the 80B production batch (GBS=6144); these LRs are for the 5B/10B GBS=128 Polaris chain only. Do not extrapolate to 30B/80B at large batch — see [`agpt/README.md`](agpt/README.md) for the batch-dependence warning.
+- GBS=128 is small for the 80B production batch (GBS=6144); these LRs are for the 5B/10B GBS=128 Polaris chain only. Do not extrapolate to 30B/80B at large batch -- see [`agpt/README.md`](README.md) for the batch-dependence warning.
 
 ## Related
 
