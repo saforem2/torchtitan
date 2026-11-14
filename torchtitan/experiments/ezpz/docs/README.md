@@ -15,7 +15,7 @@ date: 2026-03-15
 
 ## Recently Updated
 
-The 25 most-recently-changed docs by git commit date (across all 331
+The 25 most-recently-changed docs by git commit date (across all 334
 docs, not just the curated tables below). Auto-generated -- do not edit
 by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 
@@ -26,10 +26,14 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-11-14 | [Production Training Runs -- Polaris (A100)](./production/polaris/README.md) |
 | 2026-11-14 | [Continued Pre-Training (CPT) — 2B olmo x dolmino mixing-ratio sweep](./production/cpt/README.md) |
 | 2026-11-14 | [Sirius hedge: agpt 5B and 10B on the OLMo-3 tokenizer (Nov 2026)](./production/agpt/sirius-olmo3-5b-10b.md) |
+| 2026-11-14 | [Historical: AuroraGPT v1 (bf16-master, tainted) training runs](./production/agpt/historical/v1-bf16/README.md) |
 | 2026-11-14 | [Production Training — Dense (agpt) Models](./production/agpt/README.md) |
+| 2026-11-14 | [agpt 5B (moved)](./production/agpt/5b/README.md) |
+| 2026-11-14 | [Production Training — agpt 4B (4.64B), OLMo-3 tokenizer, 4K](./production/agpt/4b/README.md) |
 | 2026-11-14 | [Production Training — agpt 20B @ 512 nodes](./production/agpt/20b/n512/README.md) |
 | 2026-11-14 | [Production Training — agpt 20B @ 256 nodes](./production/agpt/20b/n256/README.md) |
 | 2026-11-14 | [Production Training — agpt 20B](./production/agpt/20b/README.md) |
+| 2026-11-14 | [Production Training — agpt 10B (9.48B), OLMo-3 tokenizer, 4K](./production/agpt/10b/README.md) |
 | 2026-11-14 | [Production Training Runs — Aurora](./production/README.md) |
 | 2026-11-14 | [AuroraGPT-2B post-training: complete status](./production/POST-TRAINING-2B.md) |
 | 2026-11-14 | [Development Journal](./journal.md) |
@@ -43,16 +47,16 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-11-12 | [MoE at TP>1: wo gets Shard(0) where row-parallel wants Partial(sum)](./guides/known-bugs/moe-tp2-wo-placement.md) |
 | 2026-11-12 | [CUDA: default CUDA graph capture breaks ezpz MoE and native DDP (2026-11-12)](./guides/known-bugs/cuda-graphs-moe-native-ddp.md) |
 | 2026-11-12 | [AuroraGPT-2B: XPU throughput recovery on Sunspot](./experiments/agpt/sunspot/2026-11-02-throughput-recovery.md) |
-| 2026-11-12 | [MMLU letter-prior gating note: constant-D beats every agpt-2B model](./evals/mmlu-letter-prior-gating.md) |
-| 2026-11-12 | [AuroraGPT MMLU sits at chance because the models answer with a letter prior](./evals/mmlu-letter-prior-at-chance.md) |
-| 2026-11-12 | [Evaluation Results](./evals/README.md) |
-| 2026-11-05 | [SFT recipe: agpt-2b-v2-256n-step92859 x tulu_math_uc_mix](./production/sft/agpt/2b-v2-256n/tulu_math_uc_mix/README.md) |
 
 <details>
 <summary>Next 25 (#26-50)</summary>
 
 | Modified | Doc |
 |---------:|-----|
+| 2026-11-12 | [MMLU letter-prior gating note: constant-D beats every agpt-2B model](./evals/mmlu-letter-prior-gating.md) |
+| 2026-11-12 | [AuroraGPT MMLU sits at chance because the models answer with a letter prior](./evals/mmlu-letter-prior-at-chance.md) |
+| 2026-11-12 | [Evaluation Results](./evals/README.md) |
+| 2026-11-05 | [SFT recipe: agpt-2b-v2-256n-step92859 x tulu_math_uc_mix](./production/sft/agpt/2b-v2-256n/tulu_math_uc_mix/README.md) |
 | 2026-11-02 | [AuroraGPT-2B: recovered Sunspot MDS/TT comparison](./experiments/agpt/sunspot/2026-11-02-recovery-comparison.md) |
 | 2026-11-02 | [agpt (Dense AuroraGPT) Benchmarks](./experiments/agpt/README.md) |
 | 2026-11-01 | [Sunspot startup isolation: MDS/TT continuation](./experiments/agpt/sunspot/2026-11-01-startup-incident.md) |
@@ -74,10 +78,6 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-10-29 | [HF export PR feedback fixes](./experiments/moe/aurora/2026-10-06-hf-export-pr-feedback.md) |
 | 2026-10-29 | [Matched dense 2B and MoE 12B2A HF evaluation](./experiments/moe/aurora/2026-10-06-hf-dense-moe-paired.md) |
 | 2026-10-29 | [MoE (Mixture of Experts) Benchmarks](./experiments/moe/README.md) |
-| 2026-10-29 | [Mano LR finder at 30B (Sunspot, 2026-08-23)](./experiments/lr-finder/agpt/2026-08-23-30b-mano-sunspot.md) |
-| 2026-10-19 | [Follow-up umbrella: Monday boost (>2048N) — 2026-10-20](./production/followup-umbrella-boost-20261020.md) |
-| 2026-10-16 | [Ten days ending 2026-09-26](./summaries/2026-09-26.md) |
-| 2026-10-16 | [Production Training — agpt 2B @ 256 nodes](./production/agpt/2b/n256/README.md) |
 
 </details>
 <!-- END recently-updated (auto-generated) -->
