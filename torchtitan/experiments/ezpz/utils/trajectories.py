@@ -884,6 +884,71 @@ TRAJECTORIES: list[dict] = [
         "cls": "live",
     },
     {
+        # agpt-v2 4.64B (5b_olmo2tok_dp12), OLMo-3 tokenizer, seq 4096, raw
+        # olmo-mix-1124 streamed through Grain. Page: docs/production/agpt/4b.
+        "key": "4b_v2_512",
+        "model": "4b",
+        "version": "v2",
+        "num_nodes": 512,
+        "ckpt_dir": str(_MAIN_CKPTS / "agpt-v2-4b-4k-olmo-mix-n512-20261109"),
+        "readme": f"{_DOCS}/4b/README.md",
+        "gbs": 6144,
+        "seq_len": 4096,
+        "token_target": OLMO_MIX_1124_TOKENS,
+        "wandb_run_ids": [
+            "uqrribs1",  # umbrella 9053470 seat 3 (Nov 11): 1-2698, step-2600
+            "lwewe0xv",  # 9076358 (Nov 14): resumes step-2600
+        ],
+        "olog_fallbacks": None,
+        "eval_subdir": None,
+        "cls": "live",
+    },
+    {
+        # The 4.64B on Sirius (agpt_5b_olmo3_polaris: Dolma, GBS 8 on 2N).
+        # Checkpoints live on Sirius, which the Aurora chart job cannot read.
+        # ORDER IS SEMANTIC: each leg resumes from the last 100-step checkpoint,
+        # and the later run wins an overlapping step.
+        "key": "4b_sirius_2",
+        "model": "4b",
+        "version": "v2",
+        "num_nodes": 2,
+        "ckpt_dir": None,
+        "readme": f"{_DOCS}/4b/README.md",
+        "gbs": 8,
+        "seq_len": 4096,
+        "token_target": None,
+        "wandb_run_ids": [
+            "jm4cpxhz",  # 33376     1-1080
+            "senzi8jf",  # 33456   901-1260
+            "byb8t878",  # 33460  1101-3029
+            "8fq5kilz",  # 33471  2901-5058
+            "dorbtxse",  # 33487  4901-7091
+            "m1vycznv",  # 33525  7001-8551
+        ],
+        "olog_fallbacks": None,
+        "eval_subdir": None,
+        "cls": "wandb_only",
+    },
+    {
+        # The 9.48B on Sirius (agpt_10b_olmo3_polaris: Dolma, GBS 32 on 8N).
+        # Every attempt so far starts at step 1 and dies in the async DCP save
+        # at step 200, so only the current attempt is charted. Earlier fresh
+        # attempts: c2f33vf3, sc4f4iji, gd6ggias, 49bt2v7p, lry1azqq, 69g3w944.
+        "key": "10b_sirius_8",
+        "model": "10b",
+        "version": "v2",
+        "num_nodes": 8,
+        "ckpt_dir": None,
+        "readme": f"{_DOCS}/10b/README.md",
+        "gbs": 32,
+        "seq_len": 4096,
+        "token_target": None,
+        "wandb_run_ids": ["e4ejewmg"],  # 33537 (Nov 14), fresh from step 1
+        "olog_fallbacks": None,
+        "eval_subdir": None,
+        "cls": "wandb_only",
+    },
+    {
         "key": "80b_v2_4_smoke",
         "model": "80b",
         "version": "v2",
