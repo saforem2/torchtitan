@@ -22,7 +22,8 @@
 #   XPU, gloo on CUDA), LAUNCH_TIMEOUT (seconds, 2400).
 #
 # Venvs: XPU needs vllm-xpu-kernels built for PVC without the Xe2-only kernels
-# (docs/upstream-sync.md, 2026-11-12 entry); CUDA uses upstream's
+# (build_vllm_xpu_kernels_pvc.pbs) and torchvision (vLLM's warmup imports it;
+# docs/upstream-sync.md, 2026-11-12 entry). CUDA uses upstream's
 # scripts/install_rl_env.sh. After an actor fails, the controller can hang
 # until LAUNCH_TIMEOUT; read the first traceback, not the exit code.
 set -uo pipefail

@@ -104,8 +104,42 @@ default list includes `bmg-g31-a0`, which the compute-node `ocloc` rejects
 from another machine must drop `.deps/*-subbuild` and `.deps/*-build`, whose CMake
 caches keep the old absolute paths. With the rebuilt wheel all five extensions import
 and vLLM reports `XPUPlatform` (`9089010`). It is installed in the Aurora and Sunspot
-`rl-monarch-torch216-sync-20261112` venvs; the old wheel is kept beside each. GRPO
-reruns: Aurora `9089026`, Sunspot `12483730`.
+`rl-monarch-torch216-sync-20261112` venvs; the old wheel is kept beside each.
+`rl/scripts/build_vllm_xpu_kernels_pvc.pbs` is that build as a job.
+
+The next blocker was upstream's own vLLM floor: `rl/generator/vllm/attention/mla.py`
+imports `vllm.utils.torch_utils.is_quantized_kv_cache`, which `b46907cce` predates, and
+`model_wrapper.py` imports that module for every model (Sunspot `12483730`, Aurora
+`9089026`). `xpu_overrides.py` adds the pinned vLLM's definition when it is missing.
+A static check of all 102 `vllm` imports under `torchtitan/rl` and
+`experiments/ezpz/rl` against `b46907cce` found no other gaps.
+
+Last, vLLM's kernel warmup imports its Qwen3-VL module for every model, and that needs
+`torchvision` (Sunspot `12483737`). Upstream's CUDA installer brings it in; the XPU venvs
+lacked it. The XPU nightly index has no `torchvision` for torch `20261015`, so both venvs
+have `torchvision==0.30.0.dev20261007+xpu` installed with `--no-deps`. On an Aurora
+compute node it imports, runs `ops.nms`, and serves vLLM's `qwen3_vl` import
+(`9089110`).
+
+`rl/scripts/grpo/multihost_grpo_e2e.pbs` is the two-host GRPO smoke for all four
+machines. It checks that vLLM picks an accelerator on both hosts before launching.
+
+Monarch GRPO trains on XPU, both machines, `3f34e7143`, same recipe as Sirius, exit `0`:
+
+| Step | Sunspot `12483743` loss | reward | Aurora `9089138` loss | reward |
+|---|---|---|---|---|
+| 1 | `0.024` | `0.47` | `0.017` | `0.47` |
+| 2 | `0.054` | `0.52` | `0.082` | `0.46` |
+| 3 | `0.093` | `0.42` | `0.11` | `0.48` |
+
+Wall time `851` s (Sunspot) and `1150` s (Aurora). Validation response length `117.9`
+at steps 0 and 3 on both, the same as Sirius; checkpoints step-1..3. Grad norm
+`0.37`-`0.48`; max trainer/generator logprob difference `0.0077`-`0.011`. The XPU compat
+tests pass on both machines (`8`/`8`). TorchStore (automatic policy: Gloo across hosts)
+moved weights at setup and after each step: trainer push `4.5` s then `0.07`-`0.14` s,
+generator fetch `72`-`75` s, load `0.2` s, identical on both machines. The fetch never
+blocked a step (`blocking_generator_pull` ratio ~`0`), but it is ~19x the CUDA Gloo
+fetch (`3.9` s).
 
 The same Monarch GRPO path trains on CUDA. Sirius `33518`, 2 A100 nodes (trainer on
 host 0, vLLM generator on host 1), AGPT-2B LoRA, GSM8K, 3 steps, exit `0`:
