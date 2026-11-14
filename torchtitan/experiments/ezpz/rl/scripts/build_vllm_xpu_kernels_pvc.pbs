@@ -63,9 +63,11 @@ echo "SRC $SRC rev=$rev version=$VLLM_VERSION_OVERRIDE torch=$(python -c 'import
 
 # CMake caches under .deps keep absolute paths. A tree copied from another
 # machine must not reuse them.
+# CMake records the physical path (/lus/flare/... for /flare/...).
+src_phys=$(pwd -P)
 for d in .deps/*-subbuild .deps/*-build; do
   [[ -f "$d/CMakeCache.txt" ]] || continue
-  grep -q "CMAKE_CACHEFILE_DIR:INTERNAL=$SRC/" "$d/CMakeCache.txt" && continue
+  grep -qE "CMAKE_CACHEFILE_DIR:INTERNAL=($src_phys|$SRC)/" "$d/CMakeCache.txt" && continue
   echo "FATAL: $d was configured in another tree; move it aside and resubmit"
   exit 19
 done

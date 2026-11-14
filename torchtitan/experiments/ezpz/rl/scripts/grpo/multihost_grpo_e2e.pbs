@@ -118,6 +118,8 @@ if [[ $(grep "^PROBE" "$OUT/probe.log" | grep -vc "vllm_platform UnspecifiedPlat
 fi
 
 if [[ "${RUN_UNIT_TESTS:-0}" == 1 ]]; then
+  "$V/bin/python" -c "import pytest" 2>/dev/null \
+    || { echo "FATAL: RUN_UNIT_TESTS=1 but pytest is not installed in $V"; exit 18; }
   "$V/bin/python" -m pytest -q -p no:cacheprovider tests/rl/unit_tests/cpu \
     --basetemp="$OUT/pytest" 2>&1 | tail -5
   ut_rc=${PIPESTATUS[0]}
