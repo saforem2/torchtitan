@@ -176,7 +176,9 @@ TRAJECTORIES: list[dict] = [
         "label": "20B-TT v2 (n256)",
         "source": "wandb",
         "key": "20b_v2_256",
-        "tokens_per_step": 3072 * 8192,
+        # GBS 6144 (trajectories.py). 3072 was the v1 256N chain's GBS; using it
+        # here drew this chain at half its tokens.
+        "tokens_per_step": 6144 * 8192,
         "color": COLOR_20B_TT_256N,
         "linestyle": "--",
         "marker": None,
