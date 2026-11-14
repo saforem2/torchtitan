@@ -1,8 +1,24 @@
 # AuroraGPT-2B post-training: complete status
 
-**Last updated: 2026-11-12.** Every number is quoted from a run doc — links go to the source. Most recent first.
+**Last updated: 2026-11-14.** Every number is quoted from a run doc — links go to the source. Most recent first.
 
-> **One-line status (as of 2026-11-12):** B2 (`checkpoint-93`, 0.205 GSM8K-CoT) still the best CoT model. CPT-FW-Edu 4N at 34.3k/190k (17.8% budget, `12483437 R` MFU 17.1% healthy) via `afterany 12483446 H` to 50k. Pretok **landed** `12483443`: `91,481 -> 36,934 packed @8192` (3.4G, `/tegu/datasets/agpt2b-distill-cot-mix-len8192`, mix-cache `cba5c64` hit) — broad SFT unblocked but **parked to CPT 50k** per `POST-TRAINING-PLAN.md` phase 2.
+> **One-line status:** CPT-FWE 4N at **75k/190k (39.4% budget, `12483799 R` MFU ~18% healthy, step-75000 `22.4G`) — chain fixed to `12h` walltime (was `2h` churn, `99e918b342`), HF converts at `74000/74200` `3.7G` verified. SFT on fresh HF (`cpt74k-b3-1n`) blocked on `XCCL→ezpz launch` fix (raw `mpiexec` broke `CCL` on `PVC/FLAT`). Raw CPT CoT `0/200` on `73k/74k` is expected degenerate `pre-SFT` signal — meaningful CoT gates on SFT `final/` only. B2 `0.205` remains best CoT.
+
+---
+
+## 2026-11-14 — CPT 75k + SFT labels + CoT baseline (in-flight)
+
+**CPT-FWE 4N** (`agpt_2b_mds_mix_owm_edu_6040` `60/40 FWE`, `PPN=8 GBS=64 seq=8192`, `100B=190734` steps): `12483799 R` `step-75000` `~22.4G` `375` ckpt dirs, `~39.4%` of `100B` budget, `MFU ~18%` `~2k steps/hr` healthy. Chain was `600s`-poll auto-requeue on `2h` walltime (`12483735→12483799` verified); this hop still `02:00` (`E ~19:13`), next hop already `12h` (`99e918b342` synced) = `~24k steps/hop` vs `4k` churn. `HFs 74000/74200` `3.7G` `9/9` files verified (patched `config/tokenizer` omission).
+
+**SFT labels bottleneck** — `12483770` froze `22m` building `labels` on `2.7M×8192` `add_column` `22B` Python loop (`Modify 16:36:00` frozen, `E 143`). Fixed `d351f8c204`/`36cfd634a5`/`746d98ded9`: `np.where`-batched via `add_column` not `datasets.map Manager` (`EOFError` on `PVC/FLAT`). `SFT 1N` on fresh `74000 HF` (`12483807` `ezpz launch --nproc 12 --nproc_per_node 12` after `mpiexec` `xcclCommInitRank 11` + `ImageMagick Wand 0.7.2` failures from `~/.local/bin/ezpz` not pinned `xpu-torch216`).
+
+**CoT baseline** — raw `CPT` `73k/74k` both `0/200` `0.0 fmt` degenerate loops (`n_unclosed=200`) — expected `pre-SFT` (`CPT` never trains `\boxed{}`), not a regression. `cpt34k-gsm8k-3ep` `0.025 acc / 0.505 fmt` vs `cpt34k-distill-broad-4n` `0.000` shows format-vs-reasoning gap. Meaningful `CoT` gates on `SFT final/` (`submit_cot_eval.sh`).
+
+**Eval infra** — `MMLU vLLM` `level_zero 40` `63G OOM` (`compute_topk_scores`) unfixable on `Sunspot XPU` — `Aurora`-only, documented. `CoT GSM8K` `vLLM fp32` works (`73k/74k` `200/200` processed).
+
+## 2026-11-12 — CPT 34.3k/190k healthy + pretok landed (broad SFT parked to 50k)
+
+> **One-line status:** CPT-FWE 4N at **75k/190k (39.4% budget, `12483799 R` MFU ~18% healthy, step-75000 `22.4G`) — chain fixed to `12h` walltime (was `2h` churn, `99e918b342`), HF converts at `74000/74200` `3.7G` verified. SFT on fresh HF (`cpt74k-b3-1n`) blocked on `XCCL→ezpz launch` fix (raw `mpiexec` broke `CCL` on `PVC/FLAT`). Raw CPT CoT `0/200` on `73k/74k` is expected degenerate `pre-SFT` signal — meaningful CoT gates on SFT `final/` only. B2 `0.205` remains best CoT.
 
 ---
 
@@ -24,14 +40,13 @@ Pretok **landed**: `_pretokenize_distill_cot_mix_1n.sh` job `12483443` `Exit` (N
 
 > [!WARNING]
 > **Do NOT use `checkpoint-8672`.** It is the final checkpoint of the full-mix run and catastrophically forgot: hellaswag 0.593 → **0.273**, arc_easy 0.694 → **0.298** — at or near random chance. Use `checkpoint-900` from the same run. The recipe page's header once called 8672 "the deliverable" — fixed 2026-08-16; its own body was always right.
-
 Base for everything below is the MDS stage-3 checkpoint `global_step138650` (not a distinct artifact — the 2B MDS is one continuous 140k-step run whose "stages" are data-mix transitions) unless noted.
 
 ---
 
-## 2026-11-11 — Sunspot CPT-FW-Edu 4N + pretok + GRPO launched — _provisional, jobs live_
+## 2026-11-11 — Sunspot CPT-FWE 4N + pretok + GRPO launched — _provisional, jobs live_
 
-CPT-FW-Edu 4N (`agpt_2b_mds_mix_owm_edu_6040` 60/40 FW-Edu, `PPN=8 GBS=64 seq=8192`, 100B=190734 steps) chain `12483048 0→4091 → 12483075 4091→7869 → 12483245 7800→10143+ R` (walltime 02:00 chained, ckpt every 200, base `gs138650/step-0`, VENV `xpu-torch216-sync-5a7a622f16`) — new low **loss 1.856 at 10108** MBH, MFU 18.16%, `~5.3%` of budget. Pretok `12483253 R -- 1N` (`_pretokenize_distill_cot_mix_1n.sh` 50/50 OpenThoughts+gsm8k-r1cot → `/tegu/.../len8192 num_proc=4`, gate `dataset_info.json`+`[decontam]`) unblocks stage-2 SFT `sft_distill_cot_4n.sh`. GRPO `12483252 R -- 3(2+1) 06:00` on B2 `checkpoint-93-hf 0.205` (`gs=8 lr=5e-6 100 steps`) — Monarch TorchStore+XPU [monarch.md](rl/monarch.md). SFT narrow `12483074 10/10 11.02→10.72 completed`. _Provisional_: `R` numbers not exit-verified; finalize on `12483245/252/253` exit with pretok `dataset_info.json`+decontam + GSM8K-CoT delta vs `B2=0.205`. Journal: [journal](../../docs/journal.md).
+CPT-FWE 4N (`agpt_2b_mds_mix_owm_edu_6040` 60/40 FWE, `PPN=8 GBS=64 seq=8192`, 100B=190734 steps) chain `12483048 0→4091 → 12483075 4091→7869 → 12483245 7800→10143+ R` (walltime 02:00 chained, ckpt every 200, base `gs138650/step-0`, VENV `xpu-torch216-sync-5a7a622f16`) — new low **loss 1.856 at 10108** MBH, MFU 18.16%, `~5.3%` of budget. Pretok `12483253 R -- 1N` (`_pretokenize_distill_cot_mix_1n.sh` 50/50 OpenThoughts+gsm8k-r1cot → `/tegu/.../len8192 num_proc=4`, gate `dataset_info.json`+`[decontam]`) unblocks stage-2 SFT `sft_distill_cot_4n.sh`. GRPO `12483252 R -- 3(2+1) 06:00` on B2 `checkpoint-93-hf 0.205` (`gs=8 lr=5e-6 100 steps`) — Monarch TorchStore+XPU [monarch.md](rl/monarch.md). SFT narrow `12483074 10/10 11.02→10.72 completed`. _Provisional_: `R` numbers not exit-verified; finalize on `12483245/252/253` exit with pretok `dataset_info.json`+decontam + GSM8K-CoT delta vs `B2=0.205`. Journal: [journal](../../docs/journal.md).
 
 ---
 
@@ -41,7 +56,6 @@ CPT-FW-Edu 4N (`agpt_2b_mds_mix_owm_edu_6040` 60/40 FW-Edu, `PPN=8 GBS=64 seq=81
 
 Wiring repairs `40b29ca`/`d551d04`/`927dd1e`/`d49706b`/`d962fd6`/`39e65d9`/`4867112` fixed VENV (`xpu-torch216` for CPT vs LD-first for RL consolidate), HF consolidate, and `--optim.` tyro namespace. Pre-tok `NPROC 32→16→8→4` (`15f3e19`/`3665e3a`/`11df0ee3a`) fixed `SIGBUS`/`SIGSEGV` on `distill pack`. Scripts present on HEAD; gate is verified `dataset_info.json` + `[decontam]` counts before training jobs start. Monarch XPU gate unchanged — see [monarch.md](rl/monarch.md) (`12479177` 40/40 auto→Gloo Exit 0). Full wiring in [journal 2026-11-05](../../docs/journal.md).
 
----
 
 ## 2026-11-04 — B2v2: more stage-2 epochs on the same narrow data hurts
 

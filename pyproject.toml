@@ -37,6 +37,7 @@ ignore-words-list = ["assertin", "datas" ,"indx", "inpt", "nd", "socio-economic"
     "OVERRIDEABLE",  # torch.nn.attention.SDPBackend.OVERRIDEABLE -- the
                      # real enum member; OVERRIDABLE does not exist and
                      # "correcting" it is an AttributeError
+    "FWE",           # FineWeb-Edu dataset acronym (FineWeb-Edu -> FWE)
 ]
 
 # ---- Explicit project build information ---- #

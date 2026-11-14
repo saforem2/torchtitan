@@ -26,6 +26,7 @@ import argparse
 import json
 import re
 
+
 # gsm8k gold answers end in "#### N"; strip commas and $.
 _GOLD_RE = re.compile(r"####\s*(-?[\d,]+(?:\.\d+)?)")
 # require a <think>...</think> then <answer>...</answer> (answer AFTER think).
