@@ -1,13 +1,14 @@
-## 2026-11-14: Sirius restored via datascience — 5B 7281 + 10B 121
+## 2026-11-14 15:44 UTC: Sirius — 5B 7454 + 10B 197 both R
 
-`datascience` unlimited (`backfill`) confirmed — prior `AuroraGPT` `allocation exhausted` was project-specific; switching `-A datascience` cleared `No active allocation`. Wrong-script `cudnn/9.26.0` abort (`submit_agpt_olmo3_polaris.sh` says `Unknown machine: sirius`) fixed by using `submit_agpt_olmo3_sirius.sh`. `Sirius workq Tot=4` hard cap briefly `Q`'d `33527 8N` (`Insufficient ncpus R:512 A:25`) then both `R`:
+`datascience` unlimited (`backfill`) — `AuroraGPT` `5004812288/5040000000` exhausted was project-specific; `-A datascience` cleared `No active allocation`. `cudnn/9.26.0` `Unknown machine: sirius` was `submit_agpt_olmo3_polaris.sh` on `sirius` (fixed via `submit_agpt_olmo3_sirius.sh`). `workq Tot=4` briefly `Q`'d `33527 8N` (`R:512 A:25`) then both `R`:
 
-| Job | Model | GPUs | Steps | Loss | Ckpts | Status |
+| Job | Model | GPUs | Steps | Loss | Ckpts | Wall |
 | --- | --- | --- | --- | --- | --- | --- |
-| `33525` | `5b_olmo3_polaris` | `2N 8` | `7000->7281` (`+281` since `14:31 UTC` restart) | `5.97 g30.5` -> `5.71 g19.4`, `tps 412 MFU 4.23%` | `step-7200`, `3.7T` total | `R` `00:46/06:00` |
-| `33527` | `10b_olmo3_polaris` | `8N 32` | fresh `1->121` (corrupt `step-100 .metadata` cleaned, `step-3 + step-100` prior) | `12.03 g2.37` -> `6.90 g3.68`, `tps 186 MFU 3.81%` | `step-100` (`81G`) | `R` `00:44/06:00` |
+| `33525` | `5b_olmo3_polaris` | `2N 8` | `7000->7454` (`+454` since `14:31 UTC`) | `5.97 g30.5` -> `6.02 g10.0`, `tps 416 MFU 4.27%` | `step-7400`, `3.8T` | `01:14/06:00` `R` |
+| `33527` | `10b_olmo3_polaris` | `8N 32` | fresh `1->197` (prior `step-100` corrupt `no .metadata` cleaned) | `12.03 g2.37` -> `6.31 g1.36`, `tps 186 MFU 3.81%` | `step-100` `89G` | `01:12/06:00` `R` |
 
-`10B` was `Gloo` node crash `x3200c0s13b0` at `step 200` with `ckpt step-100 106G` intact, then fresh-restarted (walltime-killed `step-100` had no `.metadata`, `32` shard files but incomplete). `5B` resumed from `step-7000` (`7091->7092` ckpt exists, but `walltime 21667>21600` killed before `step-7000` became resume point). Polaris `7832130 Q 18N small` (`Not enough free nodes`) unchanged since Nov 9 (`80/43` queued `Nov 14 15:16 UTC`, `32 small` running), `Sirius` remains only mover. `LR-finder` `Nov 11-12` `150` steps `GBS128` `1e-8->1e-1`: `5B AdamW 2.48e-04 / Mano 1.81e-04`, `10B AdamW 1.28e-04 / Mano 2.25e-04` (inversion at `10B`) — ready for `Polaris` when `queue` drains.
+`5B` resumed from `step-7000` (not `7092` — that `walltime 21667>21600` kill left `7092` but resume picks last good `7000`); now `7454` (+`+` ckpts `7200/7300/7400`). `10B` fresh-restarted after `Gloo x3200c0s13b0` crash at `step 200` plus walltime-corrupt `step-100` (`32` shards `no .metadata` via `rm -rf` `1s` delay). Polaris `7832130 Q 18N small` (`Not enough free nodes`) unchanged since Nov 9 `13:40` (`81 small / 43 medium` queued `15:44 UTC`, `32 small` running) — `Sirius` only mover. `LR-finder` `Nov 11-12` `150` `GBS128` `1e-8->1e-1`: `5B AdamW 2.48e-04 / Mano 1.81e-04`, `10B AdamW 1.28e-04 / Mano 2.25e-04` (inversion at `10B`) — ready for `Polaris` `queue` drain.
+
 
 
 
