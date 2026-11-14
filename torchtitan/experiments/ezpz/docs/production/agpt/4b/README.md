@@ -34,6 +34,30 @@ Tokens are steps x GBS x 4096. The full olmo-mix-1124 budget is 4.67T.
 | `9053470` seat 3 (umbrella) | Nov 9-11 | `1 -> 2698` | `12.002 -> 3.311` | 781 TPS/GPU, 8.5% MFU, ~5 s/step | Training when PBS killed the umbrella for a GPU fault in another seat. Saved `step-2600`. |
 | `9076358` | started Nov 14 | from `step-2600` | -- | -- | running, 12h `small`, own PBS job; no step logged at the time of writing |
 
+Umbrella `9053470` (the manual 24h umbrella: 2088 nodes on `large`, launched in a
+placeholder job named `test.sh`) trained this seat from 03:07:54 to 07:01:41 UTC on
+Nov 11, ~5.2 s/step. Logged values from
+`logs/multi-autoretry-9053470/trainer-3-v2-4b-n512-attempt-1.console.log`:
+
+| Step | Tokens | Loss | Grad norm | TPS/GPU | MFU |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 0.0B | 12.00226 | 1.7622 | 33 | 0.37% |
+| 10 | 0.3B | 11.92056 | 1.8139 | 276 | 3.02% |
+| 50 | 1.3B | 9.77805 | 4.3188 | 783 | 8.56% |
+| 250 | 6.3B | 6.58036 | 1.7553 | 798 | 8.73% |
+| 500 | 12.6B | 5.71695 | 1.2996 | 858 | 9.38% |
+| 750 | 18.9B | 5.11663 | 0.7835 | 793 | 8.68% |
+| 1,000 | 25.2B | 4.69840 | 0.8445 | 809 | 8.85% |
+| 1,250 | 31.5B | 4.34715 | 0.5923 | 792 | 8.66% |
+| 1,500 | 37.7B | 4.01323 | 0.5855 | 799 | 8.74% |
+| 1,750 | 44.0B | 3.85628 | 0.8479 | 783 | 8.57% |
+| 2,000 | 50.3B | 3.73506 | 1.3205 | 791 | 8.65% |
+| 2,250 | 56.6B | 3.53816 | 0.6027 | 779 | 8.52% |
+| 2,500 | 62.9B | 3.38003 | 0.3251 | 785 | 8.59% |
+| 2,698 | 67.9B | 3.31110 | 0.3888 | 781 | 8.54% |
+
+Memory 36.5 GiB per tile (57%). Steps 1-10 include compile and warmup.
+
 - It stays on the **sorted** manifest to keep its data cursor valid. With that
   order every rank reads all of its non-code files before any code: no starcoder
   until each rank's fourth file. New runs use the seed-0 shuffle
