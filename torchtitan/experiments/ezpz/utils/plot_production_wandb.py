@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
 """Plot production training metrics pulled from W&B.
 
 W&B is the single source of truth for production training history,
@@ -65,6 +70,22 @@ def _savefig_both(fig, svg_path, dpi=200):
     print(f"Saved: {png_path}")
 
 
+# The W&B/.o-log fetch + concat logic is shared with prod_dash.py via this
+# dependency-light module (stdlib + lazy wandb; NO numpy/matplotlib/torch) so
+# the chart plotters and the live board can never drift again. This file adapts
+# its plain-dict records to the numpy/METRIC_KEYS contract the plotters expect.
+from torchtitan.experiments.ezpz.utils import wandb_fetch  # noqa: E402
+
+# Family mid-tones from the shared palette. The local copy here said
+# 20b -> #D32F2F (red), which contradicted plot_production_combined.py where
+# red WAS the 2B family -- so 2B rendered blue in the per-run charts and red
+# in the overlay. utils/palette.py is now the only definition.
+from torchtitan.experiments.ezpz.utils.palette import (  # noqa: E402
+    alpha_for as _pal_alpha,
+    CHAIN_COLORS as _PAL_CHAIN_COLORS,
+    MODEL_COLORS,
+)
+
 # Production runs identified by step ranges (cross-checked with PBS logs).
 # Listed oldest first so concatenation matches resume order.
 # Each key here drives the figure filename + output dir:
@@ -90,25 +111,9 @@ def _savefig_both(fig, svg_path, dpi=200):
 # trajectories.py — that single edit updates the charts, the stale-doc
 # map, the field-filler, and the eval plots together.
 from torchtitan.experiments.ezpz.utils.trajectories import (  # noqa: E402
+    by_key,
     OLMO_MIX_1124_TOKENS,
     PRODUCTION_RUNS,
-    by_key,
-)
-
-# The W&B/.o-log fetch + concat logic is shared with prod_dash.py via this
-# dependency-light module (stdlib + lazy wandb; NO numpy/matplotlib/torch) so
-# the chart plotters and the live board can never drift again. This file adapts
-# its plain-dict records to the numpy/METRIC_KEYS contract the plotters expect.
-from torchtitan.experiments.ezpz.utils import wandb_fetch  # noqa: E402
-
-# Family mid-tones from the shared palette. The local copy here said
-# 20b -> #D32F2F (red), which contradicted plot_production_combined.py where
-# red WAS the 2B family -- so 2B rendered blue in the per-run charts and red
-# in the overlay. utils/palette.py is now the only definition.
-from torchtitan.experiments.ezpz.utils.palette import (  # noqa: E402
-    alpha_for as _pal_alpha,
-    CHAIN_COLORS as _pal_chain_colors,
-    MODEL_COLORS,
 )
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
@@ -511,7 +516,7 @@ def plot_overlay(
 # table omitted 20b_v2_256 and 2b_v2_512_lr3.22e-5 entirely, so those two fell
 # through to a default and drew in whatever the model mid-tone happened to be.
 OVERLAY_STYLE: dict[str, dict] = {
-    _k: {"color": _c, "alpha": _pal_alpha(_k)} for _k, _c in _pal_chain_colors.items()
+    _k: {"color": _c, "alpha": _pal_alpha(_k)} for _k, _c in _PAL_CHAIN_COLORS.items()
 }
 
 
@@ -548,7 +553,12 @@ def main() -> None:
         "--output-dir",
         type=Path,
         default=None,
-        help="Override output directory (default: docs/production/agpt/<model>/n<num_nodes>/figures/ for per-trajectory dashboards; docs/production/agpt/<model>/figures/ for overlays)",
+        help=(
+            "Override output directory (default: "
+            "docs/production/agpt/<model>/n<num_nodes>/figures/ for "
+            "per-trajectory dashboards; docs/production/agpt/<model>/figures/ "
+            "for overlays)"
+        ),
     )
     args = parser.parse_args()
 
