@@ -40,6 +40,10 @@ def llama3_debugmodel_zephon_smoke_save() -> Trainer.Config:
         run_id=os.environ.get("ZEPHON_RUN_ID"),
     )
     config.training.max_context_length = _MAX_CONTEXT_LENGTH
+    # The debug model uses varlen attention, and accelerator graphs need a fixed
+    # document bound per local microbatch. 16 is what
+    # torchtitan_recipes.data.c4_document_capacity gives for 256 tokens.
+    config.dataloader.max_num_documents = 16
     # Two sequences per microbatch and four per optimizer step: gradient
     # accumulation is 1 on 2 DP ranks and 2 on 1 DP rank, so each step reads a
     # whole window of the recipe's two canonical Zephon lanes.
