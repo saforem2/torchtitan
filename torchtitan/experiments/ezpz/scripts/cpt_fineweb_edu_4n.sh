@@ -35,6 +35,13 @@ export no_proxy="${no_proxy:-localhost,127.0.0.1,*.alcf.anl.gov,*.aurora.alcf.an
 
 SUBMIT_DIR="${PBS_O_WORKDIR:-$(pwd)}"
 cd "${SUBMIT_DIR}" || exit 1
+export PYTHONPATH="${SUBMIT_DIR}:${PYTHONPATH:-}"
+# Fix checkpoint double-nesting: trainer dumps to outputs/ already, so ensure
+# resume finds existing ckpts at outputs/outputs/checkpoints/ (from prior runs).
+if [[ -d "${SUBMIT_DIR}/outputs/outputs/checkpoints" && ! -e "${SUBMIT_DIR}/outputs/checkpoints" ]]; then
+  ln -s outputs/checkpoints "${SUBMIT_DIR}/outputs/checkpoints" 2>/dev/null || true
+  echo "Linked outputs/checkpoints -> outputs/outputs/checkpoints for resume" >&2
+fi
 
 # Pinned ezpz-utils (like B2v2 + data_resume working jobs)
 source "${SUBMIT_DIR}/torchtitan/experiments/ezpz/scripts/load_pinned_ezpz_utils.sh"
