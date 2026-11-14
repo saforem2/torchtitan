@@ -12,7 +12,7 @@ Two-host Monarch GRPO (trainer host 0, vLLM generator host 1, TorchStore weight 
 
 XPU blockers, in the order they surfaced: vLLM `PassConfig(enable_sp)` (`bd525d7f9`); `vllm-xpu-kernels` `4e38707` enables MHC/MQA-logits/GDN bindings on a PVC build but compiles them only for Xe2, so `_xpu_C` fails to import and vLLM picks no device (rebuilt wheel, `build_vllm_xpu_kernels_pvc.pbs`); vLLM `is_quantized_kv_cache` missing from the XPU vLLM (`bd2e0a95f`); `torchvision` for vLLM's warmup (`0.30.0.dev20261007+xpu`, `--no-deps`). CUDA needed three: workers advertised by IP on multi-NIC hosts, no `MPI_Init` in actors, rank 1 exits without `MPI_Finalize`.
 
-Open: XPU generator weight fetch is ~73 s per sync on both machines (CUDA `3.9` s). Smoke launcher: `rl/scripts/grpo/multihost_grpo_e2e.pbs`. Details: [upstream-sync](upstream-sync.md).
+Open: XPU generator weight fetch is ~73 s per sync on both machines (CUDA `3.9` s). Smoke launcher: [`rl/scripts/grpo/multihost_grpo_e2e.pbs`](../rl/scripts/grpo/multihost_grpo_e2e.pbs). Details: [upstream-sync](upstream-sync.md), [monarch.md](production/rl/monarch.md).
 
 ## 2026-11-14 15:44 UTC: Sirius — 5B 7454 + 10B 197 both R
 
@@ -23,11 +23,11 @@ Open: XPU generator weight fetch is ~73 s per sync on both machines (CUDA `3.9` 
 | `33525` | `5b_olmo3_polaris` | `2N 8` | `7000->7454` (`+454` since `14:31 UTC`) | `5.97 g30.5` -> `6.02 g10.0`, `tps 416 MFU 4.27%` | `step-7400`, `3.8T` | `01:14/06:00` `R` |
 | `33527` | `10b_olmo3_polaris` | `8N 32` | fresh `1->197` (prior `step-100` corrupt `no .metadata` cleaned) | `12.03 g2.37` -> `6.31 g1.36`, `tps 186 MFU 3.81%` | `step-100` `89G` | `01:12/06:00` `R` |
 
-`5B` resumed from `step-7000` (not `7092` — that `walltime 21667>21600` kill left `7092` but resume picks last good `7000`); now `7454` (+`+` ckpts `7200/7300/7400`). `10B` fresh-restarted after `Gloo x3200c0s13b0` crash at `step 200` plus walltime-corrupt `step-100` (`32` shards `no .metadata` via `rm -rf` `1s` delay). Polaris `7832130 Q 18N small` (`Not enough free nodes`) unchanged since Nov 9 `13:40` (`81 small / 43 medium` queued `15:44 UTC`, `32 small` running) — `Sirius` only mover. `LR-finder` `Nov 11-12` `150` `GBS128` `1e-8->1e-1`: `5B AdamW 2.48e-04 / Mano 1.81e-04`, `10B AdamW 1.28e-04 / Mano 2.25e-04` (inversion at `10B`) — ready for `Polaris` `queue` drain.
+`5B` resumed from `step-7000` (not `7092` — that `walltime 21667>21600` kill left `7092` but resume picks last good `7000`); now `7454` (+`+` ckpts `7200/7300/7400`). `10B` fresh-restarted after `Gloo x3200c0s13b0` crash at `step 200` plus walltime-corrupt `step-100` (`32` shards `no .metadata` via `rm -rf` `1s` delay). Polaris `7832130 Q 18N small` (`Not enough free nodes`) unchanged since Nov 9 `13:40` (`81 small / 43 medium` queued `15:44 UTC`, `32 small` running) — `Sirius` only mover. `LR-finder` `Nov 11-12` `150` `GBS128` `1e-8->1e-1`: `5B AdamW 2.48e-04 / Mano 1.81e-04`, `10B AdamW 1.28e-04 / Mano 2.25e-04` (inversion at `10B`; not yet on the [5B](experiments/lr-finder/agpt/5b/README.md) / [10B](experiments/lr-finder/agpt/10b/README.md) LR-finder pages) — ready for `Polaris` `queue` drain. Report: [Sirius hedge report](production/agpt/sirius-olmo3-5b-10b.md).
 
 ## 2026-11-14: Sirius hedge — 5B to 7091, 10B allocation exhausted _(superseded by entry above)_
 
-`33487` `5B 2N` `R` `4900->7091` steady `loss 6.05->5.90 g6.3`, `tps 416 MFU 4.27%`, `71` ckpts (`step-600..7092`, `3.6T`) — +2191 steps since `15:18 UTC` Nov 13 restart, ~1h walltime left on `6h` slice. `33488` `10B 8N` `32 GPUs` `FSDP` proof done (`12.00->6.19` over `200` steps, `tps 182`), `Gloo` node crash `x3200c0s13b0` at `step 200` (`FAILOVER exhausted`), `ckpt step-100 106G` intact; resubmit rejected `No active allocation found for project AuroraGPT and resource sirius` — allocation spent. Polaris `7832130 Q 18N small` still `Q` `13:03 UTC` (`83 small / 43 medium` queued, down from `91/52` but `Not enough free nodes`). `5B` remains only forward mover until Polaris drains or allocation renewed.
+`33487` `5B 2N` `R` `4900->7091` steady `loss 6.05->5.90 g6.3`, `tps 416 MFU 4.27%`, `71` ckpts (`step-600..7092`, `3.6T`) — +2191 steps since `15:18 UTC` Nov 13 restart, ~1h walltime left on `6h` slice. `33488` `10B 8N` `32 GPUs` `FSDP` proof done (`12.00->6.19` over `200` steps, `tps 182`), `Gloo` node crash `x3200c0s13b0` at `step 200` (`FAILOVER exhausted`), `ckpt step-100 106G` intact; resubmit rejected `No active allocation found for project AuroraGPT and resource sirius` — allocation spent. Polaris `7832130 Q 18N small` still `Q` `13:03 UTC` (`83 small / 43 medium` queued, down from `91/52` but `Not enough free nodes`). `5B` remains only forward mover until Polaris drains or allocation renewed. Report: [Sirius hedge report](production/agpt/sirius-olmo3-5b-10b.md).
 
 
 ## 2026-11-13: Sirius hedge — 10B 8N + 5B 2N survive outage, both restarted
@@ -41,7 +41,7 @@ Recovery `15:18 UTC` after Sirius `UAN` outage (`~00:13-15:18`, `sirius-uan-0002
 | `33471` | `5b_olmo3_polaris` | `2N 8` | `2900->5058` | `6.50 g15.4` -> `step 5058 6.14 g12.1`, `tps 409 MFU 4.2%` | `50` ckpts `step-600..5000` (`2.6T`, every 100) | **`E walltime` 06:10** (21658s > 21600) — resubmitted `33487 R` from `step-5000` |
 | `33487` | `5b_olmo3_polaris` | `2N 8` | `5058->` | resumes `step-5000` | — | **`R` 15:18+** `6h` |
 
-`10B` proof is the value: `FSDP2` on `32 GPUs` ran `200` steps with healthy convergence (`12.00->6.38` in 1h15m, `tps 185 MFU 3.8%`) — confirms Polaris `10B` `n32` will not hit `FSDP uneven sharding`. `5B` is steady real training: `2900->5058` (+2158 steps, `+50` ckpts) through the `13h` gap. Prior note at `00:11` (now superseded) only had `step 1-2` and `step 2901`; this entry replaces it with walltime-verified `200`/`5058`.
+`10B` proof is the value: `FSDP2` on `32 GPUs` ran `200` steps with healthy convergence (`12.00->6.38` in 1h15m, `tps 185 MFU 3.8%`) — confirms Polaris `10B` `n32` will not hit `FSDP uneven sharding`. `5B` is steady real training: `2900->5058` (+2158 steps, `+50` ckpts) through the `13h` gap. Prior note at `00:11` (now superseded) only had `step 1-2` and `step 2901`; this entry replaces it with walltime-verified `200`/`5058`. Report: [Sirius hedge report](production/agpt/sirius-olmo3-5b-10b.md).
 
 ## 2026-11-13 00:11 UTC: Sirius hedge — 10B 8N FSDP-safe + 5B 2N resume 2900 _(superseded by entry above)_
 
@@ -52,13 +52,13 @@ Recovery `15:18 UTC` after Sirius `UAN` outage (`~00:13-15:18`, `sirius-uan-0002
 | `33469` | `agpt_10b_olmo3_polaris` | `8N / 32 GPUs` | fresh `step 1` `6h` | `step 1 12.00 g 2.41` -> `step 2 11.86` `CUDA graph recorded`, no FSDP uneven | **`R` 00:09-06:00** — proves Polaris 10B 32-GPU sizing |
 | `33471` | `agpt_5b_olmo3_polaris` | `2N / 8 GPUs` | resume `step-2900` `n2-gbs8` | `step 2901 6.50 g 15.4` | **`R` 00:09-06:00** — 2900->2901, 4.3h gap covered |
 
-`DCP` checkpoints are sharding-incompatible across world sizes: `n2-gbs8` (8 GPUs) cannot load as `n8-gbs32` (32 GPUs) — `33468 8N 5B` fresh was correct vs dupe `33470 Q` killed. `CKPT_DIR=checkpoints/agpt-${MODEL}-n${NNODES}-gbs${GBS}`. Sirius outage `~00:13 UTC` (`sirius-uan-0002 10.140.48.172 Connection timed out`, all paths) blocked commit until now — last good poll `00:11`; jobs expected `R` to `06:00`.
+`DCP` checkpoints are sharding-incompatible across world sizes: `n2-gbs8` (8 GPUs) cannot load as `n8-gbs32` (32 GPUs) — `33468 8N 5B` fresh was correct vs dupe `33470 Q` killed. `CKPT_DIR=checkpoints/agpt-${MODEL}-n${NNODES}-gbs${GBS}`. Sirius outage `~00:13 UTC` (`sirius-uan-0002 10.140.48.172 Connection timed out`, all paths) blocked commit until now — last good poll `00:11`; jobs expected `R` to `06:00`. Report: [Sirius hedge report](production/agpt/sirius-olmo3-5b-10b.md).
 
-
+## 2026-11-12: Sunspot CPT-FW-Edu 4N at 34.3k; pretok landed
 
 CPT-FW-Edu 4N (`agpt_2b_mds_mix_owm_edu_6040` 60/40 FW-Edu, `PPN=8 GBS=64 seq=8192`, 100B=190734 steps) now `12483437 R 00:34` `step 34298 loss 1.93 MFU 17.1%` — **17.8% budget**, MFU recovered 13.4%->17.1% since chain start (`12483388 step 26742` -> `12483416 32800->33303` -> `12483437`). Chaining `afterany 12483446 H` every `02:00` (no gap) to 50k then general SFT; latest disk `step-34200`, eval at `step-17000` was `0.000` by design (pure CPT). Narrow SFT-on-CPT scored `0.015` vs B2 `0.165` — format collapse, not CPT evidence.
 
-Pretok **landed** `12483443`: `_pretokenize_distill_cot_mix_1n.sh` (NPROC=1, `rl-monarch-torch214-locality-20261001`, bypass `ezpz_setup_job`) — `91,481 rows -> 36,934 packed @8192` (3.4G, `dataset_info.json` + 8x `data-*.arrow`) via mix-cache `cba5c64` hit in 5.8s to `/tegu/datasets/agpt2b-distill-cot-mix-len8192`. 6 prior segfaults `3553055` (`12483441` etc.) fixed by VENV `rl-monarch` path. Broad SFT `sft_distill_cot_4n.sh --pretokenized_dataset` ready but **parked to CPT 50k** per `POST-TRAINING-PLAN.md` phase 2.
+Pretok **landed** `12483443`: `_pretokenize_distill_cot_mix_1n.sh` (NPROC=1, `rl-monarch-torch214-locality-20261001`, bypass `ezpz_setup_job`) — `91,481 rows -> 36,934 packed @8192` (3.4G, `dataset_info.json` + 8x `data-*.arrow`) via mix-cache `cba5c64` hit in 5.8s to `/tegu/datasets/agpt2b-distill-cot-mix-len8192`. 6 prior segfaults `3553055` (`12483441` etc.) fixed by VENV `rl-monarch` path. Broad SFT `sft_distill_cot_4n.sh --pretokenized_dataset` ready but **parked to CPT 50k** per `POST-TRAINING-PLAN.md` phase 2. Reports: [POST-TRAINING-2B](production/POST-TRAINING-2B.md), [60/40 kind-shift](production/sft/fineweb-edu-60-40-kind-shift.md), [CPT](production/cpt/README.md).
 
 ## 2026-11-11: Sunspot CPT-FW-Edu 4N resumes (step 10k) + pretok & GRPO launch — _provisional, jobs live_
 
@@ -68,7 +68,7 @@ Pretok **landed** `12483443`: `_pretokenize_distill_cot_mix_1n.sh` (NPROC=1, `rl
 > pretok, and GSM8K-CoT delta vs `B2=0.205` for CPT/GRPO. Marked `R --` = staged,
 > `R host` = training.
 
-**Lane 1 — CPT-FW-Edu 4N 60/40 kind-shift** (`agpt_2b_mds_mix_owm_edu_6040`, 40% open-web-math / 60% FineWeb-Edu via Grain local parquets `140 shards`, `GrainPacking`, `PPN=8`, `GBS=64`, `seq=8192`, 100B budget => `190734` steps, base `gs138650/step-0` MDS v2, VENV `xpu-torch216-sync-5a7a622f16`):
+**Lane 1 — CPT-FW-Edu 4N 60/40 kind-shift** ([kind-shift plan](production/sft/fineweb-edu-60-40-kind-shift.md), [CPT](production/cpt/README.md)) (`agpt_2b_mds_mix_owm_edu_6040`, 40% open-web-math / 60% FineWeb-Edu via Grain local parquets `140 shards`, `GrainPacking`, `PPN=8`, `GBS=64`, `seq=8192`, 100B budget => `190734` steps, base `gs138650/step-0` MDS v2, VENV `xpu-torch216-sync-5a7a622f16`):
 
 | Job | Steps | Tip loss | MFU | Outcome |
 | --- | --- | --- | --- | --- |
