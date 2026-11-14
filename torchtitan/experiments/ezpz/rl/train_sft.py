@@ -662,7 +662,12 @@ def main() -> None:
                 )
             except ImportError:
                 labels_col = [
-                    [tid if keep else -100 for tid, keep in zip(ex["input_ids"], ex[mask_column], strict=True)]
+                    [
+                        tid if keep else -100
+                        for tid, keep in zip(
+                            ex["input_ids"], ex[mask_column], strict=True
+                        )
+                    ]
                     for ex in dataset
                 ]
                 dataset = dataset.add_column("labels", labels_col)
