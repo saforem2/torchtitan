@@ -22,12 +22,6 @@ config.dataloader = ZephonDataLoader.Config.from_toml(
 )
 ```
 
-For AGPT (requires `ezpz` deps):
-
-```bash
-python -m torchtitan.train --module torchtitan.experiments.ezpz.agpt.config_registry --config agpt_debugmodel_zephon
-```
-
 ## TOML recipes
 
 | File | Purpose |
