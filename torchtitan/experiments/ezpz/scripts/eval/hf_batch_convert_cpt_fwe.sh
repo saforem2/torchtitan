@@ -7,14 +7,13 @@
 #PBS -A datascience
 #PBS -j oe
 #
-# Batch convert CPT FineWeb-Edu DCP -> HF for MMLU-first roadmap.
-# Frontier: 114200/190700 (12483856 R 4N). HF 67400 READY, 72800 blocked
-# (no tokenizer), 13000 empty, 74400-114200 DCP exists but HF missing.
+# Frontier: 115600/190700 (12483856 R 4N). HF 67400 READY, 72800 blocked
+# (no tokenizer), 13000 empty, 74400-115600 DCP exists but HF missing.
 #
 # Fixups:
 #   72800 - copy config.json + tokenizer.* from 67400 HF (already converted)
 #   13000 - reconvert DCP -> HF (empty HF dir, included in loop)
-# Batch:  74400 -> 114200 every 200 via seq
+# Batch:  74400 -> 115600 every 200 via seq
 #
 # Staging lock pattern from hf_export.py (staged_export) is already handled
 # inside convert_to_hf.py -- no manual .lock/.staging needed here.
@@ -54,6 +53,6 @@ fi
 # ---------------------------------------------------------------------------
 # Batch convert loop (spec one-liner, expanded for readability but kept verbatim)
 # ---------------------------------------------------------------------------
-for s in 13000 $(seq 74400 200 114200); do DCP=$DCP_ROOT/step-$s HF=$HF_ROOT/step-$s/hf; [[ -f $HF/ezpz_export.json ]] && continue; $REPO/.venv/bin/python -m torchtitan.experiments.ezpz.eval.convert_to_hf "$DCP" "$HF" --model_name experiments.ezpz.agpt --model_flavor 2b-mds --export_dtype bfloat16 || exit 1; cp "$HF_CONFIG" "$HF/config.json"; cp "$TOK_SRC"/tokenizer.* "$HF/"; ls -lh "$HF"/model-*.safetensors; done
+for s in 13000 $(seq 74400 200 115600); do DCP=$DCP_ROOT/step-$s HF=$HF_ROOT/step-$s/hf; [[ -f $HF/ezpz_export.json ]] && continue; $REPO/.venv/bin/python -m torchtitan.experiments.ezpz.eval.convert_to_hf "$DCP" "$HF" --model_name experiments.ezpz.agpt --model_flavor 2b-mds --export_dtype bfloat16 || exit 1; cp "$HF_CONFIG" "$HF/config.json"; cp "$TOK_SRC"/tokenizer.* "$HF/"; ls -lh "$HF"/model-*.safetensors; done
 
 echo CONVERTED $(ls $HF_ROOT/step-*/hf/ezpz_export.json 2>/dev/tty | wc -l) HF
