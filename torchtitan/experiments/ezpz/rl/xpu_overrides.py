@@ -1213,6 +1213,56 @@ def patch_vllm_is_quantized_kv_cache() -> None:
     torch_utils.is_quantized_kv_cache = _is_quantized_kv_cache
 
 
+def patch_generator_initial_load_gloo_for_xpu() -> None:
+    """Run the generator's initial DCP load over a Gloo group on XPU.
+
+    Since upstream #5844 a LoRA generator loads its frozen base itself
+    (``rl/generator/model.py`` ``_load_initial_weights`` -> ``CheckpointManager``
+    -> ``dcp.load``). DCP plans the load with object collectives on the default
+    group. In the generator that group comes from vLLM's ``external_launcher``,
+    which makes it pure XCCL, not the hybrid ``xpu:xccl,cpu:gloo`` group that
+    ``patch_init_distributed_for_xpu`` gives the trainer. oneCCL then segfaults
+    in its worker thread (``ccl_comp_copy`` -> ``memmove``; Aurora 9092177,
+    9092084). Hand ``dcp.load`` a Gloo group for the duration of the load. A
+    default group that already has a CPU backend is left alone.
+    """
+    import torch
+    import torch.distributed as dist
+
+    if not (hasattr(torch, "xpu") and torch.xpu.is_available()):
+        return
+    try:
+        import torch.distributed.checkpoint as dcp
+
+        import torchtitan.rl.generator.model as gen_model
+    except Exception:
+        return
+    orig = gen_model._load_initial_weights
+    if getattr(orig, "_ezpz_gloo", False):
+        return
+
+    def load_initial_weights_over_gloo(*args, **kwargs):
+        if not dist.is_initialized() or "gloo" in str(dist.get_backend()):
+            return orig(*args, **kwargs)
+        group = dist.new_group(backend="gloo")
+        dcp_load = dcp.load
+
+        def load_with_gloo(*load_args, **load_kwargs):
+            if load_kwargs.get("process_group") is None:
+                load_kwargs["process_group"] = group
+            return dcp_load(*load_args, **load_kwargs)
+
+        dcp.load = load_with_gloo
+        try:
+            return orig(*args, **kwargs)
+        finally:
+            dcp.load = dcp_load
+            dist.destroy_process_group(group)
+
+    load_initial_weights_over_gloo._ezpz_gloo = True  # type: ignore[attr-defined]
+    gen_model._load_initial_weights = load_initial_weights_over_gloo
+
+
 _SP_PASS_FIELDS = ("enable_sp", "sp_min_token_num")
 
 
@@ -1309,3 +1359,6 @@ def apply_all_xpu_patches() -> None:
             "EZPZ_RL_ONECCL_TCP_KVS=0: skipping TCP-KVS forcing; "
             "trainer uses the default (pmix/CXI) oneCCL transport"
         )
+    # Last: it imports torchtitan.rl.generator.model (and vLLM), so every patch
+    # above must already be in place.
+    patch_generator_initial_load_gloo_for_xpu()
