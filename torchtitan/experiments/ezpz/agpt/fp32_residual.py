@@ -233,8 +233,11 @@ class AgptFp32ResidualModel(AgptModel):
 
         # norm is RMSNorm (returns input dtype); run it in fp32 for accuracy,
         # then cast to the lm_head compute dtype (bf16) before the head so the
-        # head matmul stays bf16 and does not dtype-mismatch.
-        h = self.norm(h) if self.norm is not None else h
+        # head matmul stays bf16 and does not dtype-mismatch. Upstream
+        # (spmd series, #5802-#5807) moved the TP gather out of lm_head into
+        # Decoder._pre_lm_head_norm_and_gather; ShardingConfig no longer inserts
+        # it, so call the same helper or TP>1 feeds a sharded h to lm_head.
+        h = self._pre_lm_head_norm_and_gather(h)
 
         if self._skip_lm_head:
             # ChunkedLossWrapper applies the head itself; hand it the compute

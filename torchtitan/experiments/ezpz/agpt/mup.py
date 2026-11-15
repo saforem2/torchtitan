@@ -198,7 +198,7 @@ def mup_attention_scale(
 # process-wide), and it is NOT a new positional parameter. The forwards below
 # redeclare the inherited positional parameter NAMES exactly, unchanged:
 # `set_gqa_inner_attention_local_spmd` (models/common/decoder_sharding.py:299-314)
-# keys `in_dst_shardings` by positional-arg name, and the local_map contract
+# keys `input_shardings` by positional-arg name, and the local_map contract
 # check asserts under TP>1 when a mapped input is missing. Renaming
 # q_TNH/k_TNH/v_TNH broke TP=2 once already -- see agpt/__init__.py:76-91.
 #

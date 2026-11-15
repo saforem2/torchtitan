@@ -34,7 +34,6 @@ from torchtitan.models.common.decoder_sharding import (
     inner_attention_local_spmd_sharding_config,
     lm_head_sharding_config,
     norm_sharding_config,
-    pre_lm_head_norm_sharding_config,
     residual_activation_placement,
     rope_cache_sharding_config,
     rowwise_sharding_config,
@@ -59,7 +58,7 @@ def set_agpt_sharding_config(
     config.tok_embeddings.sharding_config = token_embedding_sharding_config(
         enable_sp=enable_sp
     )
-    config.norm.sharding_config = pre_lm_head_norm_sharding_config(enable_sp=enable_sp)
+    config.norm.sharding_config = norm_sharding_config(enable_sp=enable_sp)
     config.lm_head.sharding_config = lm_head_sharding_config()
     for layer_cfg in config.layers:
         _set_agpt_layer_sharding(layer_cfg, enable_sp=enable_sp)

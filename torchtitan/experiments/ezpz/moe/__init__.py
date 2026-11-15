@@ -20,7 +20,7 @@ from torchtitan.models.base.module import Module
 
 from torchtitan.models.common import (
     ComplexRoPE,
-    Embedding,
+    VocabParallelEmbedding,
     Linear,
     RMSNorm,
     RoPE,
@@ -185,12 +185,12 @@ class EzpzScaledDotProductAttention(ScaledDotProductInnerAttention):
         **kwargs,
     ) -> torch.Tensor:
         # Positional arg names MUST be the shape-suffixed q_THK/k_THK/v_THV to
-        # match set_gqa_inner_attention_local_spmd's in_dst_shardings keys --
+        # match set_gqa_inner_attention_local_spmd's input_shardings keys --
         # the local_map contract check matches by positional-arg NAME and
         # asserts under TP>1 otherwise. Renamed from _BLNH 2026-08-25: #4121
         # (73aed7f6c) renamed the upstream keys and our port left the
         # parameters behind (MEASURED on the agpt twin, smoke 8781623 arm 2).
-        # Renamed AGAIN in sync 84: #4533 rekeyed in_dst_shardings a second
+        # Renamed AGAIN in sync 84: #4533 rekeyed input_shardings a second
         # time, _TNH -> q_THK/k_THK/v_THV, and renamed the contract fn to
         # ..._local_spmd. See the agpt twin for the full history.
         #
@@ -703,7 +703,7 @@ def _debugmodel() -> moeModel.Config:
         max_context_length=_model_max_context_length(layers),
         vocab_size=vocab_size,
         dim=dim,
-        tok_embeddings=Embedding.Config(
+        tok_embeddings=VocabParallelEmbedding.Config(
             num_embeddings=vocab_size, embedding_dim=dim, param_init=_EMBEDDING_INIT
         ),
         norm=RMSNorm.Config(normalized_shape=dim, param_init=_NORM_INIT),
@@ -762,7 +762,7 @@ def _debugmodel_flex_attn() -> moeModel.Config:
         max_context_length=_model_max_context_length(layers),
         vocab_size=vocab_size,
         dim=dim,
-        tok_embeddings=Embedding.Config(
+        tok_embeddings=VocabParallelEmbedding.Config(
             num_embeddings=vocab_size, embedding_dim=dim, param_init=_EMBEDDING_INIT
         ),
         norm=RMSNorm.Config(normalized_shape=dim, param_init=_NORM_INIT),
@@ -823,7 +823,7 @@ def _small() -> moeModel.Config:
         max_context_length=_model_max_context_length(layers),
         vocab_size=vocab_size,
         dim=dim,
-        tok_embeddings=Embedding.Config(
+        tok_embeddings=VocabParallelEmbedding.Config(
             num_embeddings=vocab_size, embedding_dim=dim, param_init=_EMBEDDING_INIT
         ),
         norm=RMSNorm.Config(normalized_shape=dim, param_init=_NORM_INIT),
@@ -882,7 +882,7 @@ def _16b() -> moeModel.Config:
         max_context_length=_model_max_context_length(layers),
         vocab_size=vocab_size,
         dim=dim,
-        tok_embeddings=Embedding.Config(
+        tok_embeddings=VocabParallelEmbedding.Config(
             num_embeddings=vocab_size, embedding_dim=dim, param_init=_EMBEDDING_INIT
         ),
         norm=RMSNorm.Config(normalized_shape=dim, param_init=_NORM_INIT),
@@ -945,7 +945,7 @@ def _236b() -> moeModel.Config:
         max_context_length=_model_max_context_length(layers),
         vocab_size=vocab_size,
         dim=dim,
-        tok_embeddings=Embedding.Config(
+        tok_embeddings=VocabParallelEmbedding.Config(
             num_embeddings=vocab_size, embedding_dim=dim, param_init=_EMBEDDING_INIT
         ),
         norm=RMSNorm.Config(normalized_shape=dim, param_init=_NORM_INIT),
@@ -1009,7 +1009,7 @@ def _671b() -> moeModel.Config:
         max_context_length=_model_max_context_length(layers),
         vocab_size=vocab_size,
         dim=dim,
-        tok_embeddings=Embedding.Config(
+        tok_embeddings=VocabParallelEmbedding.Config(
             num_embeddings=vocab_size, embedding_dim=dim, param_init=_EMBEDDING_INIT
         ),
         norm=RMSNorm.Config(normalized_shape=dim, param_init=_NORM_INIT),
@@ -1068,7 +1068,7 @@ def _500m() -> moeModel.Config:
         max_context_length=_model_max_context_length(layers),
         vocab_size=vocab_size,
         dim=dim,
-        tok_embeddings=Embedding.Config(
+        tok_embeddings=VocabParallelEmbedding.Config(
             num_embeddings=vocab_size, embedding_dim=dim, param_init=_EMBEDDING_INIT
         ),
         norm=RMSNorm.Config(normalized_shape=dim, param_init=_NORM_INIT),
@@ -1127,7 +1127,7 @@ def _2b() -> moeModel.Config:
         max_context_length=_model_max_context_length(layers),
         vocab_size=vocab_size,
         dim=dim,
-        tok_embeddings=Embedding.Config(
+        tok_embeddings=VocabParallelEmbedding.Config(
             num_embeddings=vocab_size, embedding_dim=dim, param_init=_EMBEDDING_INIT
         ),
         norm=RMSNorm.Config(normalized_shape=dim, param_init=_NORM_INIT),
@@ -1189,7 +1189,7 @@ def _4b() -> moeModel.Config:
         max_context_length=_model_max_context_length(layers),
         vocab_size=vocab_size,
         dim=dim,
-        tok_embeddings=Embedding.Config(
+        tok_embeddings=VocabParallelEmbedding.Config(
             num_embeddings=vocab_size, embedding_dim=dim, param_init=_EMBEDDING_INIT
         ),
         norm=RMSNorm.Config(normalized_shape=dim, param_init=_NORM_INIT),
@@ -1252,7 +1252,7 @@ def _7b() -> moeModel.Config:
         max_context_length=_model_max_context_length(layers),
         vocab_size=vocab_size,
         dim=dim,
-        tok_embeddings=Embedding.Config(
+        tok_embeddings=VocabParallelEmbedding.Config(
             num_embeddings=vocab_size, embedding_dim=dim, param_init=_EMBEDDING_INIT
         ),
         norm=RMSNorm.Config(normalized_shape=dim, param_init=_NORM_INIT),
@@ -1311,7 +1311,7 @@ def _10b_2b() -> moeModel.Config:
         max_context_length=_model_max_context_length(layers),
         vocab_size=vocab_size,
         dim=dim,
-        tok_embeddings=Embedding.Config(
+        tok_embeddings=VocabParallelEmbedding.Config(
             num_embeddings=vocab_size, embedding_dim=dim, param_init=_EMBEDDING_INIT
         ),
         norm=RMSNorm.Config(normalized_shape=dim, param_init=_NORM_INIT),
@@ -1413,7 +1413,7 @@ def _agpt_2b_50k_moe_sdpa_aurora_full_sonic() -> moeModel.Config:
         max_context_length=rope.max_context_length,
         vocab_size=50304,
         dim=dim,
-        tok_embeddings=Embedding.Config(
+        tok_embeddings=VocabParallelEmbedding.Config(
             num_embeddings=50304, embedding_dim=dim, param_init=_EMBEDDING_INIT
         ),
         norm=RMSNorm.Config(normalized_shape=dim, param_init=_NORM_INIT),

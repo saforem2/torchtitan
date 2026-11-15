@@ -54,7 +54,7 @@ from torchtitan.rl.examples.alphabet_sort.rubric import RewardAlphabetSort
 from torchtitan.rl.generator import SamplingConfig, VLLMCudaGraphConfig, VLLMGenerator
 from torchtitan.rl.losses import GRPOLoss
 from torchtitan.rl.observability.metrics import MetricsProcessor
-from torchtitan.rl.rollout.rollouter import Rollouter, RolloutWorker
+from torchtitan.rl.rollout.rollouter import Rollouter, MessageEnvRolloutWorker
 from torchtitan.rl.rubric import Rubric
 from torchtitan.rl.trainer import Trainer
 
@@ -68,7 +68,7 @@ def _alphabet_sort_rollouter_config() -> Rollouter.Config:
     return Rollouter.Config(
         train_dataset=AlphabetSortDataset.Config(seed=42),
         validation_dataset=AlphabetSortDataset.Config(seed=99),
-        worker=RolloutWorker.Config(
+        worker=MessageEnvRolloutWorker.Config(
             rubric=Rubric.Config(reward_fns=[RewardAlphabetSort.Config(weight=1.0)]),
             message_env=AlphabetSortEnv.Config(),
         ),
