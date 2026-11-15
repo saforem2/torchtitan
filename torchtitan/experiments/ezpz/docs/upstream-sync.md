@@ -101,10 +101,45 @@ gives `4 x 12` and `48`; `4n_ppn12_rep2` gives `2 x 12`; LoRA layouts build
 `FrozenQwen3Model`. The other two, upstream's `_mxfp8` (SM100 only) and `_sglang` (not
 installed), are excluded in `recipe_adapter.py`. No GRPO run on this tree yet.
 
+### Fixed in this PR: LoRA GRPO after #5844
+
+#5844 makes weight syncs carry only trainable parameters and raises when a generator
+model freezes parameters without a checkpointer. `agpt_rl_model_configs` always applies
+LoRA, so every `alphabet_sort_agpt` and `reason_agpt` config failed at generator setup
+(`The model config freezes 227 parameters ... Set generator.checkpointer`). They, and the
+`xpu_trial` LoRA layouts, now set `generator.checkpointer =
+CheckpointManager.Config(initial_load_in_hf=True)`, as upstream's `geometry3k` LoRA recipe
+does.
+
+On XPU that load then segfaulted. The generator's DCP load plans with object collectives
+on the default group, which in the generator is vLLM's pure-XCCL `external_launcher` group;
+the core (Aurora `9092177`) is in oneCCL's worker thread (`ccl_comp_copy` -> `memmove`). The
+trainer avoids this through `patch_init_distributed_for_xpu`'s hybrid `xpu:xccl,cpu:gloo`
+group. `patch_generator_initial_load_gloo_for_xpu` (`rl/xpu_overrides.py`) gives `dcp.load`
+a Gloo group for the generator's initial load.
+
+Aurora, sync tip `6aae5b6a`, `multihost_grpo_e2e.pbs` (trainer on host 0, one vLLM
+generator on host 1, TorchStore sync every step), `rl-monarch-torch216-sync-20261112`:
+
+| Run | Job | Steps | Loss | Reward | Max logprob diff | Generator pull, share of step |
+|---|---|---|---|---|---|---|
+| AGPT-2B LoRA, GSM8K (reference recipe) | `9092336` | `3`, exit `0` | `0.0054` / `-0.11` / `-0.022` | `0.35` / `0.45` / `0.41` | `0.011`-`0.035` | ~`0` |
+| Qwen3-0.6B LoRA, `xpu_trial` `lora_2n_ppn1_10steps` | `9092341` | `10`, exit `0` | `-0.0030` -> `-0.0025` | `0.54` -> `0.17` | `0.32`-`0.54` | `0.17`-`0.22` |
+| Qwen3-0.6B full, `xpu_trial` `full_2n_ppn1_10steps` | `9092084` | `10`, exit `0` | `-0.0056` -> `-0.0022` | `0.53` -> `0.27` | `0.44`-`2.40` | `0.84`-`0.90` |
+
+The LoRA run waits on the weight pull for a fifth of each step, the full run for most of
+it: syncs now carry only the adapters. Ten steps at `lr=2e-6` do not move the reward; these
+runs check the loop, not learning. The Qwen recipes generate in bf16, which is why their
+logprob gap is wider than the fp32 AGPT reference.
+
+Still open: `xpu_trial` layouts with a 4-tile trainer and a TP=4 generator
+(`*_2n_ppn4_gtp4_*`) hang at process-mesh setup after a `sig=11` in a Monarch `SetupActor`,
+with and without LoRA (`9091990`, `9092084`). `multihost_train_upstream.py` supports exactly
+one generator, so layouts with more generators were not run.
+
 ### Not checked
 
-- RL end to end (generation, weight sync, LoRA adapter-only sync under #5844). Only
-  the `xpu_trial` recipes were built on hardware (above); no GRPO run.
+- RL on CUDA, and XPU layouts beyond one trainer host plus one generator.
 - `30ffb3b7` (#6057): HF export now raises for models with frozen parameters. A LoRA
   checkpoint exported to HF would hit it.
 
