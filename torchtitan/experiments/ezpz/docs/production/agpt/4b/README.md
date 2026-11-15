@@ -12,7 +12,7 @@ names use the geometry name `5b`. Its 9.48B twin is [agpt 10B](../10b/README.md)
 
 | Machine | Config | Shape | Head | Tokens | Now |
 |---|---|---|---|---:|---|
-| Aurora | `agpt_v2_4b_4k_olmo_mix` | 512N, GBS 6144 | `step-2600` | 65.4B | **running**, `9076358` (started 2026-11-14, W&B `lwewe0xv`) |
+| Aurora | `agpt_v2_4b_4k_olmo_mix` | 512N, GBS 6144 | `step-2600` | 65.4B | **running**, `9076358` (started 2026-11-14, W&B `rh5cn13o`) |
 | Sirius | `agpt_5b_olmo3_polaris` | 2N, GBS 8 | `step-7400` | 0.24B | running, `33525` (at `15:44 UTC`) |
 | Polaris | `agpt_5b_olmo3_polaris` | 16N / 32N | -- | -- | queued since Nov 9, `7832130` / `7832131` |
 
