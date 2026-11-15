@@ -25,7 +25,7 @@ from torchtitan.experiments.ezpz.rl.reason_agpt.reward import (
 )
 from torchtitan.rl.rollout.advantage import AdvantageEstimator
 from torchtitan.rl.rollout.data import IterableRolloutDataLoader
-from torchtitan.rl.rollout.rollouter import Rollouter, MessageEnvRolloutWorker
+from torchtitan.rl.rollout.rollouter import MessageEnvRolloutWorker, Rollouter
 from torchtitan.rl.rollout.rubric import Rubric
 from torchtitan.rl.rollout.token_env import TokenEnv
 

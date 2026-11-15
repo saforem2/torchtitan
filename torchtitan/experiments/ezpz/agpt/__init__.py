@@ -38,11 +38,11 @@ from torchtitan.models.common import (
     ComplexRoPE,
     compute_ffn_hidden_dim,
     CosSinRoPE,
-    VocabParallelEmbedding,
     Linear,
     RMSNorm,
     RoPE,
     TransformerBlock,
+    VocabParallelEmbedding,
 )
 from torchtitan.models.common.attention import InnerAttention
 from torchtitan.models.common.config_utils import (

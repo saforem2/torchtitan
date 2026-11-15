@@ -47,9 +47,7 @@ _QWEN3_0_6B_FFN_DIM1 = 3072
 _SEQ_LEN = 2048  # rl_grpo_qwen3_0_6b_flex's sequence length
 
 
-def _qwen3_0_6b_host_layout(
-    num_hosts: int, gpus_per_host: int
-) -> tuple[int, int, int]:
+def _qwen3_0_6b_host_layout(num_hosts: int, gpus_per_host: int) -> tuple[int, int, int]:
     """``(dp_replicate, dp_shard, num_generator_gpus)`` for ``num_hosts`` hosts.
 
     One host splits its GPUs between trainer and generators; more hosts train on
@@ -161,28 +159,28 @@ for _arm in ("full", "lora"):
                 )
                 for _rep in (1, 2):
                     if _hosts > 2 and _hosts // 2 * _gpus % _rep == 0:
-                        globals()[f"{_stem}_rep{_rep}_{_steps}steps"] = (
-                            functools.partial(
-                                _rl_grpo_qwen3_0_6b_hosts,
-                                _arm,
-                                _hosts,
-                                _gpus,
-                                _steps,
-                                dp_replicate=_rep,
-                            )
+                        globals()[
+                            f"{_stem}_rep{_rep}_{_steps}steps"
+                        ] = functools.partial(
+                            _rl_grpo_qwen3_0_6b_hosts,
+                            _arm,
+                            _hosts,
+                            _gpus,
+                            _steps,
+                            dp_replicate=_rep,
                         )
                 _generator_gpus = _gpus - _gpus // 2 if _hosts == 1 else _gpus
                 for _gtp in (2, 4):
                     if _generator_gpus % _gtp == 0:
-                        globals()[f"{_stem}_gtp{_gtp}_{_steps}steps"] = (
-                            functools.partial(
-                                _rl_grpo_qwen3_0_6b_hosts,
-                                _arm,
-                                _hosts,
-                                _gpus,
-                                _steps,
-                                generator_tp=_gtp,
-                            )
+                        globals()[
+                            f"{_stem}_gtp{_gtp}_{_steps}steps"
+                        ] = functools.partial(
+                            _rl_grpo_qwen3_0_6b_hosts,
+                            _arm,
+                            _hosts,
+                            _gpus,
+                            _steps,
+                            generator_tp=_gtp,
                         )
 
 del _arm, _hosts, _gpus, _steps, _stem, _rep, _gtp, _generator_gpus

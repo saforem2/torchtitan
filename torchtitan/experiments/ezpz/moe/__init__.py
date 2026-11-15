@@ -20,11 +20,11 @@ from torchtitan.models.base.module import Module
 
 from torchtitan.models.common import (
     ComplexRoPE,
-    VocabParallelEmbedding,
     Linear,
     RMSNorm,
     RoPE,
     TransformerBlock,
+    VocabParallelEmbedding,
 )
 
 # MoE and TokenChoiceTopKRouter come straight from upstream — we have no
