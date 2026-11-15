@@ -55,17 +55,23 @@ export EZPZ_SFT_MIX_CACHE_DIR=/tegu/datasets/datasets/ezpz_sft_mixes
 SUBMIT_DIR="${PBS_O_WORKDIR:-$(pwd)}"
 source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup_job
 cd "${SUBMIT_DIR}"
-source .venv/bin/activate
-python3 -c "import trl; print('trl', trl.__version__)" || { echo "FATAL: trl missing"; exit 1; }
+VENV="${VENV:-/lus/tegu/projects/datascience/foremans/venvs/rl-monarch-torch214-locality-20261001}"
+if [[ -d "${VENV}/lib" ]]; then
+  _ld_first="${SUBMIT_DIR}/.cache/xpu-ld-first/$(basename "${VENV}")"
+  if [[ ! -e "${_ld_first}/.complete" ]]; then mkdir -p "${_ld_first}"; for _lib in "${VENV}"/lib/libur_* "${VENV}"/lib/libsycl.so* "${VENV}"/lib/libumf* "${VENV}"/lib/libtcm*; do [[ -e "${_lib}" ]] && ln -sf "${_lib}" "${_ld_first}/"; done; touch "${_ld_first}/.complete"; fi
+  export LD_LIBRARY_PATH="${_ld_first}:${LD_LIBRARY_PATH:-}"
+fi
+export VIRTUAL_ENV="${VENV}"
+export PATH="${VENV}/bin:/opt/pbs/bin:${PATH}"
+python3 -c "import trl; print('trl', trl.__version__)" || { echo "FATAL: trl missing in ${VENV}"; exit 1; }
 
 # num_proc override knob: walk down (e.g. NPROC=16) if the 8192 packing map
 # SIGBUSes -- see the tulu pretokenize memory lesson in the header comment.
 NPROC="${NPROC:-32}"
-BASE_MODEL="${HOME}/global_step138650"
+BASE_MODEL="${BASE_MODEL:-${HOME}/global_step138650}"
 OUT_DIR="/tegu/datasets/datasets/agpt2b-b3-instruct-cot-mix-len8192"
 LOG_DIR="logs/pretokenize-b3-instruct-cot-mix-${PBS_JOBID%%.*}"
 mkdir -p "${LOG_DIR}"
-
 echo "=== 1N DOWNLOAD+PRETOKENIZE: b3_instruct_cot_mix -> ${OUT_DIR} (len=8192, base=gs138650) ===" \
     | tee -a "${LOG_DIR}/run.log"
 git log -1 --oneline -- torchtitan/experiments/ezpz/rl/train_sft.py \
@@ -73,9 +79,9 @@ git log -1 --oneline -- torchtitan/experiments/ezpz/rl/train_sft.py \
 echo "" | tee -a "${LOG_DIR}/run.log"
 
 # Single-rank launch: pre-tokenize is a data job, no model training / no
-# collectives. `ezpz launch --np 1` keeps the ezpz env plumbing but runs one
-# rank.
-ezpz launch --np 1 python3 -m torchtitan.experiments.ezpz.rl.train_sft \
+# collectives. Bypass ezpz_setup_job's torch (circular import in rl-monarch
+# via doctor->torchinfo) — run directly with VENV python.
+"${VENV}/bin/python" -m torchtitan.experiments.ezpz.rl.train_sft \
     --sft_dataset b3_instruct_cot_mix \
     --model_name_or_path "${BASE_MODEL}" \
     --pretokenize_to "${OUT_DIR}" \

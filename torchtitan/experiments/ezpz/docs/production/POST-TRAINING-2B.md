@@ -1,10 +1,18 @@
 # AuroraGPT-2B post-training: complete status
 
-**Last updated: 2026-11-14.** Every number is quoted from a run doc — links go to the source. Most recent first.
+**Last updated: 2026-11-15 13:35 UTC.** Every number is quoted from a run doc — links go to the source. Most recent first.
 
-> **One-line status:** CPT-FWE 4N at **75k/190k (39.4% budget, `12483799 R` MFU ~18% healthy, step-75000 `22.4G`) — chain fixed to `12h` walltime (was `2h` churn, `99e918b342`), HF converts at `74000/74200` `3.7G` verified. SFT on fresh HF (`cpt74k-b3-1n`) blocked on `XCCL→ezpz launch` fix (raw `mpiexec` broke `CCL` on `PVC/FLAT`). Raw CPT CoT `0/200` on `73k/74k` is expected degenerate `pre-SFT` signal — meaningful CoT gates on SFT `final/` only. B2 `0.205` remains best CoT.
+> **One-line status:** CPT-FWE 4N at **111.2k/190.7k (58.3% budget, `12483856 R` MFU 15.8% tps 4625 healthy, step-111200 `23G` frontier, 556 ckpt dirs)** — `12h` walltime (`99e918b342`) healthy, resumed from `step-100000` at `01:31 UTC`, `+11.2k` steps in `06:04` (`~1.9k steps/hr`). HF converts at `74000/74200` `3.7G` verified; Sunspot `~/torchtitan/outputs/hf*` empty — next convert at 112k gate. Raw CPT CoT `0/200` pre-SFT expected; B2 `0.205` remains best CoT.
 
 ---
+## 2026-11-15 — CPT 111.2k/190.7k (58.3%) chain healthy, frontier advanced
+
+**CPT-FWE 4N** (`agpt_2b_mds_mix_owm_edu_6040` `60/40 FWE`, `PPN=8 GBS=64 seq=8192`, `100B=190734` steps): `12483856 R` `step-111200` `23G` `32/32` shards `556` ckpt dirs, **`58.3%` of `100B` budget**, `MFU 15.8%` `tps 4625` `tflops 47.03` healthy. Resumed `01:31 UTC` from `step-100000` (`checkpointer.folder ./outputs/outputs/checkpoints/agpt-2b-cpt-fineweb-edu-n4-gbs64 at step 100000 (fault-tolerance restart)` — `outputs/checkpoints` symlink fix active). Walltime `12:00:00` (`stime 07:29:06`, `06:04` elapsed, `~05:56` remaining), `4N` `x1921c1s[0,2,3,4]b0n0` `datascience/workq`. Validation loss `12.53` at `111200` (flat `12.53-12.60` since `110700`).
+
+**Next chain action:** `qsub -l select=4 -l walltime=12:00:00 -v NHOSTS_TRAIN=4 torchtitan/experiments/ezpz/scripts/cpt_fineweb_edu_4n.sh` at `~13:29 UTC` expiry — resumes from `step-~122k` (`CKPT_DIR` auto-resume, `CKPT_INTERVAL=200`). No watcher requeue; manual hop required. `sync/walltime` verified: `cpt_fineweb_edu_4n.sh#PBS -l walltime=12:00:00`, `VENV xpu-torch216-sync-5a7a622f16` with `LD-first` (`grain 0.2.18 ok`), `MDS_ANNEAL_BASE /lus/tegu/.../agpt-2b-mds-gs138650/step-0` `.metadata` exists, `fineweb-edu-100BT/sample/100BT` `140 parquet` `16 shards`.
+
+**Sync note:** Sunspot `~/torchtitan HEAD 2872f71e (ezpz-grain-sft-cot)` = `origin/ezpz 0c47bbf43a (PR #88 merged)` on this lane — `0c47bbf43a` is a docs/ci merge (`lychee` re-trigger + `eval_cot_gsm8k.py` unused import drop), no CPT code delta; `HEAD..origin/ezpz` is 5 docs-only commits. Local `/Users/sam/projects/.../torchtitan HEAD 2872f71e` matches Sunspot. `POST-TRAINING-PLAN.md` is an **untracked local file** (`git status untracked`) — exists on disk but never committed to `origin/ezpz`; authoritative plan lives in `POST-TRAINING-2B.md` phases + `cpt/README.md`.
+
 
 ## 2026-11-14 — CPT 75k + SFT labels + CoT baseline (in-flight)
 

@@ -83,10 +83,17 @@ export https_proxy=http://proxy.alcf.anl.gov:3128
 SUBMIT_DIR="${PBS_O_WORKDIR:-$(pwd)}"
 source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup_job
 cd "${SUBMIT_DIR}"
-source .venv/bin/activate
-python3 -c "import trl; print('trl', trl.__version__)" || { echo "FATAL: trl missing"; exit 1; }
+VENV="${VENV:-/lus/tegu/projects/datascience/foremans/venvs/rl-monarch-torch214-locality-20261001}"
+if [[ -d "${VENV}/lib" ]]; then
+  _ld_first="${SUBMIT_DIR}/.cache/xpu-ld-first/$(basename "${VENV}")"
+  if [[ ! -e "${_ld_first}/.complete" ]]; then mkdir -p "${_ld_first}"; for _lib in "${VENV}"/lib/libur_* "${VENV}"/lib/libsycl.so* "${VENV}"/lib/libumf* "${VENV}"/lib/libtcm*; do [[ -e "${_lib}" ]] && ln -sf "${_lib}" "${_ld_first}/"; done; touch "${_ld_first}/.complete"; fi
+  export LD_LIBRARY_PATH="${_ld_first}:${LD_LIBRARY_PATH:-}"
+fi
+export VIRTUAL_ENV="${VENV}"
+export PATH="${VENV}/bin:/opt/pbs/bin:${PATH}"
+python3 -c "import trl; print('trl', trl.__version__)" || { echo "FATAL: trl missing in ${VENV}"; exit 1; }
 
-BASE_MODEL="${HOME}/global_step138650"
+BASE_MODEL="${BASE_MODEL:-${HOME}/global_step138650}"
 PRETOK_DIR="/tegu/datasets/datasets/agpt2b-b3-instruct-cot-mix-len8192"
 CKPT_DIR="outputs/sft/agpt2b-b3-instruct-cot-mix-8n"
 LOG_DIR="logs/sft-agpt2b-b3-instruct-cot-mix-8n-${PBS_JOBID%%.*}"
