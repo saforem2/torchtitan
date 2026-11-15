@@ -9,7 +9,9 @@
 # On Sirius the ladder wrapper may be invoked from $HOME; PBS_O_WORKDIR then
 # equals $HOME and the script would look for checkpoints/outputs under the
 # wrong tree. Canonicalize to the torchtitan checkout regardless of submit CWD.
-if [[ -d "${PBS_O_WORKDIR:-}/torchtitan" ]]; then
+# NOTE: test for .git so we do not confuse the repo root (~/torchtitan) with
+# its package subdir (~/torchtitan/torchtitan, which always exists).
+if [[ -d "${PBS_O_WORKDIR:-}/torchtitan/.git" ]]; then
     cd "${PBS_O_WORKDIR}/torchtitan" || exit 1
     WORKDIR="${PBS_O_WORKDIR}/torchtitan"
 else
