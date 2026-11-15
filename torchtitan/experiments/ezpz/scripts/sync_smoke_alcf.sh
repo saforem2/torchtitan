@@ -87,18 +87,15 @@ _SEQ="--training.max-context-length=512 --training.num-tokens-per-microbatch-per
 DEFAULT_CONFIGS=(
     "ezpz.agpt:agpt_debugmodel:${_SEQ}"
     # TP=2 is the arm that catches the local_map/SPMD contract breaks
-    # (#4533 class), which only fire under TP>1. It currently fails on ezpz
-    # with the KNOWN_FAILURES signature below; keep it so a change in how it
-    # fails (or a fix) is visible.
+    # (#4533 class), which only fire under TP>1.
     "ezpz.agpt:agpt_debugmodel:${_SEQ} --parallelism.tensor-parallel-degree=2"
     "ezpz.moe:moe_debugmodel:${_SEQ}"
 )
-# label-suffix|regex. Open bug: at TP>1 the attention local_map does not
-# redistribute, so the SDPA wrapper receives sequence-sharded tokens
-# (256 of 512 at TP=2). See docs/guides/known-bugs/moe-tp2-wo-placement.md.
-KNOWN_FAILURES=(
-    "tensor-parallel-degree=2|token count [0-9]+ is not a multiple of max_context_length"
-)
+# label-suffix|regex, e.g. "tensor-parallel-degree=2|some error text".
+# Empty: the TP=2 "token count 256 is not a multiple of max_context_length"
+# failure was autograd multithreading running AC recompute without the SPMD
+# mesh; train.py now disables it (Sunspot 12483861: agpt TP=2 trains).
+KNOWN_FAILURES=()
 
 if [[ -n "${SMOKE_CONFIGS:-}" ]]; then
     CONFIGS=()

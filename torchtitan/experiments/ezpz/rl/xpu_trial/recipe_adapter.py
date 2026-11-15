@@ -69,6 +69,10 @@ _EXCLUDE_SUBSTRINGS = (
     "gpt_oss",
     "qwen3_6_27b",
     "qwen3-6-27b",
+    # Upstream recipes that cannot run on XPU: MXFP8 needs SM100+, and sglang is
+    # not installed in the XPU RL venvs (Sunspot 12483862).
+    "mxfp8",
+    "sglang",
 )
 
 # Explicit allowlist for the families we keep (prefix match).  This is the
