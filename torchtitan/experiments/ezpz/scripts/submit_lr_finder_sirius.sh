@@ -11,13 +11,13 @@
 # wrong tree. Canonicalize to the torchtitan checkout regardless of submit CWD.
 if [[ -d "${PBS_O_WORKDIR:-}/torchtitan" ]]; then
     cd "${PBS_O_WORKDIR}/torchtitan" || exit 1
+    WORKDIR="${PBS_O_WORKDIR}/torchtitan"
 else
     cd "${PBS_O_WORKDIR:-$(pwd)}" || exit 1
+    WORKDIR="${PBS_O_WORKDIR:-$(pwd)}"
 fi
-if [[ -f "${PBS_O_WORKDIR:-.}/.ezpz-utils-cache/ezpz-utils.sh" ]]; then
-    source "${PBS_O_WORKDIR:-.}/.ezpz-utils-cache/ezpz-utils.sh"
-else
-    source <(curl -fsSL --max-time 30 https://bit.ly/ezpz-utils)
+if [[ -f "${WORKDIR}/.ezpz-utils-cache/ezpz-utils.sh" ]]; then
+    source "${WORKDIR}/.ezpz-utils-cache/ezpz-utils.sh"
 fi
 ezpz_load_modules
 ezpz_setup_job
@@ -27,7 +27,8 @@ export LD_LIBRARY_PATH="${HOME}/.local/mpi-compat:${LD_LIBRARY_PATH}"
 
 VENV_DIR="${HOME}/torchtitan/.venv"
 source "${VENV_DIR}/bin/activate"
-log_message INFO "Sirius LR-finder shared-NFS: ${VENV_DIR}/bin/python"
+# Config registry uses relative ./assets/hf/... (correct from torchtitan checkout).
+export TORCHTITAN_ROOT="${HOME}/torchtitan"
 MODEL_SIZE="${MODEL_SIZE:-5b}"
 export LRF_CONFIG="agpt_${MODEL_SIZE}_olmo2tok_smoke"
 export LRF_OPTIMIZERS="${LRF_OPTIMIZERS:-adamw mano}"

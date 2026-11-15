@@ -7,7 +7,6 @@ For the campaign-wide records, see the
 For methodology and acceptance criteria, see the
 [LR-finder methodology](../../README.md).
 
-
 ## Status
 
 **Production LR: open.**
@@ -42,6 +41,54 @@ Artifacts: [`sirius-33429-5b-adamw-150.csv`](../data/2026-11-12-olmo3-gbs128-sir
 [`sirius-33429-5b-mano-150.csv`](../data/2026-11-12-olmo3-gbs128-sirius/sirius-33429-5b-mano-150.csv) |
 [`sirius-33542-5b-muon-150.csv`](../data/2026-11-12-olmo3-gbs128-sirius/sirius-33542-5b-muon-150.csv) |
 [`sirius-33542-5b-sophiag-150.csv`](../data/2026-11-12-olmo3-gbs128-sirius/sirius-33542-5b-sophiag-150.csv) | [manifest](../data/2026-11-12-olmo3-gbs128-sirius/README.md)
+
+### Fixed-LR candidate table (GBS=128, validated LRs)
+
+Four validated LRs feed the gated fixed-LR matrix (all blow-up/10):
+
+| model | optimizer | fixed-LR candidate | blow-up LR | evidence job | status |
+|---|---|---:|---:|---|---|
+| 5B | AdamW | **2.48e-04** | `2.48e-03` | `33429` | validated |
+| 5B | Muon | **6.54e-04** | `6.54e-03` | `33542` | validated |
+| 10B | AdamW | **1.28e-04** | `1.28e-03` | `33430` | validated |
+| 10B | Muon | **1.06e-03** | `1.06e-02` | `33543` | validated |
+
+See [GBS128 report](../2026-11-12-olmo3-gbs128-sirius.md) and
+[agpt index](../README.md#recommended-learning-rates) for full context.
+Muon's basin is 2.6x-8.3x higher than AdamW at this batch.
+
+### SophiaG degenerate -- excluded from fixed-LR matrix
+
+SophiaG is **excluded** from the fixed-LR matrix until re-measurement:
+
+- **5B** (`33542`, 150/150): detector reports two candidates -- `7.00e-07`
+  (`7.00e-06` blow-up) and `1.01e-04` (`1.01e-03` blow-up). The first is a noise
+  crossing in the nearly-flat early basin (loss barely moved at that LR); the
+  second sits near the shallow observed minimum (`10.00` at `1.06e-03`) but the
+  curve barely descends there (12.00 -> 10.00 vs AdamW 12.01 -> 9.38) and is too
+  shallow to trust. The `~1e-5` noise and `~1e-3` drift span two decades, so
+  detector output is untrusted -- neither LR can be safely fixed.
+- **10B** (`33543`, 25/150): incomplete -- `trajectory_fingerprint mismatch`
+  (`a002...` vs `8d2e...` in `checkpoints/lr_finder_10b_sophiag`) from a stale
+  checkpoint on auto-retry. No complete CSV; fingerprint bug, not a measurement.
+
+Do not use SophiaG for production at GBS=128 without a clean re-run.
+
+### GBS scaling law -- placeholder (gated)
+
+The GBS scaling law (GBS 32 / 512 / 2048) extends the GBS=128 baseline to test
+how optimal LR varies with batch size. It is **not yet measured**.
+
+**Completion gate:** all 6 ladder jobs (5B x {32,512,2048} + 10B x {32,512,2048})
+must reach **PBS Exit 0** and record **LRF_STEPS** rows (150/150) with finite
+loss and **no** `trajectory_fingerprint mismatch` error. Dispatch: see
+`submit_lr_finder_gbs_ladder_sirius.sh` (5B) and
+`submit_lr_finder_gbs_ladder_10b_sirius.sh` (10B) -- both `GBS_VALUES=(32 512 2048)`.
+Preflight: `preflight_lrf_gbs.sh` / `preflight_lrf_gbs_10b.sh`.
+
+Until the gate passes, treat the fixed-LR matrix as GBS=128 only; do not
+extrapolate optimal LR across batch sizes. When the ladder completes, this
+section will be replaced with the fitted scaling-law table and figures.
 
 ## GBS=6144 evidence (2026-09-18 campaign, separate batch)
 

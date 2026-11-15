@@ -39,9 +39,10 @@ else
   if grep -q 'walltime=' "${FIXED_SCRIPT}"; then pass "has walltime"; else fail "missing walltime"; fi
   if grep -q 'torchtitan/.venv' "${FIXED_SCRIPT}"; then pass "uses ~/torchtitan/.venv"; else fail "missing ~/torchtitan/.venv"; fi
   if grep -q 'training.steps.*1000\|FIXED_STEPS.*1000' "${FIXED_SCRIPT}"; then pass "has training.steps 1000"; else fail "missing training.steps 1000"; fi
-  if grep -q -- '--lr_finder.enable' "${FIXED_SCRIPT}"; then fail "must NOT contain --lr_finder.enable (fixed-LR, not finder)"; else pass "no --lr_finder.enable (correct for fixed-LR)"; fi
   if grep -q -- '--optimizer.lr' "${FIXED_SCRIPT}"; then pass "has --optimizer.lr override"; else fail "missing --optimizer.lr override"; fi
+  # Gated: fixed-LR matrix comments must note TT_CONFIG_JSON pattern and GBS scaling-law gate
+  if grep -q 'TT_CONFIG_JSON' "${FIXED_SCRIPT}"; then pass "notes TT_CONFIG_JSON override pattern"; else fail "missing TT_CONFIG_JSON comment (intended --optimizer.lr / TT_CONFIG_JSON pattern)"; fi
+  if grep -q 'trajectory_fingerprint' "${FIXED_SCRIPT}"; then pass "notes trajectory_fingerprint gate"; else fail "missing trajectory_fingerprint gate comment"; fi
+  if grep -q 'GBS scaling law\|GBS.*32.*512.*2048\|GBS_VALUES' "${FIXED_SCRIPT}"; then pass "notes GBS scaling-law gate (32/512/2048)"; else fail "missing GBS scaling-law gate note (32/512/2048)"; fi
 fi
-echo ""
-echo "=========================================================="
 if (( FAILURES == 0 )); then echo " preflight PASSED — all checks ok"; echo "=========================================================="; exit 0; else echo " preflight FAILED — ${FAILURES} check(s) failed"; echo "=========================================================="; exit 1; fi

@@ -30,6 +30,47 @@ For Polaris `agpt_5b_olmo3_polaris` / `agpt_10b_olmo3_polaris` at the same GBS=1
 - **10B** AdamW `1.28e-04`, Mano `2.25e-04`, **Muon `1.06e-03`** -- SophiaG incomplete
 with the usual 10x margin already applied (i.e. blow-up is 10x above).
 
+## Fixed-LR candidate table (GBS=128, validated)
+
+Four validated LRs (blow-up/10) feed the gated fixed-LR matrix. Dispatch via
+`submit_fixed_lr_sirius.sh` with `--optimizer.lr` / `TT_CONFIG_JSON` override
+(see script header); matrix stays gated until the GBS scaling law completes.
+
+| model | optimizer | fixed-LR candidate | blow-up LR | evidence job | status |
+|---|---|---:|---:|---|---|
+| 5B | AdamW | **2.48e-04** | `2.48e-03` | `33429` | validated |
+| 5B | Muon | **6.54e-04** | `6.54e-03` | `33542` | validated |
+| 10B | AdamW | **1.28e-04** | `1.28e-03` | `33430` | validated |
+| 10B | Muon | **1.06e-03** | `1.06e-02` | `33543` | validated |
+
+### SophiaG degenerate -- excluded from fixed-LR matrix
+
+SophiaG is excluded from the fixed-LR matrix at GBS=128:
+- **5B** (`33542`, 150/150): detector reports `7.00e-07` (`7.00e-06` blow-up)
+  and `1.01e-04` (`1.01e-03` blow-up). The first is a noise crossing in the
+  nearly-flat early basin; the second sits near the shallow minimum (`10.00` at
+  `1.06e-03`) but the curve barely descends (12.00 -> 10.00 vs AdamW 12.01 ->
+  9.38) and is too shallow to trust. Two-decade span = untrusted.
+- **10B** (`33543`, 25/150): incomplete -- `trajectory_fingerprint mismatch`
+  (`a002...` vs `8d2e...` in `checkpoints/lr_finder_10b_sophiag`) from a stale
+  per-GBS checkpoint dir on auto-retry. No complete CSV; fingerprint bug, not a
+  measurement.
+
+Do not use SophiaG for production at GBS=128 without a clean re-run.
+
+### GBS scaling law -- placeholder (gated)
+
+The GBS scaling law (GBS 32 / 512 / 2048) extends this GBS=128 baseline to
+test how optimal LR varies with batch size. It is not yet measured.
+
+**Completion gate:** all 6 ladder jobs (5B x {32,512,2048} + 10B x {32,512,2048})
+must reach PBS Exit 0 and record LRF_STEPS rows (150/150) with finite loss and
+no `trajectory_fingerprint mismatch` error. Dispatch: `submit_lr_finder_gbs_ladder_sirius.sh`
+(5B) and `submit_lr_finder_gbs_ladder_10b_sirius.sh` (10B) -- both
+`GBS_VALUES=(32 512 2048)`. Preflight: `preflight_lrf_gbs.sh` / `preflight_lrf_gbs_10b.sh`.
+Until the gate passes, treat the fixed-LR matrix as GBS=128 only. When the
+ladder completes, this section will be replaced with the fitted scaling-law
+table and figures.
 ## Curves
 
 ### All optimizers by model (GBS=128, including Nov 14-15)

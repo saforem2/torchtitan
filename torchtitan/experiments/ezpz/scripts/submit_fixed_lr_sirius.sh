@@ -15,9 +15,15 @@
 #   --config agpt_${MODEL_SIZE}_olmo2tok_smoke --optimizer adamw
 #   --training.steps 1000 --training.num-tokens-per-microbatch-per-dp-rank 4096
 #   --training.num-tokens-per-train-step GBS*4096 --training.max-context-length 4096
-# Fixed LR via: --optimizer adamw --optimizer.lr=${FIXED_LR}
-# TODO: wire --optim.lr via TT_CONFIG_JSON or config_registry override
-# Default FIXED_LR examples: 5B 2.48e-04 / 10B 1.28e-04
+# Fixed LR via: --optimizer ${FIXED_OPTIMIZER} --optimizer.lr=${FIXED_LR}
+#   Intended override pattern: --optimizer.lr on CLI or TT_CONFIG_JSON
+#   '{"optimizer": {"lr": <FIXED_LR>}}' merged via config_registry.
+#   Matrix NOT yet enabled -- gate: GBS scaling law (32/512/2048) must
+#   reach Exit 0 / LRF_STEPS on all 6 ladder jobs without
+#   trajectory_fingerprint mismatch (see
+#   docs/experiments/lr-finder/agpt/2026-11-12-olmo3-gbs128-sirius.md).
+#   Do NOT expand to multi-LR matrix until gate passes.
+# Default FIXED_LR examples: 5B adamw 2.48e-04 / muon 6.54e-04; 10B adamw 1.28e-04 / muon 1.06e-03 (Sirius GBS=128 Nov 11-15)
 # Outputs: tee outputs/fixed_lr_${MODEL_SIZE}_${FIXED_LR}_${PBS_JOBID}.log
 # (actual log is ${OUT}/run.log which resolves to that path; see OUT/LOG below)
 # Usage: FIXED_LR=2.48e-04 MODEL_SIZE=5b qsub -v FIXED_LR=2.48e-04,MODEL_SIZE=5b torchtitan/experiments/ezpz/scripts/submit_fixed_lr_sirius.sh
