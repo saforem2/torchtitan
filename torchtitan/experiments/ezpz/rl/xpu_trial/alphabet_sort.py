@@ -35,6 +35,7 @@ from torchtitan_recipes.rl.alphabet_sort import (
     rl_grpo_qwen3_0_6b_flex,
 )
 
+from torchtitan.components.checkpointer import CheckpointManager
 from torchtitan.components.loss import ChunkedLossWrapper
 from torchtitan.config.parallelism import ParallelismConfig
 from torchtitan.config.transform import LoRATransform, transform_model_config_
@@ -140,6 +141,12 @@ def _rl_grpo_qwen3_0_6b_hosts(
     config.trainer.loss.loss_fn.global_vocab_size = decoder_vocab_size(trainer_model)
     config.generator.model = generator_model
     config.generator.parallelism = generator_parallelism
+    if arm == "lora":
+        # Weight syncs carry only the adapters (upstream #5844), so the generator loads
+        # the frozen base from the HF checkpoint, as upstream's LoRA recipes do.
+        config.generator.checkpointer = CheckpointManager.Config(
+            initial_load_in_hf=True
+        )
     return config
 
 

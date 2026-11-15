@@ -232,7 +232,10 @@ def _agpt_grpo_config(
             # vLLM engine in eager mode (no CUDA-graph capture on XPU).
             engine=xpu_vllm_engine_config(),
             parallelism=generator_parallelism,
-            checkpointer=None,
+            # agpt_rl_model_configs always applies LoRA, which freezes the base. Since
+            # upstream #5844 weight syncs carry only the trainable adapters, so the
+            # generator loads the frozen base from the same HF checkpoint as the trainer.
+            checkpointer=CheckpointManager.Config(initial_load_in_hf=True),
             # max_tokens raised well above the alphabet_sort default so a full CoT
             # (<think> reasoning + <answer>) is not truncated to zero reward.
             # top_p was 0.95; SamplingConfig now rejects top_p < 1 because the
