@@ -1,5 +1,30 @@
 # Development Journal
 
+## 2026-11-15: Aurora seats — first 12h legs ended, three continuations queued
+
+The per-seat jobs from 2026-11-11 started 2026-11-14 after the outage. Three hit the 12h walltime (`Exit_status=-29`); the 20B-256 is still running.
+
+| Seat | Job | Steps this leg | Last good checkpoint | Loss at end | Notes |
+|---|---|---|---|---:|---|
+| 20B-512 | `9076330` | `10801`-`10900` (x4) | `step-10800` (unchanged) | 2.461 | every run died in the `step-10900` save |
+| 4B 512N | `9076358` | `2601`-`8989` | `step-8900` | 2.727 | 1677 s load, 297 s saves |
+| 10B 512N | `9076371` | `1`-`5000` | `step-4900` | 2.837 | first 10B at scale; step-1 loss normal |
+| 20B-256 | `9076346` | `21101`-... | `step-21400` (R) | 2.430 at `21451` | 921 s saves |
+
+20B-512: four runs reached step `10900`, started the save, and died 30-40 min later with `rc=143`. The segfaults in the log are oneCCL/MPI teardown after the kill. This fits the 1800 s idle watchdog (`IDLE_TIMEOUT`) killing a save that runs longer than 1800 s. No `step-10900` was written, so the seat has made no saved progress since `step-10800`. Unverified inference: the save itself is slow, not hung.
+
+The empty `step-10900`, `step-8990` and `step-5000` dirs left by the kills are skipped on resume: both the 20B and v2 checkpointers require `.metadata`.
+
+Continuations (seat pins unchanged: v2 `6ad208b`, 20B `torchtitan-20b512-fixedpos-20261029`; dry runs passed):
+
+| Seat | Job | Change |
+|---|---|---|
+| 20B-512 | `9091868` | `IDLE_TIMEOUT=5400` |
+| 4B 512N | `9091877` | none |
+| 10B 512N | `9091888` | `MANIFEST_V2_10B=olmo-mix-dp6144.txt` (keeps the sorted order the run started on; the script default is now `-shuf0`) |
+
+Open: `CKPT_INTERVAL` 100 -> 500 would cut the 4B's save overhead from ~45% to ~13% of wall time (not applied). Post-sync `ezpz` crashes on the production torch 2.13 venv (`torch.distributed.set_timeout`), so the seat pins must stay until the venv moves to torch >= 2.16.
+
 ## 2026-11-14: Monarch GRPO trains on XPU and CUDA after the upstream sync
 
 Two-host Monarch GRPO (trainer host 0, vLLM generator host 1, TorchStore weight sync), AGPT-2B LoRA on GSM8K, 3 steps, on the `8e63247c` sync branch (#79). All three exit `0`; validation response length `117.9` at steps 0 and 3 on each.
