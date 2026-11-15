@@ -1,9 +1,10 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
-# Ported from datologyai/torchtitan-zephon
 # All rights reserved.
 #
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
+#
+# Ported from datologyai/torchtitan-zephon.
 
 """TorchTitan config recipes for the Zephon checkpoint/resume smoke test.
 
