@@ -436,7 +436,7 @@ def main(args: list[str] | None = None) -> None:
 
     logger.info(
         "torchtitan version: %s (0.0.0 means __version__ is not defined correctly).",
-        torchtitan.__version__,
+        getattr(torchtitan, "__version__", "0.0.0+unknown"),
     )
 
     raw_args = sys.argv[1:] if args is None else args

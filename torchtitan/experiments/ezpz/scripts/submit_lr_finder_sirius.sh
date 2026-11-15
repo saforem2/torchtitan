@@ -6,10 +6,14 @@
 #PBS -l select=8
 #PBS -q workq
 #PBS -j oe
-# LR finder on Sirius — shared-NFS mode (no yeet, matches prod hedge).
-set -o pipefail
-cd "${PBS_O_WORKDIR:-$(pwd)}" || exit 1
-# Source ezpz-utils for log_message etc (prod does this)
+# On Sirius the ladder wrapper may be invoked from $HOME; PBS_O_WORKDIR then
+# equals $HOME and the script would look for checkpoints/outputs under the
+# wrong tree. Canonicalize to the torchtitan checkout regardless of submit CWD.
+if [[ -d "${PBS_O_WORKDIR:-}/torchtitan" ]]; then
+    cd "${PBS_O_WORKDIR}/torchtitan" || exit 1
+else
+    cd "${PBS_O_WORKDIR:-$(pwd)}" || exit 1
+fi
 if [[ -f "${PBS_O_WORKDIR:-.}/.ezpz-utils-cache/ezpz-utils.sh" ]]; then
     source "${PBS_O_WORKDIR:-.}/.ezpz-utils-cache/ezpz-utils.sh"
 else
