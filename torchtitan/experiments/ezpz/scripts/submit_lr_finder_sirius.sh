@@ -68,7 +68,7 @@ for model in ${MODEL_SIZE}; do
       --training.num-tokens-per-train-step "$(( LRF_GBS * LRF_SEQ_LEN ))" \
       --training.max-context-length "${LRF_SEQ_LEN}" \
       --metrics.log_freq 1 \
-      --checkpoint.enable --checkpoint.folder "checkpoints/lr_finder_${model}_${opt}" \
+      --checkpoint.enable --checkpoint.folder "checkpoints/lr_finder_${model}_${opt}_gbs${LRF_GBS}" \
       --checkpoint.interval 5 --checkpoint.no-last-save-model-only \
       --checkpoint.async-mode disabled \
       --lr_finder.enable --lr_finder.init_lr "${LRF_INIT_LR}" \
