@@ -32,6 +32,9 @@ ezpz_setup_job
 export PBS_O_WORKDIR="${WORKDIR}"
 export WORKING_DIR="${WORKDIR}"
 cd "${WORKDIR}" || exit 1
+export MPICH_GPU_SUPPORT_ENABLED=0
+export EZPZ_MPI_LABEL=1
+export LD_LIBRARY_PATH="${HOME}/.local/mpi-compat:${LD_LIBRARY_PATH}"
 
 VENV_DIR="${HOME}/torchtitan/.venv"
 source "${VENV_DIR}/bin/activate"
