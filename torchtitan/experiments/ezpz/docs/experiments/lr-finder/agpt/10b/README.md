@@ -15,22 +15,26 @@ For methodology and acceptance criteria, see the
 |---|---|---|
 | AdamW | `12478509`, 100/100 points over `1e-6`–`1e-3` | observed basin minimum `4.64e-4`; detector `4.16e-5` is a 10× safety heuristic, not a measured optimum |
 | SophiaG | `12478569`, 100/100 points over `1.66e-6`–`1.66e-4` | loss minimum is the final sample; detector `3.24e-7` is below the sampled range and is not defensible |
-## OLMo-3-1K GBS=128 on Sirius (2026-11-11 to 2026-11-12) -- direct input to Polaris chain
+## OLMo-3-1K GBS=128 on Sirius (2026-11-11 to 2026-11-15) -- direct input to Polaris chain
 
 Same model family at the **Polaris production batch** (GBS=128, 524k tok = 128 x 4096, 8N 32 GPUs Sirius H100).
 Exponential sweep `1e-08 -> 1e-01`, 150 steps, `mult=1.114243`, `fraction=0.15` of `steps=1000`.
-Both arms exited 0; `33450` Mano resumed from step 72/150 walltime kill via step-90 checkpoint.
+Seven of eight arms exited 0; `33543` SophiaG failed at 25/150 (fingerprint mismatch). `33450` Mano resumed from step 72/150 walltime kill via step-90 checkpoint.
 
 | optimizer | job | suggested (blow-up) | min loss at LR | interpretation |
 |---|---|---:|---:|---|
 | **AdamW** | `33430` | **1.28e-04** (`1.28e-03`) | `9.23` at `1.19e-03` | deeper descent |
 | **Mano** | `33450` | **2.25e-04** (`2.25e-03`) | `9.66` at `2.04e-03` | **76% higher than AdamW -- inversion vs 5B** |
+| **Muon** | `33543` | **1.06e-03** (`1.06e-02`) | `9.23` at `1.15e-02` | **8.3x higher than 5B AdamW, ties AdamW minimum** |
+| **SophiaG** | `33543` | incomplete | -- | 25/150, fingerprint mismatch -- no CSV |
 
+![10B all optimizers GBS128](figures/sirius-10b-all-opts-gbs128.png)
 ![10B AdamW vs Mano GBS128](figures/sirius-33430-33450-10b-adamw-mano-gbs128.png)
 
-Polaris 10B recommendation at GBS=128: **AdamW 1.28e-04 / Mano 2.25e-04** (see [GBS128 report](../2026-11-12-olmo3-gbs128-sirius.md)).
+Polaris 10B recommendation at GBS=128: **AdamW 1.28e-04 / Mano 2.25e-04 / Muon 1.06e-03** (see [GBS128 report](../2026-11-12-olmo3-gbs128-sirius.md)). SophiaG incomplete at this batch.
 Artifacts: [`sirius-33430-10b-adamw-150.csv`](../data/2026-11-12-olmo3-gbs128-sirius/sirius-33430-10b-adamw-150.csv) |
-[`sirius-33450-10b-mano-150.csv`](../data/2026-11-12-olmo3-gbs128-sirius/sirius-33450-10b-mano-150.csv) | [manifest](../data/2026-11-12-olmo3-gbs128-sirius/README.md)
+[`sirius-33450-10b-mano-150.csv`](../data/2026-11-12-olmo3-gbs128-sirius/sirius-33450-10b-mano-150.csv) |
+[`sirius-33543-10b-muon-150.csv`](../data/2026-11-12-olmo3-gbs128-sirius/sirius-33543-10b-muon-150.csv) | [manifest](../data/2026-11-12-olmo3-gbs128-sirius/README.md)
 
 ## GBS=6144 evidence (2026-09-18 campaign, separate batch)
 

@@ -20,23 +20,28 @@ is now validating sustained behavior.
 |---|---|---|
 | AdamW | `12478508`, 100/100 points over `1e-6`–`1e-3` | observed basin minimum `6.58e-4`; detector `7.17e-5` is crossing ÷ 10, not a measured optimum |
 | SophiaG | `12478624`, 100/100 points over `2.8e-6`–`2.8e-3` | old `7.04e-7` selected a pre-basin noise crossing; corrected candidate `4.96e-5` remains unvalidated |
-## OLMo-3-1K GBS=128 on Sirius (2026-11-11 to 2026-11-12) -- direct input to Polaris chain
+## OLMo-3-1K GBS=128 on Sirius (2026-11-11 to 2026-11-15) -- direct input to Polaris chain
 
 Same model family at the **Polaris production batch** (GBS=128, 524k tok = 128 x 4096, 8N 32 GPUs Sirius H100).
 Exponential sweep `1e-08 -> 1e-01`, 150 steps, `mult=1.114243`, `fraction=0.15` of `steps=1000`.
-Both arms exited 0 with finite losses throughout; FSDP2 on 32 GPUs clean.
+Seven of eight arms exited 0 with finite losses (10B SophiaG incomplete); FSDP2 on 32 GPUs clean.
 
 | optimizer | job | suggested (blow-up) | min loss at LR | interpretation |
 |---|---|---:|---:|---|
 | **AdamW** | `33429` | **2.48e-04** (`2.48e-03`) | `9.38` at `2.53e-03` | deeper descent than Mano |
 | **Mano** | `33429` | **1.81e-04** (`1.81e-03`) | `9.75` at `2.27e-03` | 27% lower than AdamW at 5B |
+| **Muon** | `33542` | **6.54e-04** (`6.54e-03`) | `9.57` at `6.69e-03` | 2.6x higher than AdamW, widest basin |
+| **SophiaG** | `33542` | degenerate | `10.00` at `1.06e-03` | detector noise at `7e-06`; real candidate `1.01e-04` not trusted |
 
+![5B all optimizers GBS128](figures/sirius-5b-all-opts-gbs128.png)
 ![5B AdamW vs Mano GBS128](figures/sirius-33429-5b-adamw-mano-gbs128.png)
 
-Cross-size AdamW comparison (5B vs 10B): [10B page](../10b/README.md) shows the inversion -- 10B Mano is 76% *higher* than AdamW.
-Polaris 5B recommendation at GBS=128: **AdamW 2.48e-04 / Mano 1.81e-04** (blow-up/10, see [GBS128 report](../2026-11-12-olmo3-gbs128-sirius.md)).
+Cross-size: [10B page](../10b/README.md) shows 10B inversions -- Mano 76% higher than AdamW, Muon 8.3x higher than 5B AdamW.
+Polaris 5B recommendation at GBS=128: **AdamW 2.48e-04 / Mano 1.81e-04 / Muon 6.54e-04** (blow-up/10, see [GBS128 report](../2026-11-12-olmo3-gbs128-sirius.md)). SophiaG not recommended at this batch.
 Artifacts: [`sirius-33429-5b-adamw-150.csv`](../data/2026-11-12-olmo3-gbs128-sirius/sirius-33429-5b-adamw-150.csv) |
-[`sirius-33429-5b-mano-150.csv`](../data/2026-11-12-olmo3-gbs128-sirius/sirius-33429-5b-mano-150.csv) | [manifest](../data/2026-11-12-olmo3-gbs128-sirius/README.md)
+[`sirius-33429-5b-mano-150.csv`](../data/2026-11-12-olmo3-gbs128-sirius/sirius-33429-5b-mano-150.csv) |
+[`sirius-33542-5b-muon-150.csv`](../data/2026-11-12-olmo3-gbs128-sirius/sirius-33542-5b-muon-150.csv) |
+[`sirius-33542-5b-sophiag-150.csv`](../data/2026-11-12-olmo3-gbs128-sirius/sirius-33542-5b-sophiag-150.csv) | [manifest](../data/2026-11-12-olmo3-gbs128-sirius/README.md)
 
 ## GBS=6144 evidence (2026-09-18 campaign, separate batch)
 
