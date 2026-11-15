@@ -16,8 +16,6 @@ else
     cd "${PBS_O_WORKDIR:-$(pwd)}" || exit 1
     WORKDIR="${PBS_O_WORKDIR:-$(pwd)}"
 fi
-export PBS_O_WORKDIR="${WORKDIR}"
-export WORKING_DIR="${WORKDIR}"
 if [[ -f "${WORKDIR}/.ezpz-utils-cache/ezpz-utils.sh" ]]; then
     source "${WORKDIR}/.ezpz-utils-cache/ezpz-utils.sh"
 else
@@ -25,9 +23,13 @@ else
 fi
 ezpz_load_modules
 ezpz_setup_job
-export MPICH_GPU_SUPPORT_ENABLED=0
-export EZPZ_MPI_LABEL=1
-export LD_LIBRARY_PATH="${HOME}/.local/mpi-compat:${LD_LIBRARY_PATH}"
+# ezpz_setup_job recomputes WORKING_DIR from os.getcwd() and then
+# overrides PBS_O_WORKDIR on mismatch, which can produce
+# ~/torchtitan/torchtitan on Sirius. Restore both to the canonical
+# checkout so ./assets/hf resolves.
+export PBS_O_WORKDIR="${WORKDIR}"
+export WORKING_DIR="${WORKDIR}"
+cd "${WORKDIR}" || exit 1
 
 VENV_DIR="${HOME}/torchtitan/.venv"
 source "${VENV_DIR}/bin/activate"
