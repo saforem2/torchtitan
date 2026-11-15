@@ -1,5 +1,75 @@
 # Upstream Sync Log
 
+## 2026-11-15: upstream `631d544b`, 20 commits
+
+Merge of `pytorch/torchtitan` `main` at `631d544b` into `ezpz` `0c47bbf4`. Merge base
+`8e63247c`. No textual conflicts, and upstream touches nothing under
+`experiments/ezpz/`. The merge commit is upstream only; the ports are one follow-up
+commit.
+
+### What the 20 commits change for us
+
+| Upstream (PR) | ezpz port |
+|---|---|
+| `Decoder.tok_embeddings` is `VocabParallelEmbedding.Config` (#5802) | agpt and MoE registries build `VocabParallelEmbedding.Config`, as `llama3` and `deepseek_v3` flavors now do |
+| `pre_lm_head_norm_sharding_config` removed; the final norm uses `norm_sharding_config` (#5802) | `agpt/sharding.py`, `moe/sharding.py` |
+| `ShardingConfig` never redistributes (#5807); `Decoder._pre_lm_head_norm_and_gather` issues the TP gather before `lm_head` (#5802) | `AgptFp32ResidualModel.forward` (`agpt/fp32_residual.py`) mirrors `Decoder.forward`, so it calls the same helper. Without it TP>1 hands `lm_head` a sharded `h` |
+| `in_src_shardings`/`out_src_shardings` -> `input_shardings`/`output_shardings`; `in_dst_shardings`/`out_dst_shardings` removed (#5807) | ezpz builds one `ShardingConfig`, with `state_shardings` only. Comments updated. The local-SPMD attention keys stay `q_THK`/`k_THK`/`v_THV`, so the inner-attention signatures are unchanged |
+| `RolloutWorker` -> `BaseRolloutWorker` + `MessageEnvRolloutWorker` (#6033) | `reason_agpt/rollouter.py`, `alphabet_sort_agpt/config_registry.py`, `rl/xpu_trial/alphabet_sort.py` use `MessageEnvRolloutWorker`; their configs keep `message_env`/`token_env` |
+| `deepseek_v3`: `build_mla_moe_layers` drops `first_layer_sharding_config`; `MTPDecoder` gathers after `mtp_norm` | ezpz MoE uses neither |
+| `Controller._push_model_state_dict` -> `_start_push_model_state_dict`; `ModelStateDictTransport` behind a flag (#5996, #5997) | `EzpzHostMeshController` overrides only `_build_actor_system`, which is unchanged. `MonarchActorSystem.provision` is unchanged, so `EzpzMonarchActorSystem.provision` still mirrors it |
+| LoRA RL: generators load the base checkpoint, weight syncs carry only adapters (#5844) | ezpz applies the same `LoRATransform` to trainer and generator configs (`rl/model_configs.py`); no override of the sync path |
+| attn-gym `0.0.20` from PyPI, `kernel_options` API (#6063) | ezpz has no `kernel_options` callers |
+
+### `ff3297d4`: skip the first-step `empty_cache()` on XPU (#5911)
+
+`Optim.step()` has called `device_module.empty_cache()` before the first optimizer step
+since #5450. Under XCCL the memory that call releases does not go back to the driver
+(intel/torch-xpu-ops#6125), and upstream saw OOMs, segfaults and hangs in step 2 of
+DeepSeek-V3 16B. The commit adds `device_type != "xpu"` to the guard in
+`components/optim/optim.py` and clears `_is_first_step_call` unconditionally. On XPU
+the first step now runs without the cache release; CUDA is unchanged.
+
+For us: every XPU run (agpt and MoE, Sunspot and Aurora) stops releasing the cache
+before step 1. Step-1 and step-2 memory readings on XPU are not comparable with
+pre-sync runs. `moe/model.py`'s own `torch.xpu.empty_cache()` between attention and
+the MoE is opt-in (`TT_MOE_EMPTY_CACHE_BETWEEN_ATTN_MOE=1`, off by default) and is
+untouched; under XCCL it can hit the same driver issue. The pinned production clones
+do not have this commit.
+
+### Results
+
+2 nodes, seed `42`, deterministic, `6` steps, venv `xpu-torch216-sync-5a7a622f16`
+(`torch 2.16.0.dev20261015+xpu`). Baseline `0c47bbf4` and sync `90adc433` ran back to
+back in the same allocation: Aurora `9091906`, Sunspot `12483859`.
+
+| Check | Aurora pre | Aurora post | Sunspot pre | Sunspot post |
+|---|---|---|---|---|
+| agpt TP=1 | `10.88101` -> `9.93350` | identical | `10.88101` -> `9.93350` | identical |
+| MoE TP=1 | `12.94051` -> `10.97520` | identical | `12.94051` -> `10.97520` | identical |
+| resume at step 3 | no result (see below) | diff `0` | diff `0` | diff `0` |
+| agpt TP=2 | known failure | known failure | known failure | known failure |
+
+Every step matches, not only the endpoints, and the numbers match the pre-sync Sunspot
+row of the `8e63247c` entry. TP=2 fails on both trees with the same
+`token count 256 is not a multiple of max_context_length 512`, so the TP>1 contract
+changes in this sync (explicit embedding and final-norm gathers) are not exercised past
+that point.
+
+The Aurora baseline resume died in Inductor's async compile pool
+(`OSError: [Errno 9] Bad file descriptor` in `async_compile.wakeup`, rank 18) before
+step 1. The Sunspot baseline resume in the same venv passes.
+
+### Not checked
+
+- RL end to end (generation, weight sync, LoRA adapter-only sync under #5844). The RL
+  configs were not built on hardware for this sync.
+- `30ffb3b7` (#6057): HF export now raises for models with frozen parameters. A LoRA
+  checkpoint exported to HF would hit it.
+- Already broken before this sync and left alone: `rl/xpu_trial/alphabet_sort.py`
+  imports `torchtitan.rl.losses` and `torchtitan.rl.rubric`, which do not exist on
+  `ezpz` or upstream.
+
 ## 2026-11-12: upstream `8e63247c`, 282 commits
 
 Merge of `pytorch/torchtitan` `main` at `8e63247c` into `ezpz` `959b851a` (all fork
