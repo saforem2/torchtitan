@@ -6,14 +6,18 @@
 #PBS -l select=8
 #PBS -q workq
 #PBS -j oe
-# LR finder on Sirius — shared-NFS mode (no yeet, matches prod hedge).
-set -o pipefail
-cd "${PBS_O_WORKDIR:-$(pwd)}" || exit 1
-# Source ezpz-utils for log_message etc (prod does this)
-if [[ -f "${PBS_O_WORKDIR:-.}/.ezpz-utils-cache/ezpz-utils.sh" ]]; then
-    source "${PBS_O_WORKDIR:-.}/.ezpz-utils-cache/ezpz-utils.sh"
+# On Sirius the ladder wrapper may be invoked from $HOME; PBS_O_WORKDIR then
+# equals $HOME and the script would look for checkpoints/outputs under the
+# wrong tree. Canonicalize to the torchtitan checkout regardless of submit CWD.
+if [[ -d "${PBS_O_WORKDIR:-}/torchtitan" ]]; then
+    cd "${PBS_O_WORKDIR}/torchtitan" || exit 1
+    WORKDIR="${PBS_O_WORKDIR}/torchtitan"
 else
-    source <(curl -fsSL --max-time 30 https://bit.ly/ezpz-utils)
+    cd "${PBS_O_WORKDIR:-$(pwd)}" || exit 1
+    WORKDIR="${PBS_O_WORKDIR:-$(pwd)}"
+fi
+if [[ -f "${WORKDIR}/.ezpz-utils-cache/ezpz-utils.sh" ]]; then
+    source "${WORKDIR}/.ezpz-utils-cache/ezpz-utils.sh"
 fi
 ezpz_load_modules
 ezpz_setup_job
@@ -23,7 +27,8 @@ export LD_LIBRARY_PATH="${HOME}/.local/mpi-compat:${LD_LIBRARY_PATH}"
 
 VENV_DIR="${HOME}/torchtitan/.venv"
 source "${VENV_DIR}/bin/activate"
-log_message INFO "Sirius LR-finder shared-NFS: ${VENV_DIR}/bin/python"
+# Config registry uses relative ./assets/hf/... (correct from torchtitan checkout).
+export TORCHTITAN_ROOT="${HOME}/torchtitan"
 MODEL_SIZE="${MODEL_SIZE:-5b}"
 export LRF_CONFIG="agpt_${MODEL_SIZE}_olmo2tok_smoke"
 export LRF_OPTIMIZERS="${LRF_OPTIMIZERS:-adamw mano}"
@@ -68,7 +73,7 @@ for model in ${MODEL_SIZE}; do
       --training.num-tokens-per-train-step "$(( LRF_GBS * LRF_SEQ_LEN ))" \
       --training.max-context-length "${LRF_SEQ_LEN}" \
       --metrics.log_freq 1 \
-      --checkpoint.enable --checkpoint.folder "checkpoints/lr_finder_${model}_${opt}" \
+      --checkpoint.enable --checkpoint.folder "checkpoints/lr_finder_${model}_${opt}_gbs${LRF_GBS}" \
       --checkpoint.interval 5 --checkpoint.no-last-save-model-only \
       --checkpoint.async-mode disabled \
       --lr_finder.enable --lr_finder.init_lr "${LRF_INIT_LR}" \
