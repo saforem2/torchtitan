@@ -39,8 +39,6 @@
 # tokenizer or max_length needs its own pre-tokenize.)
 set -o pipefail
 
-module load oneapi/release/2025.3.1 hdf5 pti-gpu
-export ZE_FLAT_DEVICE_HIERARCHY=FLAT
 export http_proxy=http://proxy.alcf.anl.gov:3128
 export https_proxy=http://proxy.alcf.anl.gov:3128
 # Shared dataset staging area (datasets group, separate quota) -- the raw HF
@@ -53,7 +51,7 @@ export HF_DATASETS_CACHE=/tegu/datasets/datasets/hf/datasets
 export EZPZ_SFT_MIX_CACHE_DIR=/tegu/datasets/datasets/ezpz_sft_mixes
 
 SUBMIT_DIR="${PBS_O_WORKDIR:-$(pwd)}"
-source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup_job
+source <(curl -fsSL https://ezpz.cool/utils.sh) && ezpz_setup /lus/tegu/projects/datascience/foremans/venvs/rl-monarch-torch214-locality-20261001
 cd "${SUBMIT_DIR}"
 VENV="${VENV:-/lus/tegu/projects/datascience/foremans/venvs/rl-monarch-torch214-locality-20261001}"
 if [[ -d "${VENV}/lib" ]]; then
@@ -68,7 +66,7 @@ python3 -c "import trl; print('trl', trl.__version__)" || { echo "FATAL: trl mis
 # num_proc override knob: walk down (e.g. NPROC=16) if the 8192 packing map
 # SIGBUSes -- see the tulu pretokenize memory lesson in the header comment.
 NPROC="${NPROC:-32}"
-BASE_MODEL="${BASE_MODEL:-${HOME}/global_step138650}"
+BASE_MODEL="${BASE_MODEL:-outputs/evals/cpt-fwe/step-74000/hf}"
 OUT_DIR="/tegu/datasets/datasets/agpt2b-b3-instruct-cot-mix-len8192"
 LOG_DIR="logs/pretokenize-b3-instruct-cot-mix-${PBS_JOBID%%.*}"
 mkdir -p "${LOG_DIR}"
@@ -79,8 +77,8 @@ git log -1 --oneline -- torchtitan/experiments/ezpz/rl/train_sft.py \
 echo "" | tee -a "${LOG_DIR}/run.log"
 
 # Single-rank launch: pre-tokenize is a data job, no model training / no
-# collectives. Bypass ezpz_setup_job's torch (circular import in rl-monarch
-# via doctor->torchinfo) — run directly with VENV python.
+# collectives. Bypass ezpz_setup's eager torch import (circular import via
+# doctor->torchinfo in rl-monarch) — run directly with VENV python.
 "${VENV}/bin/python" -m torchtitan.experiments.ezpz.rl.train_sft \
     --sft_dataset b3_instruct_cot_mix \
     --model_name_or_path "${BASE_MODEL}" \

@@ -39,11 +39,6 @@
 # Output: outputs/sft/agpt2b-b3-instruct-cot-mix-smoke-2n/
 set -o pipefail
 
-module load oneapi/release/2025.3.1 hdf5 pti-gpu
-export ZE_FLAT_DEVICE_HIERARCHY=FLAT
-export CCL_PROCESS_LAUNCHER=pmix
-export CCL_OP_SYNC=1
-export ONEAPI_DEVICE_SELECTOR="opencl:gpu;level_zero:gpu"
 export TORCH_CPP_LOG_LEVEL=ERROR
 export CCL_ZE_CACHE_GET_IPC_HANDLES_THRESHOLD="${CCL_ZE_CACHE_GET_IPC_HANDLES_THRESHOLD:-8000}"
 export CCL_ZE_CACHE_OPEN_IPC_HANDLES_THRESHOLD="${CCL_ZE_CACHE_OPEN_IPC_HANDLES_THRESHOLD:-8000}"
@@ -60,7 +55,7 @@ export http_proxy=http://proxy.alcf.anl.gov:3128
 export https_proxy=http://proxy.alcf.anl.gov:3128
 
 SUBMIT_DIR="${PBS_O_WORKDIR:-$(pwd)}"
-source <(curl -fsSL https://bit.ly/ezpz-utils) && ezpz_setup_job
+source <(curl -fsSL https://ezpz.cool/utils.sh) && ezpz_setup /lus/tegu/projects/datascience/foremans/venvs/rl-monarch-torch214-locality-20261001
 cd "${SUBMIT_DIR}"
 VENV="${VENV:-/lus/tegu/projects/datascience/foremans/venvs/rl-monarch-torch214-locality-20261001}"
 if [[ -d "${VENV}/lib" ]]; then
@@ -72,7 +67,7 @@ export VIRTUAL_ENV="${VENV}"
 export PATH="${VENV}/bin:/opt/pbs/bin:${PATH}"
 python3 -c "import trl; print('trl', trl.__version__)" || { echo "FATAL: trl missing in ${VENV}"; exit 1; }
 
-BASE_MODEL="${BASE_MODEL:-${HOME}/global_step138650}"
+BASE_MODEL="${BASE_MODEL:-outputs/evals/cpt-fwe/step-74000/hf}"
 PRETOK_DIR="/tegu/datasets/datasets/agpt2b-b3-instruct-cot-mix-len8192"
 CKPT_DIR="outputs/sft/agpt2b-b3-instruct-cot-mix-smoke-2n"
 LOG_DIR="logs/sft-agpt2b-b3-instruct-cot-mix-smoke-2n-${PBS_JOBID%%.*}"
@@ -101,7 +96,18 @@ echo "" | tee -a "${LOG_DIR}/run.log"
 # NO --auto-retry (stuck_pre_training false-positive on TRL's {'loss':...}
 # output -- same rationale as the 8N tulu_math_uc_mix launcher). This is a
 # bounded 20-step smoke inside a 1h walltime window; a hang just times out.
-ezpz launch --np 24 -ppn 12 --timeout "${IDLE_TIMEOUT:-1800}" \
+# Ranks from ezpz_setup (NGPUS/NGPU_PER_HOST), else PBS.
+if [[ -n "${NGPUS:-}" && -n "${NGPU_PER_HOST:-}" ]]; then
+  NPROC="${NGPUS}"; PPN="${NGPU_PER_HOST}"
+elif [[ -n "${NHOSTS_TRAIN:-}" ]]; then
+  PPN="${NGPU_PER_HOST:-12}"; NPROC=$(( NHOSTS_TRAIN * PPN ))
+else
+  # Fallback: derive from PBS select (no spare-aware NHOSTS_TRAIN)
+  _nhosts="$(sort -u "${PBS_NODEFILE:-/dev/null}" 2>/dev/null | wc -l)"; (( _nhosts > 0 )) || _nhosts="${PBS_SELECT:-1}"
+  # Sunspot XPU PPN=12 when CCL/ZE_FLAT present after ezpz_setup
+  PPN="${NGPU_PER_HOST:-12}"; NPROC=$(( _nhosts * PPN ))
+fi
+ezpz launch --nproc "${NPROC}" --nproc_per_node "${PPN}" --timeout "${IDLE_TIMEOUT:-1800}" \
     python3 -m torchtitan.experiments.ezpz.rl.train_sft \
     --pretokenized_dataset "${PRETOK_DIR}" \
     --model_name_or_path "${BASE_MODEL}" \
