@@ -16,8 +16,12 @@ else
     cd "${PBS_O_WORKDIR:-$(pwd)}" || exit 1
     WORKDIR="${PBS_O_WORKDIR:-$(pwd)}"
 fi
+export PBS_O_WORKDIR="${WORKDIR}"
+export WORKING_DIR="${WORKDIR}"
 if [[ -f "${WORKDIR}/.ezpz-utils-cache/ezpz-utils.sh" ]]; then
     source "${WORKDIR}/.ezpz-utils-cache/ezpz-utils.sh"
+else
+    source <(curl -fsSL --max-time 30 https://bit.ly/ezpz-utils)
 fi
 ezpz_load_modules
 ezpz_setup_job
