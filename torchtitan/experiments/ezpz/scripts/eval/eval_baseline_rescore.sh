@@ -30,7 +30,7 @@ SUBMIT_DIR=${PBS_O_WORKDIR:-$(pwd)}
 cd "$SUBMIT_DIR" || exit 1
 
 # shellcheck disable=SC1090,SC1091
-source <(curl -fsSL https://ezpz.cool/utils.sh) && ezpz_setup /home/foremans/torchtitan/.venv
+source <(curl -fsSL https://ezpz.cool/utils.sh) && ezpz_setup torchtitan/.venv
 
 REPO=/home/foremans/torchtitan
 # fall back to SUBMIT_DIR when REPO path not present (local dev checkout)
@@ -40,8 +40,10 @@ REPO=/home/foremans/torchtitan
 # legacy/worktree-relative globs. Both checkpoints are already HF exports
 # (no DCP consolidate needed here, unlike consolidate_and_eval_cot.sh).
 CKPT_900_HF="${CKPT_900_HF:-}"
+TEGU_SFT_ROOT=/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan/outputs/sft
 if [[ -z "$CKPT_900_HF" ]]; then
   for c in \
+    "$TEGU_SFT_ROOT/agpt-2b-gs138650-tulu-math-uc-mix-8n-gbs6144/checkpoint-900-hf" \
     "$REPO/outputs/sft/agpt-2b-gs138650-tulu-math-uc-mix-8n-gbs6144/checkpoint-900-hf" \
     "$REPO/outputs/sft/agpt2b-gs138650-tulu-math-uc-mix-8n-gbs6144/checkpoint-900-hf" \
     "$SUBMIT_DIR/outputs/sft/agpt-2b-gs138650-tulu-math-uc-mix-8n-gbs6144/checkpoint-900-hf" \
@@ -53,6 +55,7 @@ fi
 CKPT_93_HF="${CKPT_93_HF:-}"
 if [[ -z "$CKPT_93_HF" ]]; then
   for c in \
+    "$TEGU_SFT_ROOT/agpt2b-b2v2-distill-cot-2n-ep3-ckpt93-b2/final" \
     "$REPO/outputs/sft/agpt2b-gsm8k-r1cot-2n/checkpoint-93-hf" \
     "$REPO/outputs/sft/agpt2b-gsm8k-r1cot-2n/checkpoint-93" \
     "$REPO/outputs/checkpoints/agpt-2b-gsm8k-r1cot-2n/step-93" \
@@ -62,15 +65,17 @@ if [[ -z "$CKPT_93_HF" ]]; then
   done
 fi
 
+
 LIMIT="${LIMIT:-200}"
 DTYPE="${DTYPE:-float32}"
 EVAL_SCRIPT="$REPO/torchtitan/experiments/ezpz/scripts/eval/eval_cot_gsm8k.py"
 [[ -f "$EVAL_SCRIPT" ]] || EVAL_SCRIPT="$SUBMIT_DIR/torchtitan/experiments/ezpz/scripts/eval/eval_cot_gsm8k.py"
 # Prefer activated venv python after ezpz_setup; fall back to repo venv.
 PY="${PY:-python}"
-if ! command -v "$PY" >/dev/null 2>&1; then
-  PY="$REPO/.venv/bin/python"
+if ! command -v "$PY" >/dev/null 2>&1 || ! "$PY" -c "import torch" 2>&1 | grep -q "torch"; then
+  PY="$REPO/torchtitan/.venv/bin/python"
 fi
+
 
 TEGU_EVAL_ROOT=/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan/outputs/evals
 if [[ -d "$TEGU_EVAL_ROOT" ]]; then _EVAL_ROOT="$TEGU_EVAL_ROOT"; else _EVAL_ROOT="$REPO/outputs/evals"; fi

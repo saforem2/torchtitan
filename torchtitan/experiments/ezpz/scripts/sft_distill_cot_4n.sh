@@ -117,7 +117,13 @@ python3 -c "import torch; print('torch', torch.__version__, 'xpu', torch.xpu.is_
 # "checkpoint-900-hf is the deliverable" (IFEval 0.253, base-LM intact). Sharded
 # form is outputs/sft/agpt-2b-gs138650-tulu-math-uc-mix-8n-gbs6144/checkpoint-900/
 # (96 .distcp shards, intact). Consolidate if -hf missing (see SFT docs for cmd).
-BASE_MODEL="${BASE_MODEL:-${SUBMIT_DIR}/outputs/sft/agpt-2b-gs138650-tulu-math-uc-mix-8n-gbs6144/checkpoint-900-hf}"
+TEGU_SFT_ROOT=/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan/outputs/sft
+BASE_MODEL="${BASE_MODEL:-$TEGU_SFT_ROOT/agpt-2b-gs138650-tulu-math-uc-mix-8n-gbs6144/checkpoint-900-hf}"
+if [[ ! -d "${BASE_MODEL}" ]]; then
+  if [[ -d "${SUBMIT_DIR}/outputs/sft/agpt-2b-gs138650-tulu-math-uc-mix-8n-gbs6144/checkpoint-900-hf" ]]; then
+    BASE_MODEL="${SUBMIT_DIR}/outputs/sft/agpt-2b-gs138650-tulu-math-uc-mix-8n-gbs6144/checkpoint-900-hf"
+  fi
+fi
 if [[ ! -d "${BASE_MODEL}" ]]; then
   SHARDED="${SUBMIT_DIR}/outputs/sft/agpt-2b-gs138650-tulu-math-uc-mix-8n-gbs6144/checkpoint-900"
   if [[ -d "${SHARDED}" ]]; then
