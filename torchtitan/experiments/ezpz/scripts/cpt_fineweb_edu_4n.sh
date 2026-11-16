@@ -78,8 +78,15 @@ TRAIN_TOKENS=100000000000
 TRAINING_STEPS=$(( TRAIN_TOKENS / (GBS * SEQ_LEN) ))
 CKPT_INTERVAL=200
 CKPT_KEEP_LATEST_K=0
-CKPT_DIR="outputs/checkpoints/agpt-2b-cpt-fineweb-edu-n${NNODES}-gbs${GBS}"
-
+# Prefer Tegu project space (per user: avoid /home fill); live chain stays on /home
+# until 190k, but new chains should write to Tegu. Env CKPT_DIR overrides.
+if [[ -z "${CKPT_DIR:-}" ]]; then
+  if [[ -d /lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan ]]; then
+    CKPT_DIR="/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan/outputs/checkpoints/agpt-2b-cpt-fineweb-edu-n${NNODES}-gbs${GBS}"
+  else
+    CKPT_DIR="outputs/checkpoints/agpt-2b-cpt-fineweb-edu-n${NNODES}-gbs${GBS}"
+  fi
+fi
 # EXTRA_ARGS passthrough for CPT fork flags
 extra_args=()
 [[ -n "${EXTRA_ARGS:-}" ]] && read -ra extra_args <<< "${EXTRA_ARGS}"

@@ -72,12 +72,13 @@ if ! command -v "$PY" >/dev/null 2>&1; then
   PY="$REPO/.venv/bin/python"
 fi
 
-mkdir -p "$REPO/outputs/evals/cot" "$SUBMIT_DIR/logs" logs 2>/dev/null || true
-OUT_900="${OUT_900:-$REPO/outputs/evals/cot/gsm8k-cot-ckpt-900-baseline.jsonl}"
-OUT_93="${OUT_93:-$REPO/outputs/evals/cot/gsm8k-cot-ckpt-93-b2-baseline.jsonl}"
+TEGU_EVAL_ROOT=/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan/outputs/evals
+if [[ -d "$TEGU_EVAL_ROOT" ]]; then _EVAL_ROOT="$TEGU_EVAL_ROOT"; else _EVAL_ROOT="$REPO/outputs/evals"; fi
+mkdir -p "$_EVAL_ROOT/cot" "$SUBMIT_DIR/logs" logs 2>/dev/null || true
+OUT_900="${OUT_900:-$_EVAL_ROOT/cot/gsm8k-cot-ckpt-900-baseline.jsonl}"
+OUT_93="${OUT_93:-$_EVAL_ROOT/cot/gsm8k-cot-ckpt-93-b2-baseline.jsonl}"
 [[ -d "$(dirname "$OUT_900")" ]] || OUT_900="$SUBMIT_DIR/outputs/evals/cot/gsm8k-cot-ckpt-900-baseline.jsonl"
 [[ -d "$(dirname "$OUT_93")" ]] || OUT_93="$SUBMIT_DIR/outputs/evals/cot/gsm8k-cot-ckpt-93-b2-baseline.jsonl"
-mkdir -p "$(dirname "$OUT_900")" "$(dirname "$OUT_93")"
 
 echo "BASELINE-RESCORE START $(date +%T) host=$(hostname) limit=$LIMIT dtype=$DTYPE"
 echo "  ckpt-900-hf (general, IFEval 0.253) : ${CKPT_900_HF:-<not found>}"
