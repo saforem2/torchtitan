@@ -27,6 +27,22 @@ set -euo pipefail
 SUBMIT_DIR=${PBS_O_WORKDIR:-$(pwd)}
 cd $SUBMIT_DIR
 
+VENV=/lus/tegu/projects/datascience/foremans/venvs/xpu-torch216-sync-5a7a622f16
+# LD-first: venv libs win over system for UR/SYCL (mirrors cpt_fineweb_edu_4n.sh:54-65)
+if [[ -d "${VENV}/lib" ]]; then
+  _ld_first="${SUBMIT_DIR}/.cache/xpu-ld-first/$(basename "${VENV}")"
+  if [[ ! -e "${_ld_first}/.complete" ]]; then
+    mkdir -p "${_ld_first}"
+    for _lib in "${VENV}"/lib/libur_* "${VENV}"/lib/libsycl.so* "${VENV}"/lib/libumf* "${VENV}"/lib/libtcm*; do
+      [[ -e "${_lib}" ]] && ln -sf "${_lib}" "${_ld_first}/"
+    done
+    touch "${_ld_first}/.complete"
+  fi
+  export LD_LIBRARY_PATH="${_ld_first}:${LD_LIBRARY_PATH:-}"
+fi
+export VIRTUAL_ENV="${VENV}"
+export PATH="${VENV}/bin:${PATH}"
+
 REPO=/home/foremans/torchtitan
 # Live DCP stays on /home (15T chain at outputs/outputs/checkpoints -- moving mid-train breaks resume)
 DCP_ROOT=$REPO/outputs/checkpoints/agpt-2b-cpt-fineweb-edu-n4-gbs64
@@ -55,6 +71,6 @@ fi
 # ---------------------------------------------------------------------------
 # Batch convert loop (spec one-liner, expanded for readability but kept verbatim)
 # ---------------------------------------------------------------------------
-for s in 13000 $(seq 74400 200 136800); do DCP=$DCP_ROOT/step-$s HF=$HF_ROOT/step-$s/hf; [[ -f $HF/ezpz_export.json ]] && continue; /lus/tegu/projects/datascience/foremans/venvs/xpu-torch216-sync-5a7a622f16/bin/python -m torchtitan.experiments.ezpz.eval.convert_to_hf "$DCP" "$HF" --model_name experiments.ezpz.agpt --model_flavor 2b-mds --export_dtype bfloat16 || exit 1; cp "$HF_CONFIG" "$HF/config.json"; cp "$TOK_SRC"/tokenizer.* "$HF/"; ls -lh "$HF"/model-*.safetensors; done
+for s in 13000 $(seq 74400 200 136800); do DCP=$DCP_ROOT/step-$s HF=$HF_ROOT/step-$s/hf; [[ -f $HF/ezpz_export.json ]] && continue; python -m torchtitan.experiments.ezpz.eval.convert_to_hf "$DCP" "$HF" --model_name experiments.ezpz.agpt --model_flavor 2b-mds --export_dtype bfloat16 || exit 1; cp "$HF_CONFIG" "$HF/config.json"; cp "$TOK_SRC"/tokenizer.* "$HF/"; ls -lh "$HF"/model-*.safetensors; done
 
 echo CONVERTED $(ls $HF_ROOT/step-*/hf/ezpz_export.json 2>/dev/tty | wc -l) HF
