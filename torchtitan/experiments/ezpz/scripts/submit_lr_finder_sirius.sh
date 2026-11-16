@@ -9,7 +9,9 @@
 # On Sirius the ladder wrapper may be invoked from $HOME; PBS_O_WORKDIR then
 # equals $HOME and the script would look for checkpoints/outputs under the
 # wrong tree. Canonicalize to the torchtitan checkout regardless of submit CWD.
-if [[ -d "${PBS_O_WORKDIR:-}/torchtitan" ]]; then
+# NOTE: test for .git so we do not confuse the repo root (~/torchtitan) with
+# its package subdir (~/torchtitan/torchtitan, which always exists).
+if [[ -d "${PBS_O_WORKDIR:-}/torchtitan/.git" ]]; then
     cd "${PBS_O_WORKDIR}/torchtitan" || exit 1
     WORKDIR="${PBS_O_WORKDIR}/torchtitan"
 else
@@ -18,9 +20,18 @@ else
 fi
 if [[ -f "${WORKDIR}/.ezpz-utils-cache/ezpz-utils.sh" ]]; then
     source "${WORKDIR}/.ezpz-utils-cache/ezpz-utils.sh"
+else
+    source <(curl -fsSL --max-time 30 https://bit.ly/ezpz-utils)
 fi
 ezpz_load_modules
 ezpz_setup_job
+# ezpz_setup_job recomputes WORKING_DIR from os.getcwd() and then
+# overrides PBS_O_WORKDIR on mismatch, which can produce
+# ~/torchtitan/torchtitan on Sirius. Restore both to the canonical
+# checkout so ./assets/hf resolves.
+export PBS_O_WORKDIR="${WORKDIR}"
+export WORKING_DIR="${WORKDIR}"
+cd "${WORKDIR}" || exit 1
 export MPICH_GPU_SUPPORT_ENABLED=0
 export EZPZ_MPI_LABEL=1
 export LD_LIBRARY_PATH="${HOME}/.local/mpi-compat:${LD_LIBRARY_PATH}"
