@@ -1,7 +1,7 @@
 #!/bin/bash --login
 #PBS -A datascience
 #PBS -N agpt-lr-finder-sirius
-#PBS -l walltime=06:00:00
+#PBS -l walltime=12:00:00
 #PBS -l filesystems=home:tegu
 #PBS -l select=8
 #PBS -q workq
