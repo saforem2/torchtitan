@@ -1,5 +1,25 @@
 # Upstream Sync Log
 
+## 2026-11-16: upstream `4122eafc`, 1 commit; `631d544b` sync landed
+
+PR #90 (the `631d544b` sync below) merged into `ezpz` as `a4de9f29a6`, then PR #92 (docs) as `e4d84f795b`. The #90 head `919e2eeb3c` branched before #89, #91 and #93; the merge is clean. Two files changed on both sides and auto-merged: `train.py` (ezpz side: `getattr(torchtitan, "__version__", ...)`) and `scripts/sync_smoke_alcf.sh` (#91's rewrite plus the sync's empty `KNOWN_FAILURES`). The sync hunk carries over byte for byte.
+
+Then upstream `main` at `4122eafc` ("[rl] Run Verifiers groups in rollout workers", #5511) into `ezpz` `e4d84f795b`. RL only: nothing under `models/llama3/` or `models/deepseek_v3/`, so nothing to replay onto `agpt/` or `moe/`. No conflicts. One file overlaps an ezpz change: `rl/actors/monarch/system.py`, where `spawn_rollout_workers` gains `**kwargs` and forwards `worker_kwargs`; the ezpz edits elsewhere in the file are untouched. `EzpzMonarchActorSystem` does not override `spawn_rollout_workers`.
+
+### Verification of the `631d544b` sync before merge
+
+Base `1fc1fce71c` vs sync `919e2eeb3c`, seeded deterministic steps plus a save/resume at step 5, per production agpt config:
+
+| Machine | debug | 2B | 4B | 10B | 20B |
+|---|---|---|---|---|---|
+| Polaris (A100) | bitwise | bitwise | bitwise | bitwise | bitwise (8N) |
+| Sirius (A100 40 GB) | bitwise | bitwise | bitwise | bitwise | bitwise (8N) |
+| Sunspot (XPU, torch `2.16.0.dev20261015`) | -- | run-to-run nondeterministic on both commits | bitwise | run-to-run nondeterministic on both commits | bitwise at 8N with `dp_replicate=3` (`12483922`) |
+
+Resume reproduced the uninterrupted run exactly on every passing arm. TP=2 fails on the base and passes on the sync, on both CUDA machines.
+
+The XPU 20B needs `--parallelism.data-parallel-replicate-degree=3`. The fused `w13` `(2, 14336, 5120)` has `14336 = 2^11 * 7` rows; no `12 * N` shard degree divides them, so `divisible_linear_param_shard_placements` falls back to padded `Shard(0)` and every rank holds 17.5 GiB of padding. See `docs/journal.md`, 2026-11-16.
+
 ## 2026-11-15: upstream `631d544b`, 20 commits
 
 Merge of `pytorch/torchtitan` `main` at `631d544b` into `ezpz` `0c47bbf4`. Merge base
