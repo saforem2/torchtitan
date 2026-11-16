@@ -18,7 +18,7 @@ def set_ezpz_max_context_length(seq_len: int) -> None:
 
     Module-level rather than a Config field: the forward's positional-arg names
     are contract-checked under TP>1 (set_gqa_inner_attention_local_spmd matches
-    in_dst_shardings by name), so the signature must not change.
+    input_shardings by name), so the signature must not change.
     """
     global _EZPZ_MAX_CONTEXT_LENGTH
     _EZPZ_MAX_CONTEXT_LENGTH = int(seq_len)
@@ -38,11 +38,11 @@ from torchtitan.models.common import (
     ComplexRoPE,
     compute_ffn_hidden_dim,
     CosSinRoPE,
-    Embedding,
     Linear,
     RMSNorm,
     RoPE,
     TransformerBlock,
+    VocabParallelEmbedding,
 )
 from torchtitan.models.common.attention import InnerAttention
 from torchtitan.models.common.config_utils import (
@@ -66,7 +66,7 @@ class ScaledDotProductInnerAttention(InnerAttention):
 
     The forward must keep ``q_THK, k_THK, v_THV`` as its first three
     positional names: ``inner_attention_local_spmd_sharding_config`` matches
-    ``in_dst_shardings`` by name.
+    ``input_shardings`` by name.
     """
 
     @dataclass(kw_only=True, slots=True)
@@ -139,7 +139,7 @@ class EzpzScaledDotProductAttention(ScaledDotProductInnerAttention):
     ) -> torch.Tensor:
         # Positional arg names MUST be the shape-suffixed q_THK/k_THK/v_THV to
         # match the keys in set_gqa_inner_attention_local_spmd's
-        # in_dst_shardings (models/common/decoder_sharding.py:288) -- the
+        # input_shardings (models/common/decoder_sharding.py:256) -- the
         # local_map contract check matches by positional-arg NAME and asserts
         # under TP>1 if a mapped input is missing.
         #
@@ -157,11 +157,11 @@ class EzpzScaledDotProductAttention(ScaledDotProductInnerAttention):
         # It happened AGAIN in sync 84. #4533 renamed the upstream class
         # (ScaledDotProductAttention -> ScaledDotProductInnerAttention) and
         # the contract fn (set_gqa_inner_attention_local_map ->
-        # ..._local_spmd), and rekeyed in_dst_shardings a second time:
+        # ..._local_spmd), and rekeyed input_shardings a second time:
         # q_TNH/k_TNH/v_TNH -> q_THK/k_THK/v_THV (N heads -> H, H head_dim ->
         # K, and v's last axis is V not K). These parameters were renamed to
         # match at merge time. THIRD occurrence of the same trap: whenever an
-        # upstream sync touches decoder_sharding.py, diff its in_dst_shardings
+        # upstream sync touches decoder_sharding.py, diff its input_shardings
         # keys against this signature BEFORE running anything at TP>1.
         # #4121 (fold-batch-dim) reshaped the LM stack to a flat [T, N, H]
         # token layout, so these arrive 3D on the current tree. SDPA needs
@@ -352,7 +352,7 @@ class SoftcappedFlexAttention(InnerAttention):
         **kwargs,
     ) -> torch.Tensor:
         # 57th sync: shape-suffixed positional names required to match
-        # set_gqa_inner_attention_local_spmd's in_dst_shardings under TP>1.
+        # set_gqa_inner_attention_local_spmd's input_shardings under TP>1.
         # The _BLNH suffixes are a contract: 4D [B, L, N, H]. Upstream's
         # fold-batch-dim (#4121) reshapes the LM stack to a flat [T] token
         # layout, and if that ever reaches here the tensors arrive 3D --
@@ -609,7 +609,7 @@ def _build_agpt_config(
         max_context_length=max_context_length,
         dim=dim,
         vocab_size=vocab_size,
-        tok_embeddings=Embedding.Config(
+        tok_embeddings=VocabParallelEmbedding.Config(
             num_embeddings=vocab_size, embedding_dim=dim, param_init=_EMBEDDING_INIT
         ),
         norm=RMSNorm.Config(normalized_shape=dim, param_init=_NORM_INIT),

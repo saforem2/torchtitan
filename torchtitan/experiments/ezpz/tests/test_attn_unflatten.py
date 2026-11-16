@@ -64,7 +64,7 @@ def _committed_unflatten_block() -> str:
     src = _SRC.read_text()
     m = re.search(
         # Suffix is _TNH since b5f6f712f (the local_map contract matches
-        # positional-arg NAMES, so these track upstream's in_dst_shardings
+        # positional-arg NAMES, so these track upstream's input_shardings
         # keys). Matched loosely so a future rename fails on the STRUCTURE
         # here, not on the letters -- this test broke silently for a day
         # because it pinned the old _BLNH spelling.

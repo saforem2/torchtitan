@@ -1,5 +1,148 @@
 # Upstream Sync Log
 
+## 2026-11-15: upstream `631d544b`, 20 commits
+
+Merge of `pytorch/torchtitan` `main` at `631d544b` into `ezpz` `0c47bbf4`. Merge base
+`8e63247c`. No textual conflicts, and upstream touches nothing under
+`experiments/ezpz/`. The merge commit is upstream only; the ports are one follow-up
+commit.
+
+### What the 20 commits change for us
+
+| Upstream (PR) | ezpz port |
+|---|---|
+| `Decoder.tok_embeddings` is `VocabParallelEmbedding.Config` (#5802) | agpt and MoE registries build `VocabParallelEmbedding.Config`, as `llama3` and `deepseek_v3` flavors now do |
+| `pre_lm_head_norm_sharding_config` removed; the final norm uses `norm_sharding_config` (#5802) | `agpt/sharding.py`, `moe/sharding.py` |
+| `ShardingConfig` never redistributes (#5807); `Decoder._pre_lm_head_norm_and_gather` issues the TP gather before `lm_head` (#5802) | `AgptFp32ResidualModel.forward` (`agpt/fp32_residual.py`) mirrors `Decoder.forward`, so it calls the same helper. Without it TP>1 hands `lm_head` a sharded `h` |
+| `in_src_shardings`/`out_src_shardings` -> `input_shardings`/`output_shardings`; `in_dst_shardings`/`out_dst_shardings` removed (#5807) | ezpz builds one `ShardingConfig`, with `state_shardings` only. Comments updated. The local-SPMD attention keys stay `q_THK`/`k_THK`/`v_THV`, so the inner-attention signatures are unchanged |
+| `RolloutWorker` -> `BaseRolloutWorker` + `MessageEnvRolloutWorker` (#6033) | `reason_agpt/rollouter.py`, `alphabet_sort_agpt/config_registry.py`, `rl/xpu_trial/alphabet_sort.py` use `MessageEnvRolloutWorker`; their configs keep `message_env`/`token_env` |
+| `deepseek_v3`: `build_mla_moe_layers` drops `first_layer_sharding_config`; `MTPDecoder` gathers after `mtp_norm` | ezpz MoE uses neither |
+| `Controller._push_model_state_dict` -> `_start_push_model_state_dict`; `ModelStateDictTransport` behind a flag (#5996, #5997) | `EzpzHostMeshController` overrides only `_build_actor_system`, which is unchanged. `MonarchActorSystem.provision` is unchanged, so `EzpzMonarchActorSystem.provision` still mirrors it |
+| LoRA RL: generators load the base checkpoint, weight syncs carry only adapters (#5844) | ezpz applies the same `LoRATransform` to trainer and generator configs (`rl/model_configs.py`); no override of the sync path |
+| attn-gym `0.0.20` from PyPI, `kernel_options` API (#6063) | ezpz has no `kernel_options` callers |
+
+### `ff3297d4`: skip the first-step `empty_cache()` on XPU (#5911)
+
+`Optim.step()` has called `device_module.empty_cache()` before the first optimizer step
+since #5450. Under XCCL the memory that call releases does not go back to the driver
+(intel/torch-xpu-ops#6125), and upstream saw OOMs, segfaults and hangs in step 2 of
+DeepSeek-V3 16B. The commit adds `device_type != "xpu"` to the guard in
+`components/optim/optim.py` and clears `_is_first_step_call` unconditionally. On XPU
+the first step now runs without the cache release; CUDA is unchanged.
+
+For us: every XPU run (agpt and MoE, Sunspot and Aurora) stops releasing the cache
+before step 1. Step-1 and step-2 memory readings on XPU are not comparable with
+pre-sync runs. `moe/model.py`'s own `torch.xpu.empty_cache()` between attention and
+the MoE is opt-in (`TT_MOE_EMPTY_CACHE_BETWEEN_ATTN_MOE=1`, off by default) and is
+untouched; under XCCL it can hit the same driver issue. The pinned production clones
+do not have this commit.
+
+### Results
+
+2 nodes, seed `42`, deterministic, `6` steps, venv `xpu-torch216-sync-5a7a622f16`
+(`torch 2.16.0.dev20261015+xpu`). Baseline `0c47bbf4` and sync `90adc433` ran back to
+back in the same allocation: Aurora `9091906`, Sunspot `12483859`.
+
+| Check | Aurora pre | Aurora post | Sunspot pre | Sunspot post |
+|---|---|---|---|---|
+| agpt TP=1 | `10.88101` -> `9.93350` | identical | `10.88101` -> `9.93350` | identical |
+| MoE TP=1 | `12.94051` -> `10.97520` | identical | `12.94051` -> `10.97520` | identical |
+| resume at step 3 | no result (see below) | diff `0` | diff `0` | diff `0` |
+| agpt TP=2 | known failure | known failure | known failure | known failure |
+
+Every step matches, not only the endpoints, and the numbers match the pre-sync Sunspot
+row of the `8e63247c` entry. TP=2 fails on both trees with the same
+`token count 256 is not a multiple of max_context_length 512`; the fix is below.
+
+The Aurora baseline resume died in Inductor's async compile pool
+(`OSError: [Errno 9] Bad file descriptor` in `async_compile.wakeup`, rank 18) before
+step 1. The Sunspot baseline resume in the same venv passes.
+
+### Fixed in this PR: TP>1 training
+
+The TP=2 failure predates this sync, and the smoke script carried it as a known
+failure. Its comment blamed the attention `local_map`; the cause is autograd
+multithreading. Upstream's `dist_utils.init_distributed()` calls
+`torch.autograd.set_multithreading_enabled(False)` (#3565) so activation-checkpoint
+recompute runs on the thread that holds the `spmd_types` TLS mesh. `ezpz/train.py` calls
+`ezpz.distributed.setup_torch()` first, `init_distributed()` sees an initialized process
+group and returns early, and the call never runs. Recompute on a backward thread then
+finds no mesh, `maybe_gather_tp_input()` skips the sequence-parallel all-gather, and
+attention gets the `1/TP` shard (256 of 512 tokens). The traceback is in `recompute_fn`,
+not the first forward. `train.py` now makes the call itself after `setup_torch()`.
+
+Sunspot `12483861`, sync tip `7d688310`, same smoke settings:
+
+| Config | Steps `1` -> `6` |
+|---|---|
+| agpt TP=1 | `10.88101` -> `9.93350`, unchanged |
+| agpt TP=2 | `10.86447` -> `9.95684` |
+| MoE TP=1 | `12.94051` -> `10.97520`, unchanged |
+| resume at step 3 | diff `0` |
+
+`KNOWN_FAILURES` in `sync_smoke_alcf.sh` is now empty. MoE at TP=2 needs
+`expert_parallel_degree >= tensor_parallel_degree` (upstream config validation), so it
+was not run here; MoE EP is still open from earlier entries.
+
+### Fixed in this PR: `rl/xpu_trial/alphabet_sort.py`
+
+It was a verbatim copy of Guoqiong's recipe pinned to the RL API before upstream's
+rebuild (`VLLMGenerator`, `torchtitan.rl.losses`, `torchtitan.rl.rubric`,
+`LinearLoRAHandler`, `TrainingSampleBuilder`), and had not imported since before
+`959b851a`. Upstream now ships the recipe in-tree, so the module re-exports
+`torchtitan_recipes.rl.alphabet_sort` and rebuilds only the trial's multi-host Qwen3-0.6B
+layouts (`full`/`lora`, `_rep<R>`, `_gtp<T>`) on the current API. Model configs bake in
+their parallelism, so each layout rebuilds both instead of editing `parallelism`. LoRA
+uses `LoRATransform` on `wqkv`/`wo`, as `rl/model_configs.py` does.
+
+Sunspot `12483862`, `rl-monarch-torch216-sync-20261112`: `recipe_adapter` imports and
+706 of its 708 recipes build. `1n_ppn12` gives `dp_shard=6` and `6` generators; `8n_ppn12`
+gives `4 x 12` and `48`; `4n_ppn12_rep2` gives `2 x 12`; LoRA layouts build
+`FrozenQwen3Model`. The other two, upstream's `_mxfp8` (SM100 only) and `_sglang` (not
+installed), are excluded in `recipe_adapter.py`. No GRPO run on this tree yet.
+
+### Fixed in this PR: LoRA GRPO after #5844
+
+#5844 makes weight syncs carry only trainable parameters and raises when a generator
+model freezes parameters without a checkpointer. `agpt_rl_model_configs` always applies
+LoRA, so every `alphabet_sort_agpt` and `reason_agpt` config failed at generator setup
+(`The model config freezes 227 parameters ... Set generator.checkpointer`). They, and the
+`xpu_trial` LoRA layouts, now set `generator.checkpointer =
+CheckpointManager.Config(initial_load_in_hf=True)`, as upstream's `geometry3k` LoRA recipe
+does.
+
+On XPU that load then segfaulted. The generator's DCP load plans with object collectives
+on the default group, which in the generator is vLLM's pure-XCCL `external_launcher` group;
+the core (Aurora `9092177`) is in oneCCL's worker thread (`ccl_comp_copy` -> `memmove`). The
+trainer avoids this through `patch_init_distributed_for_xpu`'s hybrid `xpu:xccl,cpu:gloo`
+group. `patch_generator_initial_load_gloo_for_xpu` (`rl/xpu_overrides.py`) gives `dcp.load`
+a Gloo group for the generator's initial load.
+
+Aurora, sync tip `6aae5b6a`, `multihost_grpo_e2e.pbs` (trainer on host 0, one vLLM
+generator on host 1, TorchStore sync every step), `rl-monarch-torch216-sync-20261112`:
+
+| Run | Job | Steps | Loss | Reward | Max logprob diff | Generator pull, share of step |
+|---|---|---|---|---|---|---|
+| AGPT-2B LoRA, GSM8K (reference recipe) | `9092336` | `3`, exit `0` | `0.0054` / `-0.11` / `-0.022` | `0.35` / `0.45` / `0.41` | `0.011`-`0.035` | ~`0` |
+| Qwen3-0.6B LoRA, `xpu_trial` `lora_2n_ppn1_10steps` | `9092341` | `10`, exit `0` | `-0.0030` -> `-0.0025` | `0.54` -> `0.17` | `0.32`-`0.54` | `0.17`-`0.22` |
+| Qwen3-0.6B full, `xpu_trial` `full_2n_ppn1_10steps` | `9092084` | `10`, exit `0` | `-0.0056` -> `-0.0022` | `0.53` -> `0.27` | `0.44`-`2.40` | `0.84`-`0.90` |
+
+The LoRA run waits on the weight pull for a fifth of each step, the full run for most of
+it: syncs now carry only the adapters. Ten steps at `lr=2e-6` do not move the reward; these
+runs check the loop, not learning. The Qwen recipes generate in bf16, which is why their
+logprob gap is wider than the fp32 AGPT reference.
+
+Still open: `xpu_trial` layouts with a 4-tile trainer and a TP=4 generator
+(`*_2n_ppn4_gtp4_*`) hang at process-mesh setup after a `sig=11` in a Monarch `SetupActor`,
+with and without LoRA (`9091990`, `9092084`). `multihost_train_upstream.py` supports exactly
+one generator, so layouts with more generators were not run.
+
+### Not checked
+
+- RL on CUDA, and XPU layouts beyond one trainer host plus one generator.
+- `30ffb3b7` (#6057): HF export now raises for models with frozen parameters. A LoRA
+  checkpoint exported to HF would hit it.
+
 ## 2026-11-12: upstream `8e63247c`, 282 commits
 
 Merge of `pytorch/torchtitan` `main` at `8e63247c` into `ezpz` `959b851a` (all fork

@@ -73,7 +73,7 @@ from torchtitan.rl.generator.parallelism import InferenceParallelismConfig
 from torchtitan.rl.generator.types import SamplingConfig
 from torchtitan.rl.observability.metrics import MetricsProcessor
 from torchtitan.rl.rollout.data import IterableRolloutDataLoader
-from torchtitan.rl.rollout.rollouter import Rollouter, RolloutWorker
+from torchtitan.rl.rollout.rollouter import MessageEnvRolloutWorker, Rollouter
 from torchtitan.rl.rollout.rubric import Rubric
 from torchtitan.rl.trainer.losses import GRPOLoss
 from torchtitan.rl.trainer.trainer import Trainer
@@ -87,7 +87,7 @@ def _agpt_rollouter(
     few_shot: bool = True,
 ) -> Rollouter.Config:
     """Configure alphabet-sort rollout prompts and reward shaping."""
-    worker = RolloutWorker.Config(
+    worker = MessageEnvRolloutWorker.Config(
         rubric=Rubric.Config(
             reward_fns=[
                 ShapedRewardAlphabetSort.Config(weight=1.0)
@@ -206,7 +206,10 @@ def _agpt_grpo_config(
             # vLLM engine in eager mode (no CUDA-graph capture on XPU).
             engine=xpu_vllm_engine_config(),
             parallelism=generator_parallelism,
-            checkpointer=None,
+            # agpt_rl_model_configs always applies LoRA, which freezes the base. Since
+            # upstream #5844 weight syncs carry only the trainable adapters, so the
+            # generator loads the frozen base from the same HF checkpoint as the trainer.
+            checkpointer=CheckpointManager.Config(initial_load_in_hf=True),
             # top_p was 0.95; SamplingConfig now rejects top_p < 1 because the
             # trainer computes logprobs over the full vocabulary (upstream #5317).
             sampling=SamplingConfig(temperature=0.8, max_tokens=700),

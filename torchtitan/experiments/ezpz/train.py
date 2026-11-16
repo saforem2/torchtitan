@@ -600,6 +600,15 @@ def main(args: list[str] | None = None) -> None:
 
 if __name__ == "__main__":
     ezpz.distributed.setup_torch()
+    # Upstream's dist_utils.init_distributed() disables autograd multithreading
+    # (#3565) so activation-checkpoint recompute runs on the thread that holds
+    # the spmd_types TLS mesh. setup_torch() initializes the process group
+    # first, so init_distributed() returns early and never gets there. Without
+    # this, recompute on a backward thread sees no mesh, maybe_gather_tp_input()
+    # becomes a no-op under sequence parallelism, and attention gets the
+    # 1/TP token shard (smoke: "token count 256 is not a multiple of
+    # max_context_length 512" at TP=2).
+    torch.autograd.set_multithreading_enabled(False)
     _ensure_rank_env()
     main()
     # Hard-exit after main() returns. Without this, mpiexec hangs

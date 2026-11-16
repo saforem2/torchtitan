@@ -25,16 +25,16 @@ from torchtitan.experiments.ezpz.rl.reason_agpt.reward import (
 )
 from torchtitan.rl.rollout.advantage import AdvantageEstimator
 from torchtitan.rl.rollout.data import IterableRolloutDataLoader
-from torchtitan.rl.rollout.rollouter import Rollouter, RolloutWorker
+from torchtitan.rl.rollout.rollouter import MessageEnvRolloutWorker, Rollouter
 from torchtitan.rl.rollout.rubric import Rubric
 from torchtitan.rl.rollout.token_env import TokenEnv
 
 
-class GSM8KReasonWorker(RolloutWorker):
+class GSM8KReasonWorker(MessageEnvRolloutWorker):
     """GSM8K environment, reward rubric, and advantage estimator."""
 
     @dataclass(kw_only=True, slots=True)
-    class Config(RolloutWorker.Config):
+    class Config(MessageEnvRolloutWorker.Config):
         rubric: Rubric.Config = field(
             default_factory=lambda: Rubric.Config(
                 reward_fns=[
