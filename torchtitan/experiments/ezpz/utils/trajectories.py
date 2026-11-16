@@ -898,7 +898,7 @@ TRAJECTORIES: list[dict] = [
         "token_target": OLMO_MIX_1124_TOKENS,
         "wandb_run_ids": [
             "uqrribs1",  # umbrella 9053470 seat 3 (Nov 11): 1-2698, step-2600
-            "lwewe0xv",  # 9076358 (Nov 14): resumes step-2600
+            "rh5cn13o",  # 9076358 attempt 2 (Nov 14): resumes step-2600; attempt 1 lwewe0xv logged no rows
         ],
         "olog_fallbacks": None,
         "eval_subdir": None,

@@ -2,12 +2,12 @@
 
 **Last updated: 2026-11-15 13:35 UTC.** Every number is quoted from a run doc — links go to the source. Most recent first.
 
-> **One-line status:** CPT-FWE 4N at **111.2k/190.7k (58.3% budget, `12483856 R` MFU 15.8% tps 4625 healthy, step-111200 `23G` frontier, 556 ckpt dirs)** — `12h` walltime (`99e918b342`) healthy, resumed from `step-100000` at `01:31 UTC`, `+11.2k` steps in `06:04` (`~1.9k steps/hr`). HF converts at `74000/74200` `3.7G` verified; Sunspot `~/torchtitan/outputs/hf*` empty — next convert at 112k gate. Raw CPT CoT `0/200` pre-SFT expected; B2 `0.205` remains best CoT.
+> **One-line status:** CPT-FineWeb-Edu 4N at **111.2k/190.7k (58.3% budget, `12483856 R` MFU 15.8% tps 4625 healthy, step-111200 `23G` frontier, 556 ckpt dirs)** — `12h` walltime (`99e918b342`) healthy, resumed from `step-100000` at `01:31 UTC`, `+11.2k` steps in `06:04` (`~1.9k steps/hr`). HF converts at `74000/74200` `3.7G` verified; Sunspot `~/torchtitan/outputs/hf*` empty — next convert at 112k gate. Raw CPT CoT `0/200` pre-SFT expected; B2 `0.205` remains best CoT.
 
 ---
 ## 2026-11-15 — CPT 111.2k/190.7k (58.3%) chain healthy, frontier advanced
 
-**CPT-FWE 4N** (`agpt_2b_mds_mix_owm_edu_6040` `60/40 FWE`, `PPN=8 GBS=64 seq=8192`, `100B=190734` steps): `12483856 R` `step-111200` `23G` `32/32` shards `556` ckpt dirs, **`58.3%` of `100B` budget**, `MFU 15.8%` `tps 4625` `tflops 47.03` healthy. Resumed `01:31 UTC` from `step-100000` (`checkpointer.folder ./outputs/outputs/checkpoints/agpt-2b-cpt-fineweb-edu-n4-gbs64 at step 100000 (fault-tolerance restart)` — `outputs/checkpoints` symlink fix active). Walltime `12:00:00` (`stime 07:29:06`, `06:04` elapsed, `~05:56` remaining), `4N` `x1921c1s[0,2,3,4]b0n0` `datascience/workq`. Validation loss `12.53` at `111200` (flat `12.53-12.60` since `110700`).
+**CPT-FineWeb-Edu 4N** (`agpt_2b_mds_mix_owm_edu_6040` `60/40 FineWeb-Edu`, `PPN=8 GBS=64 seq=8192`, `100B=190734` steps): `12483856 R` `step-111200` `23G` `32/32` shards `556` ckpt dirs, **`58.3%` of `100B` budget**, `MFU 15.8%` `tps 4625` `tflops 47.03` healthy. Resumed `01:31 UTC` from `step-100000` (`checkpointer.folder ./outputs/outputs/checkpoints/agpt-2b-cpt-fineweb-edu-n4-gbs64 at step 100000 (fault-tolerance restart)` — `outputs/checkpoints` symlink fix active). Walltime `12:00:00` (`stime 07:29:06`, `06:04` elapsed, `~05:56` remaining), `4N` `x1921c1s[0,2,3,4]b0n0` `datascience/workq`. Validation loss `12.53` at `111200` (flat `12.53-12.60` since `110700`).
 
 **Next chain action:** `qsub -l select=4 -l walltime=12:00:00 -v NHOSTS_TRAIN=4 torchtitan/experiments/ezpz/scripts/cpt_fineweb_edu_4n.sh` at `~13:29 UTC` expiry — resumes from `step-~122k` (`CKPT_DIR` auto-resume, `CKPT_INTERVAL=200`). No watcher requeue; manual hop required. `sync/walltime` verified: `cpt_fineweb_edu_4n.sh#PBS -l walltime=12:00:00`, `VENV xpu-torch216-sync-5a7a622f16` with `LD-first` (`grain 0.2.18 ok`), `MDS_ANNEAL_BASE /lus/tegu/.../agpt-2b-mds-gs138650/step-0` `.metadata` exists, `fineweb-edu-100BT/sample/100BT` `140 parquet` `16 shards`.
 
@@ -16,19 +16,13 @@
 
 ## 2026-11-14 — CPT 75k + SFT labels + CoT baseline (in-flight)
 
-**CPT-FWE 4N** (`agpt_2b_mds_mix_owm_edu_6040` `60/40 FWE`, `PPN=8 GBS=64 seq=8192`, `100B=190734` steps): `12483799 R` `step-75000` `~22.4G` `375` ckpt dirs, `~39.4%` of `100B` budget, `MFU ~18%` `~2k steps/hr` healthy. Chain was `600s`-poll auto-requeue on `2h` walltime (`12483735→12483799` verified); this hop still `02:00` (`E ~19:13`), next hop already `12h` (`99e918b342` synced) = `~24k steps/hop` vs `4k` churn. `HFs 74000/74200` `3.7G` `9/9` files verified (patched `config/tokenizer` omission).
+**CPT-FineWeb-Edu 4N** (`agpt_2b_mds_mix_owm_edu_6040` `60/40 FineWeb-Edu`, `PPN=8 GBS=64 seq=8192`, `100B=190734` steps): `12483799 R` `step-75000` `~22.4G` `375` ckpt dirs, `~39.4%` of `100B` budget, `MFU ~18%` `~2k steps/hr` healthy. Chain was `600s`-poll auto-requeue on `2h` walltime (`12483735→12483799` verified); this hop still `02:00` (`E ~19:13`), next hop already `12h` (`99e918b342` synced) = `~24k steps/hop` vs `4k` churn. `HFs 74000/74200` `3.7G` `9/9` files verified (patched `config/tokenizer` omission).
 
 **SFT labels bottleneck** — `12483770` froze `22m` building `labels` on `2.7M×8192` `add_column` `22B` Python loop (`Modify 16:36:00` frozen, `E 143`). Fixed `d351f8c204`/`36cfd634a5`/`746d98ded9`: `np.where`-batched via `add_column` not `datasets.map Manager` (`EOFError` on `PVC/FLAT`). `SFT 1N` on fresh `74000 HF` (`12483807` `ezpz launch --nproc 12 --nproc_per_node 12` after `mpiexec` `xcclCommInitRank 11` + `ImageMagick Wand 0.7.2` failures from `~/.local/bin/ezpz` not pinned `xpu-torch216`).
 
 **CoT baseline** — raw `CPT` `73k/74k` both `0/200` `0.0 fmt` degenerate loops (`n_unclosed=200`) — expected `pre-SFT` (`CPT` never trains `\boxed{}`), not a regression. `cpt34k-gsm8k-3ep` `0.025 acc / 0.505 fmt` vs `cpt34k-distill-broad-4n` `0.000` shows format-vs-reasoning gap. Meaningful `CoT` gates on `SFT final/` (`submit_cot_eval.sh`).
 
 **Eval infra** — `MMLU vLLM` `level_zero 40` `63G OOM` (`compute_topk_scores`) unfixable on `Sunspot XPU` — `Aurora`-only, documented. `CoT GSM8K` `vLLM fp32` works (`73k/74k` `200/200` processed).
-
-## 2026-11-12 — CPT 34.3k/190k healthy + pretok landed (broad SFT parked to 50k)
-
-> **One-line status:** CPT-FWE 4N at **75k/190k (39.4% budget, `12483799 R` MFU ~18% healthy, step-75000 `22.4G`) — chain fixed to `12h` walltime (was `2h` churn, `99e918b342`), HF converts at `74000/74200` `3.7G` verified. SFT on fresh HF (`cpt74k-b3-1n`) blocked on `XCCL→ezpz launch` fix (raw `mpiexec` broke `CCL` on `PVC/FLAT`). Raw CPT CoT `0/200` on `73k/74k` is expected degenerate `pre-SFT` signal — meaningful CoT gates on SFT `final/` only. B2 `0.205` remains best CoT.
-
----
 
 ## 2026-11-12 — CPT 34.3k/190k healthy + pretok landed (broad SFT parked to 50k)
 
@@ -52,9 +46,9 @@ Base for everything below is the MDS stage-3 checkpoint `global_step138650` (not
 
 ---
 
-## 2026-11-11 — Sunspot CPT-FWE 4N + pretok + GRPO launched — _provisional, jobs live_
+## 2026-11-11 — Sunspot CPT-FineWeb-Edu 4N + pretok + GRPO launched — _provisional, jobs live_
 
-CPT-FWE 4N (`agpt_2b_mds_mix_owm_edu_6040` 60/40 FWE, `PPN=8 GBS=64 seq=8192`, 100B=190734 steps) chain `12483048 0→4091 → 12483075 4091→7869 → 12483245 7800→10143+ R` (walltime 02:00 chained, ckpt every 200, base `gs138650/step-0`, VENV `xpu-torch216-sync-5a7a622f16`) — new low **loss 1.856 at 10108** MBH, MFU 18.16%, `~5.3%` of budget. Pretok `12483253 R -- 1N` (`_pretokenize_distill_cot_mix_1n.sh` 50/50 OpenThoughts+gsm8k-r1cot → `/tegu/.../len8192 num_proc=4`, gate `dataset_info.json`+`[decontam]`) unblocks stage-2 SFT `sft_distill_cot_4n.sh`. GRPO `12483252 R -- 3(2+1) 06:00` on B2 `checkpoint-93-hf 0.205` (`gs=8 lr=5e-6 100 steps`) — Monarch TorchStore+XPU [monarch.md](rl/monarch.md). SFT narrow `12483074 10/10 11.02→10.72 completed`. _Provisional_: `R` numbers not exit-verified; finalize on `12483245/252/253` exit with pretok `dataset_info.json`+decontam + GSM8K-CoT delta vs `B2=0.205`. Journal: [journal](../../docs/journal.md).
+CPT-FineWeb-Edu 4N (`agpt_2b_mds_mix_owm_edu_6040` 60/40 FineWeb-Edu, `PPN=8 GBS=64 seq=8192`, 100B=190734 steps) chain `12483048 0→4091 → 12483075 4091→7869 → 12483245 7800→10143+ R` (walltime 02:00 chained, ckpt every 200, base `gs138650/step-0`, VENV `xpu-torch216-sync-5a7a622f16`) — new low **loss 1.856 at 10108** MBH, MFU 18.16%, `~5.3%` of budget. Pretok `12483253 R -- 1N` (`_pretokenize_distill_cot_mix_1n.sh` 50/50 OpenThoughts+gsm8k-r1cot → `/tegu/.../len8192 num_proc=4`, gate `dataset_info.json`+`[decontam]`) unblocks stage-2 SFT `sft_distill_cot_4n.sh`. GRPO `12483252 R -- 3(2+1) 06:00` on B2 `checkpoint-93-hf 0.205` (`gs=8 lr=5e-6 100 steps`) — Monarch TorchStore+XPU [monarch.md](rl/monarch.md). SFT narrow `12483074 10/10 11.02→10.72 completed`. _Provisional_: `R` numbers not exit-verified; finalize on `12483245/252/253` exit with pretok `dataset_info.json`+decontam + GSM8K-CoT delta vs `B2=0.205`. Journal: [journal](../../docs/journal.md).
 
 ---
 
