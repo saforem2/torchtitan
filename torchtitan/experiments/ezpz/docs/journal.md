@@ -1,5 +1,65 @@
 # Development Journal
 
+## 2026-11-16: Latest `ezpz` on torch 2.16 -- 20B padded-shard OOM, load-and-continue per chain
+
+> [!IMPORTANT]
+> The 20B (and 2B) on `origin/ezpz` OOM on every Aurora/Sunspot rank count. Fused `w13` is `(2, 14336, 5120)`, and `14336 = 2^11 * 7` has no factor of 3, so no `12 * N` shard degree divides its rows. `agpt/parallelize.py` (`divisible_linear_param_shard_placements`) falls back to padded `Shard(0)`, which stores `[1, 14336, 5120]` fp32 per rank per layer: 294 MB x 64 = **17.5 GiB/rank**, constant in N. `--parallelism.data-parallel-replicate-degree=3` (shard degree a power of 2) fixes it.
+
+Model memory after init, `agpt_20b_real`, torch `2.16.0.dev20261015+xpu`, `1fc1fce71`:
+
+| Run | ranks | dp_replicate x dp_shard | model memory | step 1 |
+|---|---|---|---:|---|
+| Sunspot `12483898` | 24 | 1 x 24 | 22.91 GiB | crash |
+| Sunspot `12483901` / `12483918` | 48 | 1 x 48 | 20.59 GiB | crash / OOM |
+| Sunspot `12483909` | 96 | 1 x 96 | 20.12 GiB | crash |
+| Sunspot `12483922` | 96 | 3 x 32 | **5.36 GiB** | 12.94795 |
+| Aurora `9095539` / `9095656` | 96 | 3 x 32 | 5.81 GiB | not reached (see below) |
+| Polaris `7853470` (CUDA) | 32 | 1 x 32 | 5.36 GiB | 12.96308 |
+| Aurora umbrella smoke `9093858` (torch 2.13, pinned code) | 96 | 1 x 96 | 1.11 GiB | 12.95570 |
+
+With `--debug.deterministic` the OOM surfaced as `UR_RESULT_ERROR_OUT_OF_RESOURCES` in FSDP `split_with_sizes_copy` (and a GPU `NotPresent` segfault at 24 ranks). `--debug.no-deterministic` turned it into a plain `torch.OutOfMemoryError` (`Tried to allocate 6.82 GiB`, the padded all-gather). The 2B (`F=11008 = 2^8 * 43`) hits the same fallback; the 4B and 10B don't.
+
+PR #90 20B on XPU, `12483922` (8N, replicate 3, deterministic): base `1fc1fce71` vs sync `919e2eeb3c` **IDENTICAL** for 10 steps, `RESUME_OK compared=5/5 max_abs_diff=0` on both arms. Non-deterministic `12483923`: both arms train, resume differs by ~5e-4, as expected. torch `2.14.0+xpu` and `2.15.0.dev` venvs can't import either commit (`torch.fx.experimental.unification.core`, `spmd_types.rules`).
+
+Aurora 2N load-and-continue (`/flare/AuroraGPT/foremans/scratch/load-continue-20261116/`). Arm "current" = chain pin + `frameworks/2026.1.0` via `umbrella-20261116.pbs SMOKE=1`; arm "latest" = `origin/ezpz` `1fc1fce71` + torch 2.16 venv. No saves; production checkpoints read via symlink.
+
+| Chain | ckpt | current: load / losses | latest: load / result | Blocker for latest |
+|---|---|---|---|---|
+| 2B | `step-39900` | ok | 57.6 s, within ~2e-4 of current | padded `Shard(0)` on `w13 (2, 11008, 2048)` |
+| 4B v2 | `step-8900` | 7.7 s, 2.0-3.0 | 7.6 s, fails at first batch | olmo-mix schema cast; `6ad208b` fix not on `origin/ezpz` |
+| 10B v2 | `step-4900` | ok | 49 s, fails at first batch | same as 4B |
+| 20B-256 | `step-21700` | 255.5 s, 2.35-2.52 | OOM (`9095109`) | padded `Shard(0)` |
+| 20B-512 | `step-10800` | 291.9 s, 2.43-2.59 | OOM (`9095186`) | padded `Shard(0)` |
+
+Pre-fused checkpoints load on the fused code (2B/4B/10B), so the `#3714` layout change is not a blocker. v2 grain loaders refuse a checkpoint written at another DP degree on both stacks (`--checkpoint.exclude-from-loading dataloader` for the test only). The latest arm also needed an `LD_LIBRARY_PATH` shim (`ur-shim/`): the system oneAPI UR loader shadows the wheel's `libur_loader` (`undefined symbol urGraphGetIdExp`).
+
+20B-512 latest arm at 8N with replicate 3 (`load_continue_hsdp.pbs`, `debug-scaling`, GBS 192):
+
+| Job | startup to model built | `step-10800` load | result |
+|---|---|---|---|
+| `9095539` | 34.5 min (26.5 min to first Python log) | started 19:24:52 UTC | killed at the 40 min arm cap, step 0 |
+| `9095656` | 12.2 min | 41 min, unfinished (20:02-20:43 UTC) | killed at walltime, step 0 |
+
+The torch 2.16 venv runs from Lustre, not yeeted; the umbrella seats avoid this by overlaying `frameworks/2026.1.0` from node-local `/opt/aurora`. The same checkpoint loaded in 291.9 s at 24 ranks that morning. Both runs overlapped umbrella `9094039`'s 6144-rank 4B/10B checkpoint loads on `flare`; the slowdown is unverified as contention. Not retried while the umbrella is loading.
+
+Open: moving production to `origin/ezpz` needs `6ad208b` ported, `dp_replicate=3` (or a non-padding fallback in `parallelize.py`) for 2B/20B, the `ur-shim`, and a node-local torch 2.16 runtime (yeeted self-contained venv or a `frameworks` module with 2.16).
+
+## 2026-11-16: Umbrella `9094039` (2346N, 24h) started -- 4B/10B reloads exceed `IDLE_TIMEOUT`
+
+Started 18:12:14 UTC; per-seat jobs `9091877`, `9091888`, `9092662`, `9093715` held (`qhold`) until it ends. Runs with `IDLE_TIMEOUT=3600` and the default `CKPT_INTERVAL=100`.
+
+| Seat | resumed from | first steps | notes |
+|---|---|---|---|
+| 20B-512 | `step-10800` | 2.538 at `10801` | first save at `10900` -- the save that segfaulted in DCP planning in `9076330` (x4) |
+| 20B-256 | `step-21700` | 2.423 at `21713` | 567.5 s load |
+| 2B | `step-39900` | 2.696 at `39933` | **`step-40000` saved** with `.metadata`, past the `39943` NaN |
+| 4B | `step-8900` | none | load silent > 60 min |
+| 10B | `step-4900` | none | killed by the idle watchdog mid-load (`rc=143` after 4795 s), relaunched as attempt 2; reload silent > 45 min again |
+
+While the 4B/10B loads run, the training seats drop to ~4% MFU (20B-256 normally ~18%, 2B ~0.4-0.7%). When the first loads died, the 20B-256 went to 17.7% MFU within minutes. Per-rank read rate during the load was 1.4 MB/s (4B) and 2.4 MB/s (10B). Decision: let both seats relaunch (no `trainer-<idx>.nan-stop` marker).
+
+Monitor: `.monitor_state/umbrella-9094039/watch.sh` (one ssh poll every 240 s; probe `/flare/AuroraGPT/foremans/scratch/umbrella-monitor/probe.sh`).
+
 ## 2026-11-15: Aurora seats — first 12h legs ended, three continuations queued
 
 The per-seat jobs from 2026-11-11 started 2026-11-14 after the outage. Three hit the 12h walltime (`Exit_status=-29`); the 20B-256 is still running.
