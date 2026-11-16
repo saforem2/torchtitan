@@ -93,13 +93,18 @@ GBS=128 came from the [Nov 11-12 report](../2026-11-12-olmo3-gbs128-sirius.md) /
 Live 5B curves: `outputs/lr_finder/ezpz/AgptModel/adamw/gbs*/lr_finder_data.csv`;
 archive: `outputs/lr_finder_5b_adamw_gbs32_sweep.csv` (from JSONL rank0) and
 `outputs/lr_finder/ezpz/AgptModel/adamw/gbs2097152/lr_finder_data.csv`.
-Walltime fix: base script `06:00 -> 12:00:00` for GBS512.
+Walltime: base script `06:00 -> 12:00:00` for GBS512 and GBS2048 (12h, not 6h).
 
-10B arm: GBS32 was degenerate (1.98e-09, noise); 10B scaling law not yet
-measured. GBS2048 (8388608, GAS=64) NCCL rc134 on both sizes — needs config
-fix (lower GAS / `checkpoint.async-mode`), not more walltime. Treat 10B/2048
-as not measured; do not extrapolate across sizes or to GBS2048.
+GBS2048 (8388608 tokens/step, `2048 * 4096 / 32 dp / LBS=2 -> GAS=32`, not GAS=64)
+is **deferred** pending the LBS-fix re-run -- the prior NCCL 300s timeout
+(3 steps in 33 min vs GBS512 16 steps in ~74 min, rc134) was observed under
+the uncorrected GAS=64 config and does not apply to the corrected GAS=32 run.
+Treat GBS2048 as not measured; do not extrapolate to GBS2048.
 
+10B arm: GBS32 was degenerate (1.98e-09, noise) and is excluded from any fit;
+10B GBS512/2048 GAS-adjusted jobs are pending (LBS=2 correction -> GBS2048
+GAS=32, walltime 12h). Treat the 10B scaling law as not yet measured; do not
+extrapolate across sizes or to GBS2048.
 ## GBS=6144 evidence (2026-09-18 campaign, separate batch)
 
 ## AdamW fixed-LR validation
