@@ -74,21 +74,31 @@ SophiaG is **excluded** from the fixed-LR matrix until re-measurement:
 
 Do not use SophiaG for production at GBS=128 without a clean re-run.
 
-### GBS scaling law -- placeholder (gated)
+### GBS scaling law (5B AdamW, Sirius H100, Nov 2026)
 
-The GBS scaling law (GBS 32 / 512 / 2048) extends the GBS=128 baseline to test
-how optimal LR varies with batch size. It is **not yet measured**.
+The GBS ladder tests how optimal LR varies with batch size at fixed model.
+Per-GBS live output is now isolated (`lr_finder.py:gbs{gbs}`,
+`global_batch_size=GBS*4096`), so curves no longer collide.
 
-**Completion gate:** all 6 ladder jobs (5B x {32,512,2048} + 10B x {32,512,2048})
-must reach **PBS Exit 0** and record **LRF_STEPS** rows (150/150) with finite
-loss and **no** `trajectory_fingerprint mismatch` error. Dispatch: see
-`submit_lr_finder_gbs_ladder_sirius.sh` (5B) and
-`submit_lr_finder_gbs_ladder_10b_sirius.sh` (10B) -- both `GBS_VALUES=(32 512 2048)`.
-Preflight: `preflight_lrf_gbs.sh` / `preflight_lrf_gbs_10b.sh`.
+5B AdamW, 5B olmo2tok, sweep `1e-08 -> 1e-01` 150 steps, `mult=1.114243`:
 
-Until the gate passes, treat the fixed-LR matrix as GBS=128 only; do not
-extrapolate optimal LR across batch sizes. When the ladder completes, this
-section will be replaced with the fitted scaling-law table and figures.
+| GBS | global_batch_size | job | suggested (blow-up) | min loss @ LR | loss @0.1 |
+|-----|-------------------|-----|---------------------|---------------|-----------|
+| 32 | 131072 | 33628 | 3.49e-05 (3.49e-04) [5.55e-03] | 9.54 @7.46e-03 | 18.42 |
+| 128 | 524288 | 33429 | 2.48e-04 (2.48e-03) | 9.38 @2.53e-03 | 17.78 |
+| 512 | 2097152 | 33629 | 5.36e-04 (5.36e-03) | 9.13 @5.39e-03 | 13.30 |
+
+GBS=128 came from the [Nov 11-12 report](../2026-11-12-olmo3-gbs128-sirius.md) /
+`data/2026-11-12-olmo3-gbs128-sirius/sirius-33429-5b-adamw-150.csv`.
+Live 5B curves: `outputs/lr_finder/ezpz/AgptModel/adamw/gbs*/lr_finder_data.csv`;
+archive: `outputs/lr_finder_5b_adamw_gbs32_sweep.csv` (from JSONL rank0) and
+`outputs/lr_finder/ezpz/AgptModel/adamw/gbs2097152/lr_finder_data.csv`.
+Walltime fix: base script `06:00 -> 12:00:00` for GBS512.
+
+10B arm: GBS32 was degenerate (1.98e-09, noise); 10B scaling law not yet
+measured. GBS2048 (8388608, GAS=64) NCCL rc134 on both sizes — needs config
+fix (lower GAS / `checkpoint.async-mode`), not more walltime. Treat 10B/2048
+as not measured; do not extrapolate across sizes or to GBS2048.
 
 ## GBS=6144 evidence (2026-09-18 campaign, separate batch)
 
