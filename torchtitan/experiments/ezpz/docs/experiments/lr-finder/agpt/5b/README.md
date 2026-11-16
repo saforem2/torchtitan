@@ -74,37 +74,40 @@ SophiaG is **excluded** from the fixed-LR matrix until re-measurement:
 
 Do not use SophiaG for production at GBS=128 without a clean re-run.
 
-### GBS scaling law (5B AdamW, Sirius H100, Nov 2026)
+### GBS scaling law (5B AdamW, Sirius H100, Nov 2026) -- measured 32/128/512
 
 The GBS ladder tests how optimal LR varies with batch size at fixed model.
-Per-GBS live output is now isolated (`lr_finder.py:gbs{gbs}`,
-`global_batch_size=GBS*4096`), so curves no longer collide.
+Per-GBS live output is isolated (`lr_finder.py:gbs{gbs}`,
+`global_batch_size=GBS*4096`), so curves no longer collide. Sweep
+`1e-08 -> 1e-01` 150 steps, `mult=1.114243`.
 
-5B AdamW, 5B olmo2tok, sweep `1e-08 -> 1e-01` 150 steps, `mult=1.114243`:
+| GBS | global_batch_size | GAS | job | suggested (blow-up) | min loss | note |
+|-----|-------------------|-----|-----|---------------------|----------|------|
+| 32 | 131072 | 1 | 33628 / **33654** re-run | 3.49e-05 (3.49e-04) | 9.54 | clean, 12:00 |
+| 128 | 524288 | 4 | 33429 (2026-11-12) | 2.48e-04 (2.48e-03) | 9.38 | baseline |
+| 512 | 2097152 | 16 | 33629 / **33655** re-run 5.36e-04 | 5.36e-04 (5.36e-03) | 9.13 | clean, 12:00 |
+| 2048 | 8388608 | 32 (LBS=2) | 33656/33630 | NCCL 300s, rc137 | -- | **data-path blocked, not model-limited** (see below) |
 
-| GBS | global_batch_size | job | suggested (blow-up) | min loss @ LR | loss @0.1 |
-|-----|-------------------|-----|---------------------|---------------|-----------|
-| 32 | 131072 | 33628 | 3.49e-05 (3.49e-04) [5.55e-03] | 9.54 @7.46e-03 | 18.42 |
-| 128 | 524288 | 33429 | 2.48e-04 (2.48e-03) | 9.38 @2.53e-03 | 17.78 |
-| 512 | 2097152 | 33629 | 5.36e-04 (5.36e-03) | 9.13 @5.39e-03 | 13.30 |
-
-GBS=128 came from the [Nov 11-12 report](../2026-11-12-olmo3-gbs128-sirius.md) /
+GBS=128 came from [2026-11-12 report](../2026-11-12-olmo3-gbs128-sirius.md) /
 `data/2026-11-12-olmo3-gbs128-sirius/sirius-33429-5b-adamw-150.csv`.
-Live 5B curves: `outputs/lr_finder/ezpz/AgptModel/adamw/gbs*/lr_finder_data.csv`;
-archive: `outputs/lr_finder_5b_adamw_gbs32_sweep.csv` (from JSONL rank0) and
-`outputs/lr_finder/ezpz/AgptModel/adamw/gbs2097152/lr_finder_data.csv`.
-Walltime: base script `06:00 -> 12:00:00` for GBS512 and GBS2048 (12h, not 6h).
+Live curves: `outputs/lr_finder/ezpz/AgptModel/adamw/gbs*/lr_finder_data.csv`;
+archive re-runs `33654/33655` confirmed the 32/512 numbers above.
 
-GBS2048 (8388608 tokens/step, `2048 * 4096 / 32 dp / LBS=2 -> GAS=32`, not GAS=64)
-is **deferred** pending the LBS-fix re-run -- the prior NCCL 300s timeout
-(3 steps in 33 min vs GBS512 16 steps in ~74 min, rc134) was observed under
-the uncorrected GAS=64 config and does not apply to the corrected GAS=32 run.
-Treat GBS2048 as not measured; do not extrapolate to GBS2048.
+**GBS2048 is not a model failure.** Both attempts (GAS=64 at 33630 and
+corrected GAS=32/LBS=2 at 33656) NCCL-timed-out after 300s at step 3
+(3 steps in ~11-16 min vs GBS512 16 steps in 74 min — see `2026-11-12-olmo3-gbs128-sirius.md`).
+The abort stack is in Grain `prefetch.py` (`_put_iterator_elements_in_buffer`):
+`json.gz` streaming + python tokenizer + Grain queue cannot feed 32
+microbatches within the NCCL window on the wiki subset. Production jobs
+avoid this by using pre-tokenized `BlendCorpus`/parquet. Treat GBS2048 as
+not measured for the scaling law; the 32/128/512 trend is the valid basis
+and already covers 16x batch. Walltime was 12:00 for 512 and 2048 (6h killed
+early jobs).
 
-10B arm: GBS32 was degenerate (1.98e-09, noise) and is excluded from any fit;
-10B GBS512/2048 GAS-adjusted jobs are pending (LBS=2 correction -> GBS2048
-GAS=32, walltime 12h). Treat the 10B scaling law as not yet measured; do not
-extrapolate across sizes or to GBS2048.
+10B arm: GBS32 was degenerate (1.98e-09, noise, job 33657) and is excluded
+from any fit; 10B GBS512/2048 both NCCL-timed-out (33658/33659, same data-path
+cause — 10b is ~4x slower per step than 5b at same GAS, ~180 tps vs ~790).
+Treat the 10B scaling law as not yet measured.
 ## GBS=6144 evidence (2026-09-18 campaign, separate batch)
 
 ## AdamW fixed-LR validation
