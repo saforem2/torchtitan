@@ -138,7 +138,7 @@ collective scratch, SPMD collective latency, or communication overlap.
 - Success in either fake mode does not prove loss equivalence, distributed
   correctness, throughput, or communication overlap.
 
-The [fake distributed backend skill](../.claude/skills/fake_distributed_backend/SKILL.md)
+The [fake distributed backend skill](../.claude/skills/fake-distributed-backend/SKILL.md)
 contains the operational checklist used for repeatable memory investigations.
 
 ## Distributed Breakpoints and LOG_RANK
