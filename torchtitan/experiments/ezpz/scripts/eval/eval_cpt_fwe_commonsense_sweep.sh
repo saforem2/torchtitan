@@ -102,12 +102,15 @@ run_eval() {
     local suffix="$3"
     [ -z "$tasks" ] && return 0
     echo "[commonsense] lm_eval tasks=$tasks num_fewshot=$fewshot -> $OUT_DIR/results_${suffix}.json"
+    # --batch_size auto probes torch.ones on XPU and OOMs at auto:1
+    # (UR_RESULT_ERROR_OUT_OF_RESOURCES) on some Sunspot nodes; pin to 8.
+    local bs="${EVAL_BATCH_SIZE:-8}"
     "$PYTHON" -m lm_eval \
         --model hf \
         --model_args "pretrained=$CKPT" \
         --tasks "$tasks" \
         --device xpu:0 \
-        --batch_size auto \
+        --batch_size "$bs" \
         --output_path "$OUT_DIR/results_${suffix}.json" \
         --num_fewshot "$fewshot"
 }
