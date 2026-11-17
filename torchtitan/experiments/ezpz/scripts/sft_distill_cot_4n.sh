@@ -95,12 +95,23 @@ else
   fi
 fi
 
-# Env bootstrap (Monarch / TRL)
+# Env bootstrap (Monarch / TRL) — LD-first so venv SYCL/UR wins over stale 2026.0 on x1921 nodes
 VENV="${VENV:-/lus/tegu/projects/datascience/foremans/venvs/rl-monarch-torch214-locality-20261001}"
+# LD-first: venv libs win over system for UR/SYCL (mirrors cpt_fineweb_edu_4n.sh:54-65)
+if [[ -d "${VENV}/lib" ]]; then
+  _ld_first="${SUBMIT_DIR}/.cache/xpu-ld-first/$(basename "${VENV}")"
+  if [[ ! -e "${_ld_first}/.complete" ]]; then
+    mkdir -p "${_ld_first}"
+    for _lib in "${VENV}"/lib/libur_* "${VENV}"/lib/libsycl.so* "${VENV}"/lib/libumf* "${VENV}"/lib/libtcm*; do
+      [[ -e "${_lib}" ]] && ln -sf "${_lib}" "${_ld_first}/"
+    done
+    touch "${_ld_first}/.complete"
+  fi
+  export LD_LIBRARY_PATH="${_ld_first}:${LD_LIBRARY_PATH:-}"
+fi
 export VIRTUAL_ENV="${VENV}"
 export PATH="${VENV}/bin:${PATH}"
 export PYTHONPATH="${SUBMIT_DIR}${PYTHONPATH:+:${PYTHONPATH}}"
-export LD_LIBRARY_PATH="${VENV}/lib:${LD_LIBRARY_PATH:-}"
 
 # Shared dataset staging area -- same as _pretokenize_distill_cot_mix_1n.sh.
 # Raw HF repos + materialized-mix cache live under /tegu/datasets (datasets
@@ -117,7 +128,13 @@ python3 -c "import torch; print('torch', torch.__version__, 'xpu', torch.xpu.is_
 # "checkpoint-900-hf is the deliverable" (IFEval 0.253, base-LM intact). Sharded
 # form is outputs/sft/agpt-2b-gs138650-tulu-math-uc-mix-8n-gbs6144/checkpoint-900/
 # (96 .distcp shards, intact). Consolidate if -hf missing (see SFT docs for cmd).
-BASE_MODEL="${BASE_MODEL:-${SUBMIT_DIR}/outputs/sft/agpt-2b-gs138650-tulu-math-uc-mix-8n-gbs6144/checkpoint-900-hf}"
+TEGU_SFT_ROOT=/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan/outputs/sft
+BASE_MODEL="${BASE_MODEL:-$TEGU_SFT_ROOT/agpt-2b-gs138650-tulu-math-uc-mix-8n-gbs6144/checkpoint-900-hf}"
+if [[ ! -d "${BASE_MODEL}" ]]; then
+  if [[ -d "${SUBMIT_DIR}/outputs/sft/agpt-2b-gs138650-tulu-math-uc-mix-8n-gbs6144/checkpoint-900-hf" ]]; then
+    BASE_MODEL="${SUBMIT_DIR}/outputs/sft/agpt-2b-gs138650-tulu-math-uc-mix-8n-gbs6144/checkpoint-900-hf"
+  fi
+fi
 if [[ ! -d "${BASE_MODEL}" ]]; then
   SHARDED="${SUBMIT_DIR}/outputs/sft/agpt-2b-gs138650-tulu-math-uc-mix-8n-gbs6144/checkpoint-900"
   if [[ -d "${SHARDED}" ]]; then
@@ -228,9 +245,10 @@ NGPUS_ACTIVE=$(( NHOSTS_TRAIN * PPN ))
 NNODES="${NHOSTS_TRAIN}"
 
 NUM_EPOCHS="${NUM_EPOCHS:-3}"
-CKPT_DIR="${SUBMIT_DIR}/outputs/sft/agpt2b-distill-cot-pretok-${NNODES}n-ep${NUM_EPOCHS}"
-LOG_DIR="${SUBMIT_DIR}/logs/sft-distill-pretok-${NHOSTS_TRAIN}n-${PBS_JOBID%%.*}"
-mkdir -p "${CKPT_DIR}" "${LOG_DIR}"
+TEGU_SFT_ROOT=/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan/outputs/sft
+if [[ -d "$TEGU_SFT_ROOT" ]]; then _SFT_ROOT="$TEGU_SFT_ROOT"; else _SFT_ROOT="${SUBMIT_DIR}/outputs/sft"; fi
+CKPT_DIR="${CKPT_DIR:-$_SFT_ROOT/agpt2b-distill-cot-pretok-${NNODES}n-ep${NUM_EPOCHS}}"
+LOG_DIR="${LOG_DIR:-${SUBMIT_DIR}/logs/sft-distill-pretok-${NHOSTS_TRAIN}n-${PBS_JOBID%%.*}}"
 
 GBS=$(( NGPUS_ACTIVE * 2 * 8 ))  # LBS=2 GAS=8 TP=1 => GBS = NGPU*LBS*GAS
 
