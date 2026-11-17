@@ -4,7 +4,7 @@
 #   (1) submit_lr_finder_sirius.sh has LRF_MAX_LR=1e-1 default
 #   (2) config_registry.py has agpt_5b_olmo2tok_smoke
 #   (3) GBS values 32/512/2048 are power-of-2 and world_size-compatible
-#
+#   (4) GAS for GBS_VALUES is power-of-2, <=32, finite (LBS-adjusted: 1 for <1024, 2 for >=1024; GBS=2048 GAS=32 via LBS=2 — see sirius.sh auto-LBS block)
 # Usage:
 #   bash torchtitan/experiments/ezpz/scripts/preflight_lrf_gbs.sh
 # Exits 0 on all PASS, 1 on any FAIL.
@@ -119,6 +119,47 @@ else
     fi
 fi
 echo ""
+
+# ---------------------------------------------------------------------------
+# (4) GAS for GBS_VALUES: power-of-2, <=32, finite (LBS-adjusted)
+# ---------------------------------------------------------------------------
+echo "--- check 4: GAS validation (GBS*4096/(LBS*4096*32), LBS rule mirrors sirius.sh) ---"
+# Reproduce submit_lr_finder_sirius.sh LBS rule: LBS=1 default, auto-raised to 2 when GBS>=1024.
+# Formula: GAS = GBS * SEQ_LEN / (LBS * SEQ_LEN * dp) with SEQ_LEN=4096, dp=32 (Sirius 8N).
+# SEQ_LEN cancels algebraically but kept for contract fidelity.
+LRF_SEQ_LEN=4096
+DP=32
+for gbs in "${GBS_VALUES[@]}"; do
+    # Reproduce LBS rule from submit_lr_finder_sirius.sh
+    if (( gbs >= 1024 )); then
+        LBS=2
+    else
+        LBS=1
+    fi
+    # GAS = GBS * 4096 / (LBS * 4096 * 32) — keep as integer math, check divisibility
+    _gas_num=$(( gbs * LRF_SEQ_LEN ))
+    _gas_den=$(( LBS * LRF_SEQ_LEN * DP ))
+    if (( _gas_num % _gas_den != 0 )); then
+        fail "GBS=${gbs} LBS=${LBS} GAS not finite: ${gbs}*4096=${_gas_num} not divisible by ${LBS}*4096*32=${_gas_den}"
+        continue
+    fi
+    GAS=$(( _gas_num / _gas_den ))
+    # GBS=2048 was GAS=64 under LBS=1 (NCCL timeout); now GAS=32 via LBS=2.
+    if (( GAS == 0 )); then
+        fail "GBS=${gbs} LBS=${LBS} GAS=${GAS} is zero"
+    elif ! is_power_of_two "${GAS}"; then
+        fail "GBS=${gbs} LBS=${LBS} GAS=${GAS} is NOT power-of-2"
+    else
+        pass "GBS=${gbs} LBS=${LBS} GAS=${GAS} is power-of-2"
+    fi
+    if (( GAS > 32 )); then
+        fail "GBS=${gbs} LBS=${LBS} GAS=${GAS} exceeds 32"
+    else
+        pass "GBS=${gbs} LBS=${LBS} GAS=${GAS} <= 32"
+    fi
+    # finite already checked via mod; expected: GBS32=1, GBS512=16, GBS2048=32
+done
+unset _gas_num _gas_den GAS LBS LRF_SEQ_LEN DP
 
 # ---------------------------------------------------------------------------
 # Summary
