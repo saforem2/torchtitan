@@ -107,6 +107,51 @@ fi
 # Back in the checkout (ezpz_setup may have cd'd).
 cd "${SUBMIT_DIR}" || exit 2
 
+ACCEL=""; [[ -n "${ZE_FLAT_DEVICE_HIERARCHY:-}${CCL_PROCESS_LAUNCHER:-}" ]] && ACCEL=xpu || ACCEL=cuda
+
+# --- library-path workarounds, applied AFTER ezpz_setup's module loads ---
+# ezpz_setup does not provide these; without them every production smoke on
+# 2026-11-17 died in the import probe (Sunspot 12484699 and Aurora 9098335:
+# libsycl urGraphGetIdExp; Polaris 7857660 and Sirius 33741: "cannot load MPI
+# library"). They must come after the module loads, which re-prepend the
+# system oneAPI/MPI paths. TODO: drop once ezpz_setup owns them.
+if [[ "${ACCEL}" == cuda ]]; then
+    # The venv's mpi4py is not linked against Cray GTL: MPI_Init aborts with
+    # "GPU_SUPPORT_ENABLED is requested, but GTL library is not linked"
+    # (Sirius 33436) unless this is off.
+    export MPICH_GPU_SUPPORT_ENABLED=0
+    # PALS copies the interpreter to /var/run/palsd on multi-host launches; a
+    # uv-managed python then misses $ORIGIN/../lib/libpython3.12.so.1.0
+    # (rank exit 127, Polaris 7839193).
+    export PALS_TRANSFER=0
+    [[ -d "${HOME}/.local/mpi-compat" ]] \
+        && export LD_LIBRARY_PATH="${HOME}/.local/mpi-compat:${LD_LIBRARY_PATH:-}"
+    # pip's mpi4py 4.x (MPI-ABI build) dlopens the generic libmpi.so.12, which
+    # Cray MPICH does not ship. Point it at Cray's libmpi.so.
+    if [[ -n "${CRAY_MPICH_DIR:-}" && -e "${CRAY_MPICH_DIR}/lib/libmpi.so" ]]; then
+        _mpi_abi="${SUBMIT_DIR}/.cache/mpi-abi"
+        mkdir -p "${_mpi_abi}"
+        ln -sfn "${CRAY_MPICH_DIR}/lib/libmpi.so" "${_mpi_abi}/libmpi.so.12"
+        export LD_LIBRARY_PATH="${_mpi_abi}:${LD_LIBRARY_PATH:-}"
+    fi
+elif [[ -d "${VENV}/lib" ]]; then
+    # A torch wheel newer than the loaded oneAPI module needs its own Unified
+    # Runtime / SYCL libs first, or `import torch` dies with
+    #   libsycl.so.9: undefined symbol: urGraphGetIdExp
+    # Link only the UR/SYCL/UMF/TCM set: the whole venv lib/ would also shadow
+    # the system MPI/libfabric and break PMIx.
+    _ld_first="${SUBMIT_DIR}/.cache/xpu-ld-first/$(basename "${VENV}")"
+    if [[ ! -e "${_ld_first}/.complete" ]]; then
+        mkdir -p "${_ld_first}"
+        for _lib in "${VENV}"/lib/libur_* "${VENV}"/lib/libsycl.so* \
+                    "${VENV}"/lib/libumf* "${VENV}"/lib/libtcm*; do
+            [[ -e "${_lib}" ]] && ln -sf "${_lib}" "${_ld_first}/"
+        done
+        touch "${_ld_first}/.complete"
+    fi
+    export LD_LIBRARY_PATH="${_ld_first}:${LD_LIBRARY_PATH:-}"
+fi
+
 # Keep the venv's compile-cache policy: node-local, not on Lustre.
 export TORCHINDUCTOR_CACHE_DIR="/tmp/${USER}-smoke-inductor"
 export TRITON_CACHE_DIR="/tmp/${USER}-smoke-triton"
@@ -134,7 +179,6 @@ fi
 
 # Derive a human label for logs (keep SMOKE_MACHINE if caller set it).
 MACHINE="${SMOKE_MACHINE:-$(hostname -s 2>/dev/null || hostname)}"
-ACCEL=""; [[ -n "${ZE_FLAT_DEVICE_HIERARCHY:-}${CCL_PROCESS_LAUNCHER:-}" ]] && ACCEL=xpu || ACCEL=cuda
 
 # Build the optional hf-assets flag once (omit when the dir doesn't exist).
 HF_FLAG=()
