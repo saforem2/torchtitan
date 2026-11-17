@@ -208,15 +208,15 @@ optimizer-update or checkpoint acceptance gate can run.
 | `9094039` seat 0 | 2026-11-16- | 24h (umbrella) | 10,801 -> 10,900 (x2), then 10,801 -> 10,863+ | 2.538 -> 2.461 | -- | 1-15% | **Running, cannot save.** `step-10900` save segfaults ~40 min in (DCP save planning, `PMPI_Wait`); ezpz auto-retry, then supervisor attempt 2. Left looping ([write-up](../../../2026-11-16-umbrella-9094039.md)). |
 
 **Latest checkpoint:** step-10,800 in the fixedpos fork (disk-audited on Aurora
-2026-11-14). The previous constant-LR chain's last good checkpoint is step-11,100;
+2026-11-17 03:40 UTC; every `step-10900` save since 2026-11-14 segfaulted). The previous constant-LR chain's last good checkpoint is step-11,100;
 its step-11,200 is an empty interrupted save.
 
 **Cumulative steps:** 10,800 resumable (disk-confirmed); 11,148 logged
 
 **Tokens consumed:** 10,800 x 12,288 x 8,192 = **1,087.2B tokens** (23.3% of 4.67T target)
 
-**Loss:** 2.4661, the last value W&B holds for the Nov 11 fixedpos runs
-(`2gzsirm3`, `ez5oe0r6`). A single-step value.
+**Loss:** 2.4606, the last value W&B holds for umbrella `9094039` attempt 1
+(`mqz0au4c`, step 10,899). A single-step value.
 
 ### Recovery
 

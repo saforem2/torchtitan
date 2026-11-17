@@ -68,7 +68,7 @@ checkpoint reloads hit the 60-min idle watchdog. Per-seat jobs `9091877`,
 ## Previous — 2026-11-11 per-seat jobs
 
 They ran 2026-11-14..15 after the outage: `9076330` (20B-512) died four times
-in the `step-10900` save; `9076346` (20B-256) went 21101 -> 21451+; `9076358`
+in the `step-10900` save; `9076346` (20B-256) went 21101 -> 21750 (`step-21700`); `9076358`
 (4B) went 2601 -> 8989 (`step-8900`); `9076371` (10B, 512N) went 1 -> 5000
 (`step-4900`). See [journal 2026-11-15](../journal.md).
 
@@ -110,7 +110,7 @@ per-dispatch history is in the linked pages.
 |------------|-------|---------------:|-----:|---------:|-------|
 | [**2B 256N**](agpt/2b/n256/README.md) async | **COMPLETE** ✅ | **92,859** | 2.652 | **100.0%** | 🏁 target reached (4.674T) |
 | [2B 512N](agpt/2b/n512/README.md) sync | **COMPLETE** | 46,429 | **2.687** | **100.0%** | ✅ **finished 2026-08-13 19:11 UTC** as umbrella 8744247 t0, exit 0. Full 4.674T olmo-mix-1124 budget. Final eval: MMLU 0.2511 (chance), and the last 500B tokens moved no metric. Stage 2 (dolmino CPT) seeded from step-46429 **has since run** (8756070 t0 then 8756957 t0) and sits at step 7,728, also idle. |
-| [20B 256N](agpt/20b/n256/README.md) | **running** (`9094039` seat 1) | **22,000** | 2.422 | 23.7% | ▶️ `9076346` (Nov 14-15) 21,101 -> 21,451+; `9094039` saved 21,800 / 21,900 / 22,000; live 22,100 at 18.3% MFU (2026-11-17 03:40 UTC). |
+| [20B 256N](agpt/20b/n256/README.md) | **running** (`9094039` seat 1) | **22,000** | 2.422 | 23.7% | ▶️ `9076346` (Nov 14-15) 21,101 -> 21,750; `9094039` saved 21,800 / 21,900 / 22,000; live 22,100 at 18.3% MFU (2026-11-17 03:40 UTC). |
 | [20B 512N](agpt/20b/n512/README.md) | **running, cannot save** (`9094039` seat 0) | **10,800** (fixedpos) | 2.464 | 23.3% | 🔴 `step-10900` save segfaults ~40 min in, in DCP save planning: 4x in `9076330`, 2x so far in `9094039`. Left looping 10,801 -> 10,900. |
 | [agpt 4B, OLMo-3, 4K](agpt/4b/README.md) | **running** (`9094039` seat 3, Aurora 512N) | **11,700** | 2.672 | 6.3% | ▶️ `9076358` 2,601 -> 8,989; `9094039` reload hit the idle watchdog once, then trained from 8,979; live 11,800 (03:40 UTC). Sirius `33525` finished (walltime); Polaris 16N/32N queued. |
 | [agpt 10B, OLMo-3, 4K](agpt/10b/README.md) | **stopped** (`9094039` seat 4) | **4,900** | 2.837 | 2.6% | ⏹️ `9076371` (512N, fresh) 1 -> 5,000. In `9094039` three `step-4900` reloads each exceeded the 3600 s idle watchdog; seat stopped (marker) at 21:52 UTC. 768N diverged at step 1. Sirius `33527`/`33537` finished; Polaris queued. |
