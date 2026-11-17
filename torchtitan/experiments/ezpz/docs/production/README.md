@@ -143,13 +143,15 @@ has its own token/step goal in the linked page.
     doc: 20B-256 `step-12000` (137 ckpt dirs, mtime Aug 26 09:27), 20B-512
     `step-10600` (126). These supersede the 2026-08-26 sync census (10,369 /
     9,690), which predates the 08-26 leg. Note `docs/production/metrics/*.csv`
-    is NOT authoritative for this -- its `manifest.json` reads
-    `exported_at 2026-08-17`, so it stops at 10,380 / 9,694.
+    was NOT authoritative for this -- its `manifest.json` then read
+    `exported_at 2026-08-17`, so it stopped at 10,380 / 9,694. Re-exported
+    2026-11-17 04:11 UTC (`utils/export_ground_truth.py` on Aurora): 14 chains,
+    20B-256 through 22,107, 20B-512 through 11,147 logged, 4B 12,100, 10B 5,000.
     The [dispatch log](dispatch-log.md) records higher *logged* steps for the
     20B chains (`8764675`: 20B-512 to 10,699, 20B-256 to 11,800) -- logged is
     not persisted, checkpoints save on an interval, and the log's own reading
     rules say to take the resumable head from disk. Losses are the tips of the
-    committed [metrics store](metrics/README.md) (exported 2026-08-17), whose
+    committed [metrics store](metrics/README.md) (as exported 2026-08-17), whose
     nearest sampled steps are 10,380 / 9,694 / 7,730 / 21,307.
     Seat-to-chain attribution for `8773440` is by node count plus the seat's
     reported loss: its two 2B-512 seats logged 0 and 504 steps, and the 504
