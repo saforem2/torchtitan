@@ -46,6 +46,14 @@ Aurora `9076371` trained 1 -> 5000 at 512N and saved `step-4900` (loss 2.837). S
   before it starts
   ([umbrella write-up](../../2026-11-11-umbrella-2088n.md#resubmission-2026-11-11)).
 
+Charts from W&B (`21detr4f`, `9076371`, steps 1-5000; regenerated 2026-11-17):
+
+![Aurora 512N: loss, throughput, MFU](n512/figures/production_10b_v2_512n.svg)
+
+![Aurora 512N: grad norm, learning rate, max loss](n512/figures/training_diagnostics_10b_v2_512n.svg)
+
+![Aurora 512N: tokens vs time](n512/figures/tokens_vs_time_10b_v2_512n.svg)
+
 ## Sirius: 8N hedge on Dolma
 
 Full detail: [Sirius hedge report](../sirius-olmo3-5b-10b.md).

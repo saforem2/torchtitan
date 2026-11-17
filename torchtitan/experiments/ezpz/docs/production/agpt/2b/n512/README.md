@@ -126,6 +126,14 @@
 
 ![2B v2 512N Tokens vs Time](figures/tokens_vs_time_2b_v2_512n.svg)
 
+### Constant-LR fork `-REAL-fixedpos` (from `step-39900`, umbrella `9094039`)
+
+W&B `vl3xaxrn`, regenerated 2026-11-17 (steps 39,901 -> ~40,790).
+
+![2B 512N const-LR -REAL-fixedpos](figures/production_2b_v2_512_constlr_real_fixedposn.svg)
+
+![2B 512N const-LR -REAL-fixedpos diagnostics](figures/training_diagnostics_2b_v2_512_constlr_real_fixedposn.svg)
+
 ### Progress (chain)
 
 | Job ID | Date | Walltime | Steps | Loss (start → end) | TPS/GPU | MFU | Status |
