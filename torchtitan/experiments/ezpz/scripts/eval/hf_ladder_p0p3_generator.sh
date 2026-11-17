@@ -70,6 +70,11 @@ for s in __STEPS__; do
   echo "CONVERT $s"
   python -m torchtitan.experiments.ezpz.eval.convert_to_hf "$DCP" "$HF" --model_name experiments.ezpz.agpt --model_flavor 2b-mds --export_dtype bfloat16 || exit 1
   cp "$HF_CONFIG" "$HF/config.json"
+  # HF export already wrote config.json + tokenizer.* via write_hf_assets; the
+  # legacy cp overwrites are kept for dense 2b-mds chain but must include the
+  # tokenizer JSONs or lm-eval bos_token_id is None (see Tegu 79-HF backfill).
+  cp "$TOK_SRC"/tokenizer_config.json "$HF/" 2>/dev/null || true
+  cp "$TOK_SRC"/special_tokens_map.json "$HF/" 2>/dev/null || true
   cp "$TOK_SRC"/tokenizer.* "$HF/"
   ls -lh "$HF"/model-*.safetensors
 done
