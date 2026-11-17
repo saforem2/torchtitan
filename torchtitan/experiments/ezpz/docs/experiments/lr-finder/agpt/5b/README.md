@@ -108,6 +108,11 @@ early jobs).
 from any fit; 10B GBS512/2048 both NCCL-timed-out (33658/33659, same data-path
 cause — 10b is ~4x slower per step than 5b at same GAS, ~180 tps vs ~790).
 Treat the 10B scaling law as not yet measured.
+
+![5B AdamW GBS scaling law — 32 / 128 / 512 clean, 2048 blocked](figures/sirius-5b-gbs-scaling-law.svg)
+
+*Figure: 5B AdamW LR-finder curves at GBS 32 / 128 / 512 (Sirius H100, same 1e-8 -> 1e-1 sweep). Dashed lines mark blow-up/10 (suggested LR); dots mark minima. GBS 2048 both attempts NCCL-timed-out in the data loader (json.gz + tokenizer straggler), not a model limit — excluded from the trend. Style: `ambivalent` + Iosevka25 (Iosevka fallback). Source: `torchtitan/experiments/ezpz/utils/plot_style.apply_style()` via `.venv` `ambivalent.mplstyle`.*
+
 ## GBS=6144 evidence (2026-09-18 campaign, separate batch)
 
 ## AdamW fixed-LR validation

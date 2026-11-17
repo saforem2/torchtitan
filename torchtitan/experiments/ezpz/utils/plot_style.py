@@ -1,8 +1,8 @@
 """Shared chart styling for ezpz plots.
 
-Applies the ``ambivalent`` matplotlib stylesheet and registers Iosevka
-(downloaded to ``~/.local/share/fonts/Iosevka/``) so every chart uses
-the same monospace face.
+Applies the ``ambivalent`` matplotlib stylesheet and registers Iosevka25
+(preferred) with Iosevka fallback, so every chart uses the house
+monospace face.
 
 Import side-effect: calling ``apply_style()`` is idempotent. The
 caller imports this module before creating any figures.
@@ -51,8 +51,8 @@ def _ambivalent_stylefile() -> str | None:
     return None
 
 
-def apply_style(font_family: str | list[str] = "Iosevka") -> None:
-    """Apply ambivalent style + Iosevka font (idempotent).
+def apply_style(font_family: str | list[str] = "Iosevka25") -> None:
+    """Apply ambivalent style + Iosevka25/Iosevka font (idempotent).
 
     Import-safe in environments without IPython (e.g. the XPU training
     .venv): loads the ambivalent stylesheet from its file rather than
@@ -75,6 +75,6 @@ def apply_style(font_family: str | list[str] = "Iosevka") -> None:
             stacklevel=2,
         )
     if isinstance(font_family, str):
-        font_family = [font_family, "DejaVu Sans Mono", "monospace"]
+        font_family = [font_family, "Iosevka", "DejaVu Sans Mono", "monospace"]
     plt.rcParams["font.family"] = font_family
     _applied = True
