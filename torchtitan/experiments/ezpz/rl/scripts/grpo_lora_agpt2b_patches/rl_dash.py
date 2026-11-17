@@ -37,8 +37,7 @@ for d in (os.path.expanduser("~/Library/Fonts"), "/Library/Fonts"):
 plt.style.use(ambivalent.STYLES["ambivalent"])
 _ios = sorted({f.name for f in fm.fontManager.ttflist if "iosevka" in f.name.lower()})
 if _ios:
-    # prefer a plain "Iosevka"/"Iosevka Term" family if present
-    pref = next((n for n in _ios if n.lower() in ("iosevka", "iosevka term")), _ios[0])
+    pref = next((n for n in _ios if n.lower() in ("iosevka25", "iosevka", "iosevka term")), _ios[0])
     plt.rcParams["font.family"] = pref
 plt.rcParams["savefig.transparent"] = True
 plt.rcParams["figure.facecolor"] = "none"

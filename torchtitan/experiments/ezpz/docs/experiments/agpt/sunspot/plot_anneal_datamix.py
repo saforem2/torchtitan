@@ -26,11 +26,9 @@ matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt  # noqa: E402
 
-# ambivalent is required -- silent fallback hides style regressions.
-# uv pip install --no-deps "git+https://github.com/saforem2/ambivalent"
-import ambivalent  # noqa: E402
+from torchtitan.experiments.ezpz.utils.plot_style import apply_style  # noqa: E402
 
-plt.style.use(ambivalent.STYLES["ambivalent"])
+apply_style()
 
 FIGDIR = Path(__file__).parent / "figures"
 FIGDIR.mkdir(exist_ok=True)

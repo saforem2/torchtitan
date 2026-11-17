@@ -29,12 +29,9 @@ import matplotlib
 matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
+from torchtitan.experiments.ezpz.utils.plot_style import apply_style  # noqa: E402
 
-# ambivalent is required — silent fallback hides style regressions.
-# Install with: uv pip install --no-deps "git+https://github.com/saforem2/ambivalent"
-import ambivalent  # noqa: F401
-
-plt.style.use(ambivalent.STYLES["ambivalent"])
+apply_style()
 
 
 def compute_wsd_lr_schedule(

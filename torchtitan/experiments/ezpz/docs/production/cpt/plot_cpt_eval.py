@@ -16,12 +16,9 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-try:
-    import ambivalent
+from torchtitan.experiments.ezpz.utils.plot_style import apply_style
 
-    plt.style.use(ambivalent.STYLES["ambivalent"])
-except Exception:
-    pass
+apply_style()
 
 # (mix label, tsv basename, color)
 MIXES = [

@@ -1498,9 +1498,8 @@ def _apply_house_style(plt):
     # Prefer 'Iosevka Term' when present (rl_dash3 convention).
     try:
         from matplotlib import font_manager as _fm
-        names = {f.name for f in _fm.fontManager.ttflist
-                 if "iosevka" in f.name.lower()}
-        pick = next((n for n in ("Iosevka Term", "Iosevka") if n in names), None)
+        names = {f.name for f in _fm.fontManager.ttflist if "iosevka" in f.name.lower()}
+        pick = next((n for n in ("Iosevka25", "Iosevka Term", "Iosevka") if n in names), None)
         if pick:
             plt.rcParams["font.family"] = [pick, "DejaVu Sans Mono", "monospace"]
     except Exception:
