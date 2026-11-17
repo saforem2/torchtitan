@@ -131,8 +131,10 @@
 
 ### Job Submission
 
-- **Current production path (native auto-retry):** Use
-  `scripts/submit_agpt_{2b,20b,80b}_autoretry.sh`, which use
+- **Current production path (umbrella):** `submit/aurora/umbrella-*.pbs`, one
+  multi-seat PBS job on `frameworks/2026.1.0` overlays with pinned worktrees
+  (see "Production Training Status" below).
+- **Single-chain native auto-retry:** `scripts/submit_agpt_{2b,20b,80b}_autoretry.sh`, which use
   `ezpz launch --auto-retry` (ezpz >= 0.17.1, PR #170) -- ezpz owns the
   split + scrape + swap + retry loop. The scripts yeet the venv to the
   whole (un-split) nodefile themselves (auto-retry does NOT broadcast)
@@ -439,67 +441,41 @@ that touches one of these areas.
 
 ## Production Training Status (Aurora)
 
-Tracking in `docs/production/`. All v2 (post-bf16-fix) runs use the
-torch 2.13 venv stack. New runs use the native auto-retry scripts
-(`scripts/submit_agpt_*_autoretry.sh`); earlier Aurora v2 trajectories
-ran under the legacy `*_aurora_venv_failover.sh` wrapper (see Job
-Submission above). Default dtype is now `float32` (see Recent Findings).
+Tracking in `docs/production/` (index: `docs/production/README.md`). Status as
+of 2026-11-17 03:40 UTC.
 
-### v2 — 2B 512N canonical chain (`8460301 → 8463626 → 8463627 → 8466847`)
+**Production path:** one multi-seat umbrella PBS job,
+`submit/aurora/umbrella-*.pbs` (current: `umbrella-20261116.pbs`, job
+`9094039`, 2346N, 24h on `large`). Seats run on the node-local
+`frameworks/2026.1.0` image (torch `2.13.0a0`) with Lustre uv overlay venvs,
+each from a pinned worktree (20B-512 `dc6c150`; 20B-256 and 2B `151f305`;
+4B/10B v2 `6ad208b`). Nothing is yeeted. A supervisor relaunches a dead seat
+unless `logs/multi-autoretry-<job>/trainer-<idx>.nan-stop` exists. The
+`scripts/submit_agpt_*_autoretry.sh` single-chain submitters still work but are
+not what production runs. Post-sync `ezpz` (`origin/ezpz`) needs torch >= 2.16,
+so the pins stay until a node-local 2.16 runtime exists (journal 2026-11-16).
 
-- **Cumulative steps:** 5,073 (as of 2026-05-04)
-- **Loss:** 2.97
-- **Tokens consumed:** 510B (10.9% of 4.67T target)
-- **Throughput:** ~2,700 TPS/GPU, ~10% MFU
-- **Checkpoint dir:** `outputs/checkpoints/agpt-2b-sophiag-olmo-mix-1124-n512-gbs12288/`
-- **Status:** 8463626 walltime-finished cleanly (50 ckpts saved every
-  100 steps); 8463627 (continuation) and 8466847 (held behind it)
-  are both Q for a 512N slot.
-- **Trajectory page:** [`docs/production/agpt/2b/n512/`](docs/production/agpt/2b/n512/README.md)
+| Chain | Checkpoint dir (under `outputs/checkpoints/`) | Head | State |
+|---|---|---|---|
+| 20B 512N | `agpt-20b-sophiag-olmo-mix-1124-n512-gbs12288-constlr-from9000-fixedpos` | `step-10800` | `step-10900` save segfaults in DCP save planning (6x); seat loops |
+| 20B 256N | `agpt-20b-sophiag-olmo-mix-1124-n256-gbs6144-fixedpos` | `step-22000` | training |
+| 2B 512N const-LR fork | `agpt-2b-sophiag-olmo-mix-1124-n512-gbs12288-constlr-from9200-REAL-fixedpos` | `step-40700` | training; re-forked from `step-39900` (the `-REAL` fork NaN'd at 39,943) |
+| 4B v2 512N | `agpt-v2-4b-4k-olmo-mix-n512-20261109` | `step-11700` | training |
+| 10B v2 512N | `agpt-v2-10b-4k-olmo-mix-n512-20261111` | `step-4900` | stopped; 6144-rank reloads exceed `IDLE_TIMEOUT=3600` |
 
-### v2 — 20B 512N canonical chain (`8460302 → 8463628 → 8466848`)
+Operational facts:
+- 6144-rank checkpoint loads print nothing; under concurrent loads they can
+  exceed the 3600 s idle watchdog (4B/10B in `9094039`) and slow every other
+  seat to ~4% MFU.
+- oneCCL `N pending requests in pool 0` warning dumps keep a seat's log fresh,
+  so the idle watchdog never fires on a seat hung in a collective.
 
-- **Cumulative steps:** 863 (as of 2026-05-04)
-- **Loss:** 3.46
-- **Tokens consumed:** 87B (1.9% of 4.67T target)
-- **Throughput:** ~358 TPS/GPU, ~17.8% MFU
-- **Status:** 8463628 walltime-finished cleanly at step 863
-  (step-100..step-800 ckpts saved); 8466848 (continuation, auto-released
-  from hold) is Q for a 512N slot.
-- **Eval (8 ckpts, steps 100-800):** ARC-Easy `acc` lifts cleanly
-  **0.271 → 0.444** above v1's flat ~0.27 baseline; HellaSwag `acc_norm`
-  breaks out **0.254 → 0.284** (+3pp above v1). ARC-C / Winogrande
-  still in noise at this token count. The fp32-master fix is
-  smoking-gun-validated at 20B.
-- **Trajectory page:** [`docs/production/agpt/20b/n512/`](docs/production/agpt/20b/n512/README.md)
-
-### v2 — 20B 256N (`8463659`, NODE_FAIL after step 364)
-
-- step 364, loss 4.61, 18.3B tokens. Killed by recurring `signal 9`
-  Aurora NODE_FAIL — same pattern as 8459818 / 8460301.
-- step-300 ckpt saved cleanly; resumable. No continuation chained
-  (production is consolidated on the 512N chain; this trajectory was
-  a per-token comparator scaling experiment).
-- **Trajectory page:** [`docs/production/agpt/20b/n256/`](docs/production/agpt/20b/n256/README.md)
-
-### v2 — 1024N first attempts (`8463182` 2B, `8463183` 20B) — both crashed at startup
-
-- **2B 1024N (8463182)**: `MemoryError: std::bad_alloc` in
-  `torch.distributed.broadcast` during `set_determinism` init. Died
-  in 211s.
-- **20B 1024N (8463183)**: rank 4732 died from signal 11 (SIGSEGV)
-  during the same init phase. Died in 211s.
-- 12,288 ranks (1024N × 12 GPU/node) appears to hit an init-time
-  memory/comm scaling issue that 256N and 512N don't see. Bracket
-  with 768N / 896N before resubmitting.
-- See [`memory/project_1024n_init_crash.md`](.).
-
-### v2 — √2-LR fork (`8467141 → 8467142`, 2B 512N)
-
-Experimental: tests whether scaling LR by √2 (3.22e-5 vs 2.28e-5) at
-the doubled GBS=12,288 closes the per-token gap to 256N. Writes to
-its own ckpt dir (`gbs12288-lr3.22e-5`), independent of the canonical
-chain. Both jobs Q/H for 4+ days now.
+Finished or historical (one line each):
+- 2B 512N canonical chain: COMPLETE 2026-08-13, step 46,429, 4.674T tokens, loss 2.687.
+- 2B 256N async chain: COMPLETE 2026-06-29, step 92,859.
+- 20B 512N constant-LR chain NaN'd from 11,101 (`8938159`, 2026-10-18/19); fixedpos fork from `step-10800` (PR #66).
+- 1024N (12,288 ranks) init crashed in `set_determinism` (`8463182`, `8463183`, 2026-05-04); 768N 10B diverged at step 1 (`9053470`, 2026-11-11).
+- Recurring Aurora `signal 9` NODE_FAIL on long jobs (2026-05); resume from the last checkpoint.
 
 ### v2 — 80B
 
@@ -645,9 +621,10 @@ moved up to "Golden Rules".
   `scripts/interactive-launch.sh`.
 - **Append-only tables** — production training progress tables should
   append, not replace.
-- **Use `scripts/submit_agpt_*_autoretry.sh`** (native
-  `ezpz launch --auto-retry`) for current production (torch 2.13 venv,
-  fp32-master). The bash `*_aurora_venv_failover.sh` wrapper is legacy
+- **Production runs `submit/aurora/umbrella-*.pbs`** (multi-seat, frameworks
+  overlays, pinned worktrees). `scripts/submit_agpt_*_autoretry.sh` (native
+  `ezpz launch --auto-retry`, torch 2.13 venv, fp32-master) is the single-chain
+  path. The bash `*_aurora_venv_failover.sh` wrapper is legacy
   but retained (reproducing earlier Aurora runs + failure-taxonomy
   reference). The non-failover `submit_agpt_{2b,20b}_aurora_venv.sh`
   were removed 2026-06-24 (recover from git history if needed). The
