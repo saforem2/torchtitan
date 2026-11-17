@@ -183,7 +183,7 @@ plt.style.use(ambivalent.STYLES["ambivalent"])
 _ios = sorted({f.name for f in fm.fontManager.ttflist if "iosevka" in f.name.lower()})
 if _ios:
     plt.rcParams["font.family"] = next(
-        (n for n in _ios if n.lower() in ("iosevka", "iosevka term")), _ios[0])
+        (n for n in _ios if n.lower() in ("iosevka25", "iosevka", "iosevka term")), _ios[0])
 # Material Design 500-level palette (well-spread hues, distinct at a glance),
 # installed as the prop_cycle so the C0..CN refs used everywhere resolve to it.
 MATERIAL = [

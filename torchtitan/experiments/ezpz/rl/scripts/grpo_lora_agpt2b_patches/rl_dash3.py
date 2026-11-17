@@ -169,7 +169,7 @@ plt.style.use(ambivalent.STYLES["ambivalent"])
 _ios = sorted({f.name for f in fm.fontManager.ttflist if "iosevka" in f.name.lower()})
 if _ios:
     plt.rcParams["font.family"] = next(
-        (n for n in _ios if n.lower() in ("iosevka", "iosevka term")), _ios[0])
+        (n for n in _ios if n.lower() in ("iosevka25", "iosevka", "iosevka term")), _ios[0])
 plt.rcParams.update({"savefig.transparent": True, "figure.facecolor": "none",
                      "axes.facecolor": "none"})
 

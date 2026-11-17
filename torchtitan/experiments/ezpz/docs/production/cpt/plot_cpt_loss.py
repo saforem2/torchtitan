@@ -18,14 +18,9 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-try:
-    # ezpz docs plots expect the ambivalent style; fall back silently if the
-    # optional IPython/ambivalent stack is missing (see feedback note).
-    import ambivalent
+from torchtitan.experiments.ezpz.utils.plot_style import apply_style
 
-    plt.style.use(ambivalent.STYLES["ambivalent"])
-except Exception:
-    pass
+apply_style()
 
 # (label, tsv basename, final validation loss, color)
 RUNS = [

@@ -40,7 +40,7 @@ def house_style():
                 fm.fontManager.addfont(os.path.join(iose, f))
     if hits:
         plt.style.use(hits[0])
-    plt.rcParams["font.family"] = ["Iosevka", "DejaVu Sans Mono", "monospace"]
+    plt.rcParams["font.family"] = ["Iosevka25", "Iosevka", "DejaVu Sans Mono", "monospace"]
 
 
 def smooth(ys, frac=0.10):

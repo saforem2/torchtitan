@@ -36,14 +36,9 @@ matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
 
-# ambivalent is required — silent fallback hides style regressions.
-# Install with: uv pip install --no-deps "git+https://github.com/saforem2/ambivalent"
-import ambivalent  # noqa: F401
+from torchtitan.experiments.ezpz.utils.plot_style import apply_style
 
-plt.style.use(ambivalent.STYLES["ambivalent"])
-
-# Force monospace across every text element in every figure.
-plt.rcParams["font.family"] = "monospace"
+apply_style()
 
 DATA_DIR = Path(__file__).parent
 FIG_DIR = DATA_DIR.parent / "figures"

@@ -591,13 +591,9 @@ def _plot(summary: dict[str, Any], out_dir: str) -> str | None:
         print(f"[coord-check] matplotlib unavailable ({exc}); skipping the plot")
         return None
     try:
-        import ambivalent  # noqa: F401
+        from torchtitan.experiments.ezpz.utils.plot_style import apply_style
 
-        plt.style.use(ambivalent.STYLES["ambivalent"])
-        plt.rcParams["font.family"] = "sans-serif"
-        plt.rcParams["font.sans-serif"] = ["Iosevka"] + list(
-            plt.rcParams["font.sans-serif"]
-        )
+        apply_style()
     except Exception as exc:  # noqa: BLE001
         print(f"[coord-check] ambivalent unavailable ({exc}); matplotlib defaults")
 

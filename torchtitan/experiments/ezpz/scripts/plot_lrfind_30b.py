@@ -21,32 +21,19 @@ import os
 import matplotlib
 
 matplotlib.use("Agg")
-
 import matplotlib.pyplot as plt
+from torchtitan.experiments.ezpz.utils.plot_style import apply_style
 
-# ambivalent is required -- silent fallback hides style regressions.
-import ambivalent  # noqa: F401
+apply_style()
 
-plt.style.use(ambivalent.STYLES["ambivalent"])
-
-# ambivalent sets IBM Plex Sans; these figures want Iosevka to match the rest
-# of the docs. Prepend rather than replace so the style's own fallback chain
-# still applies on a machine without Iosevka installed.
-plt.rcParams["font.family"] = "sans-serif"
-plt.rcParams["font.sans-serif"] = ["Iosevka"] + list(
-    plt.rcParams["font.sans-serif"]
-)
-# Math text otherwise renders in DejaVu and visibly disagrees with the labels.
+# Math text should match label family instead of falling back to DejaVu.
 plt.rcParams["mathtext.fontset"] = "custom"
-plt.rcParams["mathtext.rm"] = "Iosevka"
-plt.rcParams["mathtext.it"] = "Iosevka:italic"
-plt.rcParams["mathtext.bf"] = "Iosevka:bold"
-# fontset="custom" makes matplotlib resolve EVERY mathtext family, including
-# mathtext.cal, which defaults to "cursive" -- not installed here, so it warns
-# and falls back to DejaVu on every render. Point it at Iosevka too.
-plt.rcParams["mathtext.cal"] = "Iosevka:italic"
-plt.rcParams["mathtext.sf"] = "Iosevka"
-plt.rcParams["mathtext.tt"] = "Iosevka"
+plt.rcParams["mathtext.rm"] = "Iosevka25"
+plt.rcParams["mathtext.it"] = "Iosevka25:italic"
+plt.rcParams["mathtext.bf"] = "Iosevka25:bold"
+plt.rcParams["mathtext.cal"] = "Iosevka25:italic"
+plt.rcParams["mathtext.sf"] = "Iosevka25"
+plt.rcParams["mathtext.tt"] = "Iosevka25"
 
 REPO = "/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan"
 

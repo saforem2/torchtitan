@@ -45,7 +45,7 @@ def apply_house_style() -> None:
                 fm.fontManager.addfont(str(f))
     if hits:
         plt.style.use(hits[0])
-    plt.rcParams["font.family"] = ["Iosevka", "DejaVu Sans Mono", "monospace"]
+    plt.rcParams["font.family"] = ["Iosevka25", "Iosevka", "DejaVu Sans Mono", "monospace"]
 
 
 def load_curve(path: str):

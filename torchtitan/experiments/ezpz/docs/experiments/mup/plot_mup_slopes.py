@@ -21,12 +21,9 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 
-try:
-    import ambivalent  # noqa: F401
-    plt.style.use(ambivalent.STYLES["ambivalent"])
-    _STYLE = "ambivalent"
-except Exception:
-    _STYLE = "matplotlib default (ambivalent unavailable)"
+from torchtitan.experiments.ezpz.utils.plot_style import apply_style  # noqa: E402
+
+apply_style()
 
 # (module, SP slope, muP with d^-1 readout, muP with fan_in^-1/2 readout).
 # None = not reported in the source table.
@@ -142,5 +139,4 @@ out.mkdir(parents=True, exist_ok=True)
 for ext in ("svg", "png"):
     fig.savefig(out / f"mup_coord_check_slopes.{ext}", dpi=150,
                 bbox_inches="tight")
-print(f"style: {_STYLE}")
 print(f"wrote {out}/mup_coord_check_slopes.{{svg,png}}")
