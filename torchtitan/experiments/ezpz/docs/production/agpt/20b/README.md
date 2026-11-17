@@ -1,14 +1,14 @@
 # Production Training — agpt 20B
 
-> Last updated: 2026-11-14
+> Last updated: 2026-11-17
 >
-> **20B-512 restarted on 2026-11-14 (`9076330`); 20B-256 is queued.** Disk-checked
-> on Aurora 2026-11-14:
+> **Both 20B chains run in umbrella [`9094039`](../../2026-11-16-umbrella-9094039.md).**
+> Disk-checked on Aurora 2026-11-17 03:40 UTC:
 >
-> | Chain | Resumable head | Tokens | Queued job |
-> |---|---|---|---|
-> | [20B 256N](n256/README.md) | `step-21100` (fixedpos) | 1,062.0B (22.7%) | `9076346`, 260 nodes |
-> | [20B 512N](n512/README.md) | `step-10800` (fixedpos) | 1,087.2B (23.3%) | `9076330`, 520 nodes, running |
+> | Chain | Resumable head | Tokens | Job | State |
+> |---|---|---|---|---|
+> | [20B 256N](n256/README.md) | `step-22000` (fixedpos) | 1,107.3B (23.7%) | `9094039` seat 1, 260 nodes | training, live 22,100, loss 2.422 |
+> | [20B 512N](n512/README.md) | `step-10800` (fixedpos) | 1,087.2B (23.3%) | `9094039` seat 0, 520 nodes | trains, cannot save: `step-10900` save segfaults (6x) |
 >
 > Since the September snapshot: umbrella `8938159` (Oct 18-19) took the 256N to
 > `step-20900` and sent the 512N NaN from step 11,101. Both chains moved to

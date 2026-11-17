@@ -1,7 +1,7 @@
 # Production Training — agpt 10B (9.48B), OLMo-3 tokenizer, 4K
 
-> **Last updated:** 2026-11-14. Steps, checkpoints and queue state below were
-> read from disk, logs and the schedulers on 2026-11-14.
+> **Last updated:** 2026-11-17. Aurora checkpoints read from disk at 03:40 UTC;
+> Sirius/Polaris queue state from `qstat -x` at 03:18 UTC.
 
 The agpt-v2 9.48B model: `10b_olmo2tok` geometry (dim 4096, 48 layers, 32 heads,
 8 KV heads, vocab 100352), OLMo-3 tokenizer (byte-identical to OLMo-2-1124-7B),
@@ -12,27 +12,28 @@ The agpt-v2 9.48B model: `10b_olmo2tok` geometry (dim 4096, 48 layers, 32 heads,
 
 | Machine | Config | Shape | Head | Now |
 |---|---|---|---|---|
-| Aurora | `agpt_v2_10b_4k_olmo_mix` | 512N, GBS 6144 | none | queued, `9076371` (fresh start) |
-| Sirius | `agpt_10b_olmo3_polaris` | 8N (32 GPUs), GBS 32 | `step-100` | running, `33527` (fresh, step 197 at `15:44 UTC`) |
+| Aurora | `agpt_v2_10b_4k_olmo_mix` | 512N, GBS 6144 | `step-4900` | stopped; umbrella `9094039` seat 4 could not reload `step-4900` within the 3600 s idle watchdog |
+| Sirius | `agpt_10b_olmo3_polaris` | 8N (32 GPUs), GBS 32 | `step-100` | finished: `33527` (`Exit_status=1`), `33537` (`Exit_status=143`) |
 | Polaris | `agpt_10b_olmo3_polaris` | 16N / 32N | -- | queued since Nov 9, `7832132` / `7832133` |
 
-No 10B run has a checkpoint past `step-100` yet.
+Aurora `9076371` trained 1 -> 5000 at 512N and saved `step-4900` (loss 2.837). Sirius has no checkpoint past `step-100`.
 
-## Aurora: never trained at scale
+## Aurora: 512N
 
 | | |
 |---|---|
 | Config | `agpt_v2_10b_4k_olmo_mix` (`10b_olmo2tok_dp12`: hidden 11520 for even FSDP sharding) |
-| Data | raw olmo-mix-1124 JSON; queued job reads `olmo-mix-dp6144.txt` (sorted), see below |
+| Data | raw olmo-mix-1124 JSON; 512N reads `olmo-mix-dp6144.txt` (sorted), see below |
 | Optimizer | AdamW `7e-5`, 2000 warmup. Scaled from the LR finder, not validated at a fixed LR. |
-| Checkpoints | `agpt-v2-10b-4k-olmo-mix-n768-20261109/` is empty; the queued job writes `agpt-v2-10b-4k-olmo-mix-n512-20261111/` |
+| Checkpoints | `agpt-v2-10b-4k-olmo-mix-n768-20261109/` is empty; 512N writes `agpt-v2-10b-4k-olmo-mix-n512-20261111/` (head `step-4900`) |
 | W&B | `12fv8yur`, `8qp5o62y`, `uzp907ru`, `znmzohyl` (the failed 768N attempts) |
 
 | Job | Dates | Shape | Outcome |
 |---|---|---|---|
 | `9055264` | -- | 2N | step-1 loss 11.99, the expected value |
 | `9053470` seat 4 (umbrella) | Nov 9-11 | 768N, 9216 ranks, GBS 9216 | step-1 loss **17788**, **24202**, **38478** on three fresh attempts, then a oneCCL scale-out allreduce failure (`atl_comm->wait fails`) and `FAILOVER STOP: deterministic_failure`; two more attempts stuck before training |
-| `9076371` | queued Nov 11 | 512N, 6144 ranks, GBS 6144 | fresh start |
+| `9076371` | Nov 14-15 | 512N, 6144 ranks, GBS 6144 | fresh start, `1 -> 5000`, loss `-> 2.837`; 12h walltime. Saved `step-4900`. Step-1 loss normal. |
+| `9094039` seat 4 (umbrella) | Nov 16 | 512N, 6144 ranks, GBS 6144 | three `step-4900` reloads, each killed by the 3600 s idle watchdog mid-load (`rc=143` after 4819 s, 4723 s, 4656 s); seat stopped with `trainer-4.nan-stop` at 21:52 UTC. [Write-up](../../2026-11-16-umbrella-9094039.md). |
 
 - Unverified inference from the umbrella write-up: oneCCL scale-out allreduce is
   broken at 9216 ranks on this stack. The 4B trained normally at 6144 ranks, so
@@ -64,7 +65,7 @@ Full detail: [Sirius hedge report](../sirius-olmo3-5b-10b.md).
 | `33527` | fresh `1 -> 200` | `12.03 -> 6.33` | died at step 200 |
 | `33528` | fresh `1 -> 19` | `12.02 -> 8.64` | stopped |
 | `33529` | fresh `1 -> 200` | `12.01 -> 6.30` | died at step 200 |
-| `33537` | fresh `1 -> 197+` | `12.02 -> 6.35` | running Nov 14 18:43 |
+| `33537` | fresh `1 -> 197+` | `12.02 -> 6.35` | finished, `Exit_status=143` |
 
 **Every attempt dies at step 200.** `33469`, `33488`, `33527` and `33529` each reached
 exactly step 200 and stopped with `FAILOVER STOP`. In `33529` the traceback is in

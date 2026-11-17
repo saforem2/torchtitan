@@ -1,6 +1,6 @@
 # Production Training — agpt 2B
 
-> Last updated: 2026-09-30
+> Last updated: 2026-11-17
 >
 > Current v2 production runs on `--training.dtype=float32`.
 > Historical v1 (bf16-tainted) runs are archived at
@@ -8,7 +8,16 @@
 > with the diagnosis link.
 
 > [!IMPORTANT]
-> **Nothing on this page is running.** Both 2B stage-1 chains **finished**
+> **2026-11-17: the 512N constant-LR fork is running again** as seat 2 of
+> umbrella [`9094039`](../../2026-11-16-umbrella-9094039.md). The `-REAL` fork
+> NaN'd at step 39,943 in `8855988`, which wrote NaN checkpoints
+> `step-42500`..`step-44600`; `step-39900` is its last finite checkpoint. The
+> `...-REAL-fixedpos` fork resumed from it and saved `step-40000` ..
+> `step-40700` (loss 2.693, live 40,744 at 03:40 UTC). The stage-1 chains
+> below stay complete.
+
+> [!NOTE]
+> **2026-09-30 snapshot. Nothing on this page was running then.** Both 2B stage-1 chains **finished**
 > their full 4.67T budget -- 256N on 2026-06-29, 512N on 2026-08-13 -- so
 > "not running" is the expected end state for them, not a fault. The
 > follow-on 2B heads, verified directly on Aurora on 2026-09-30, are

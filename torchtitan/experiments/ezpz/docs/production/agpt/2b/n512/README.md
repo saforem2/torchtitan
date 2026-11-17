@@ -1,6 +1,9 @@
 # Production Training — agpt 2B @ 512 nodes
 
-> **Last updated: 2026-09-30.**
+> **Last updated: 2026-11-17.** The constant-LR fork below is running again
+> from `step-39900` as `...-REAL-fixedpos` (umbrella `9094039`, `step-40700` as
+> of 03:40 UTC) after NaN'ing at 39,943; see the
+> [umbrella write-up](../../../2026-11-16-umbrella-9094039.md).
 >
 > **This is the canonical 2B production chain.**
 >

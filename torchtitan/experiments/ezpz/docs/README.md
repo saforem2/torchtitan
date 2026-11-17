@@ -89,14 +89,15 @@ going?" Tracking is per-model and per-node-count.
 
 | Page | Notes | Modified |
 |------|-------|---------:|
-| [Production Index](./production/README.md) | Top-level snapshot of every active trajectory | 2026-11-14 |
-| [Dense (agpt) Production](./production/agpt/README.md) | 2B / 20B / 80B chains, v1-vs-v2 overlays | 2026-11-14 |
+| [Production Index](./production/README.md) | Top-level snapshot of every active trajectory | 2026-11-17 |
+| [Umbrella `9094039`](./production/2026-11-16-umbrella-9094039.md) | 2346N/24h five-seat umbrella: 4B/10B reload vs idle watchdog, 20B-512 `step-10900` save segfault, 2B fork from `step-39900` | 2026-11-17 |
+| [Dense (agpt) Production](./production/agpt/README.md) | 2B / 20B / 80B chains, v1-vs-v2 overlays | 2026-11-17 |
 | [2B 256N](./production/agpt/2b/n256/README.md) | step-**92,859** (4.674T tokens, 100.0% of 4.67T), loss 2.6524. | 2026-10-16 |
-| [2B 512N](./production/agpt/2b/n512/README.md) | step-**46429** (4.67T tokens, 100.0% of 4.67T), loss 2.6869. | 2026-09-30 |
-| [20B 512N](./production/agpt/20b/n512/README.md) | step-**10,800** (10,800 x 12,288 x 8,192 = **1,087.2B tokens**), loss 2.4661. | 2026-11-14 |
-| [20B 256N](./production/agpt/20b/n256/README.md) | step-**21,100** (21,100 x 6,144 x 8,192 = **1,062.0B tokens**), loss 2.4434. | 2026-11-14 |
-| [agpt 4B, OLMo-3, 4K](./production/agpt/4b/README.md) | Aurora 512N at step-2,600 (65.4B tokens), queued; Sirius 2N hedge; Polaris queued. | 2026-11-14 |
-| [agpt 10B, OLMo-3, 4K](./production/agpt/10b/README.md) | Aurora 768N diverged at step 1, requeued at 512N; Sirius 8N hedge; Polaris queued. | 2026-11-14 |
+| [2B 512N](./production/agpt/2b/n512/README.md) | step-**46429** (4.67T tokens, 100.0% of 4.67T), loss 2.6869. Const-LR fork `-REAL-fixedpos` at step-40,700 (umbrella `9094039`). | 2026-11-17 |
+| [20B 512N](./production/agpt/20b/n512/README.md) | step-**10,800** (10,800 x 12,288 x 8,192 = **1,087.2B tokens**), loss 2.4661. `step-10900` save segfaults; looping in `9094039`. | 2026-11-17 |
+| [20B 256N](./production/agpt/20b/n256/README.md) | step-**22,000** (22,000 x 6,144 x 8,192 = **1,107.3B tokens**), loss 2.422. Running in `9094039`. | 2026-11-17 |
+| [agpt 4B, OLMo-3, 4K](./production/agpt/4b/README.md) | Aurora 512N at step-11,700 (294.4B tokens), running in `9094039`; Sirius 2N finished; Polaris queued. | 2026-11-17 |
+| [agpt 10B, OLMo-3, 4K](./production/agpt/10b/README.md) | Aurora 512N at step-4,900 (123.3B tokens); umbrella seat stopped (reloads exceeded the idle watchdog). 768N diverged at step 1. Sirius 8N finished; Polaris queued. | 2026-11-17 |
 | [agpt 80B](./production/agpt/80b/README.md) | **Blocked at scale by a high-dp NaN; root cause unknown.** Optimizer-independent (SophiaG 512N, mano 62N); the earlier "bf16 residual-stream overflow" diagnosis is refuted ([what we know](./guides/known-bugs/80b-nan-what-we-know.md)). fp32 activations prevent it at ~3.4x cost; fp32-residual alone still NaNs at dp=192; no live 80B production, fp32-residual work dormant. Wall 2 (256N init segfault) separate + open. | 2026-10-29 |
 | [80B 512N NaN incident (2026-07-03)](./experiments/agpt/aurora/20260703-80b-512n-sophiag-nan.md) | Incident record of the 512N NaN + NaN-abort guard. NOTE: the SophiaG-Hessian attribution was later disproven (2026-07-14, task #21) -- the NaN is optimizer-independent; the follow-on residual-overflow diagnosis is also refuted, root cause unknown (see `guides/known-bugs/80b-nan-what-we-know.md`). | 2026-07-24 |
 | [20B 1024N](./production/agpt/20b/n1024/README.md) | First attempt (8463183) crashed at startup; not retried | 2026-06-24 |
