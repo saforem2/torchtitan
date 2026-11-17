@@ -193,6 +193,28 @@ TRAJECTORIES: list[dict] = [
         "linestyle": "-",
         "marker": None,
     },
+    # agpt-v2 OLMo-3-tokenizer chains: raw olmo-mix-1124 through Grain, seq 4096,
+    # GBS 6144 (trajectories.py). Same 4.67T budget as the chains above.
+    {
+        "model": "4b",
+        "label": "4B v2 OLMo-3 (n512)",
+        "source": "wandb",
+        "key": "4b_v2_512",
+        "tokens_per_step": 6144 * 4096,
+        "color": "#00897B",  # teal 600
+        "linestyle": "-",
+        "marker": None,
+    },
+    {
+        "model": "10b",
+        "label": "10B v2 OLMo-3 (n512)",
+        "source": "wandb",
+        "key": "10b_v2_512",
+        "tokens_per_step": 6144 * 4096,
+        "color": "#6D4C41",  # brown 600
+        "linestyle": "-",
+        "marker": None,
+    },
 ]
 
 

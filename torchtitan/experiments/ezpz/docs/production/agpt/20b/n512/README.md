@@ -1,12 +1,19 @@
 # Production Training — agpt 20B @ 512 nodes
 
-> **Last updated:** 2026-11-14
+> **Last updated:** 2026-11-17
 >
 > **This is the canonical 20B production chain.**
 >
-> **Current status (2026-11-14): `9076330` (520 nodes, `small`, 12h) started
-> resuming `step-10800` on the fixedpos fork** (W&B `g4fgz2rv`); no step logged
-> at the time of writing.
+> **Current status (2026-11-17 03:40 UTC): trains, cannot save.** Seat 0 of
+> umbrella [`9094039`](../../../2026-11-16-umbrella-9094039.md). Every save of
+> `step-10900` dies ~40 min after `Saving the checkpoint`, inside DCP save
+> planning: mass `Fatal Python error: Segmentation fault` through MPICH
+> `PMPI_Wait` / oneCCL at 6144 ranks. Nothing is written and the head stays
+> `step-10800`. Seen 4x in `9076330` (Nov 14-15) and 2x so far in `9094039`
+> (23:15:54 UTC, then supervisor attempt 1 ended at 02:07:17 UTC). The seat is
+> left looping (decision 2026-11-17). Fix idea, untested: `dcp.save` on a gloo
+> process group; the `.metadata` is 1.25 GB, and the September stack saved the
+> same plan.
 >
 > - **Oct 18-19, umbrella `8938159`:** the constant-LR chain went NaN on every
 >   step from 11,101 through 11,148 (`loss=nan grad_norm=nan`, ~20% MFU), with
@@ -196,18 +203,20 @@ optimizer-update or checkpoint acceptance gate can run.
 | `8828612` t1 | 2026-09-19/20 | -- | **0 steps** | -- | -- | -- | Both attempts died during startup with `std::bad_alloc`; the checkpoint head remained 10,900. The sibling 20B-256 seat advanced to persisted step 16,000. |
 | `8870515` t1 | to 2026-09-25 | -- | 10,901 -> 11,190 | -- | -- | -- | Persisted step-11,100 (Sep 25); the step-11,200 save was interrupted. |
 | `8938159` | 2026-10-18/19 | 24h | 11,101 -> 11,148 | **nan** | -- | ~20% | NaN every step, optimizer corrupted; step-11,200 empty. Led to the fixedpos fork from step-10,800 ([journal](../../../../journal.md#2026-10-20-aurora----umbrella-nan-fixedpos-fork-boost-queued)). |
-| `9053470` t0 | 2026-11-09/11 | 4h26m (umbrella) | 10,801 -> 10,882 (fixedpos) | 2.538 -> 2.462 | 278 | 13.9% | **Latest outcome.** Hung once after 10,854; watchdog restart from step-10,800; no new checkpoint ([write-up](../../../2026-11-11-umbrella-2088n.md)). |
+| `9053470` t0 | 2026-11-09/11 | 4h26m (umbrella) | 10,801 -> 10,882 (fixedpos) | 2.538 -> 2.462 | 278 | 13.9% | Hung once after 10,854; watchdog restart from step-10,800; no new checkpoint ([write-up](../../../2026-11-11-umbrella-2088n.md)). |
+| `9076330` | 2026-11-14/15 | 12h | 10,801 -> 10,900 (x4) | -> 2.461 | -- | -- | Every run died in the `step-10900` save; head unchanged at step-10,800 ([journal](../../../../journal.md)). |
+| `9094039` seat 0 | 2026-11-16- | 24h (umbrella) | 10,801 -> 10,900 (x2), then 10,801 -> 10,863+ | 2.538 -> 2.461 | -- | 1-15% | **Running, cannot save.** `step-10900` save segfaults ~40 min in (DCP save planning, `PMPI_Wait`); ezpz auto-retry, then supervisor attempt 2. Left looping ([write-up](../../../2026-11-16-umbrella-9094039.md)). |
 
 **Latest checkpoint:** step-10,800 in the fixedpos fork (disk-audited on Aurora
-2026-11-14). The previous constant-LR chain's last good checkpoint is step-11,100;
+2026-11-17 03:40 UTC; every `step-10900` save since 2026-11-14 segfaulted). The previous constant-LR chain's last good checkpoint is step-11,100;
 its step-11,200 is an empty interrupted save.
 
 **Cumulative steps:** 10,800 resumable (disk-confirmed); 11,148 logged
 
 **Tokens consumed:** 10,800 x 12,288 x 8,192 = **1,087.2B tokens** (23.3% of 4.67T target)
 
-**Loss:** 2.4661, the last value W&B holds for the Nov 11 fixedpos runs
-(`2gzsirm3`, `ez5oe0r6`). A single-step value.
+**Loss:** 2.4606, the last value W&B holds for umbrella `9094039` attempt 1
+(`mqz0au4c`, step 10,899). A single-step value.
 
 ### Recovery
 

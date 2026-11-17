@@ -1,6 +1,9 @@
 # Production Training — agpt 2B @ 512 nodes
 
-> **Last updated: 2026-09-30.**
+> **Last updated: 2026-11-17.** The constant-LR fork below is running again
+> from `step-39900` as `...-REAL-fixedpos` (umbrella `9094039`, `step-40700` as
+> of 03:40 UTC) after NaN'ing at 39,943; see the
+> [umbrella write-up](../../../2026-11-16-umbrella-9094039.md).
 >
 > **This is the canonical 2B production chain.**
 >
@@ -122,6 +125,14 @@
 ### Tokens vs Wall Clock
 
 ![2B v2 512N Tokens vs Time](figures/tokens_vs_time_2b_v2_512n.svg)
+
+### Constant-LR fork `-REAL-fixedpos` (from `step-39900`, umbrella `9094039`)
+
+W&B `vl3xaxrn`, regenerated 2026-11-17 (steps 39,901 -> ~40,790).
+
+![2B 512N const-LR -REAL-fixedpos](figures/production_2b_v2_512_constlr_real_fixedposn.svg)
+
+![2B 512N const-LR -REAL-fixedpos diagnostics](figures/training_diagnostics_2b_v2_512_constlr_real_fixedposn.svg)
 
 ### Progress (chain)
 

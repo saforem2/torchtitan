@@ -375,6 +375,12 @@ TRAJECTORIES: list[dict] = [
             "8je9lhff",  # Oct 18-19 umbrella 8938159: NaN every step 11101-11148
             "2gzsirm3",  # Nov 11 umbrella 9053470, fixedpos: 10801-10882
             "ez5oe0r6",  # Nov 11 umbrella 9053470 auto-retry from step-10800
+            # 9076330 (Nov 14-15): 10801-10900 x4, every run died in the
+            # step-10900 save; no new checkpoint.
+            "kexpqgho",
+            "g41htqbu",
+            "k32a8o23",
+            "mqz0au4c",  # umbrella 9094039 seat 0 (Nov 16): 10801-10900 x2, save segfault
         ],
         # Backfill for the 5399->6801 hole, added 2026-08-16.
         #
@@ -558,6 +564,8 @@ TRAJECTORIES: list[dict] = [
             "iv185ozq",
             "gvzni7as",  # Oct 18-19 umbrella 8938159: to 20987, ckpt step-20900
             "gg6841jm",  # Nov 11 umbrella 9053470, fixedpos: 20901-21143, step-21100
+            "32hmonmk",  # 9076346 (Nov 14-15): 21101-21750, step-21700
+            "l8rbmuhl",  # umbrella 9094039 seat 1 (Nov 16-): 21701-, step-22000+
         ],
         # 17 of this chain's 20 runs end in state "crashed" (12h/2h dispatches
         # hitting walltime), and a crashed run's final steps often never sync --
@@ -819,6 +827,32 @@ TRAJECTORIES: list[dict] = [
         # the canonical overlay charts (which the live-chain guard enforces).
         "cls": "wandb_only",
     },
+    {
+        # 2B 512N constant-LR fork, -REAL lineage, re-forked from step-39900
+        # (2026-11-16). The -REAL fork NaN'd at 39943 in 8855988 and wrote NaN
+        # checkpoints step-42500..44600; step-39900 is its last finite one.
+        # This dir resumes it with BLENDCORPUS_RESUME_CONSUMED_SAMPLES=100442112.
+        "key": "2b_v2_512_constlr_real_fixedpos",
+        "model": "2b",
+        "version": "v2",
+        "num_nodes": 512,
+        "ckpt_dir": str(
+            _MAIN_CKPTS
+            / "agpt-2b-sophiag-olmo-mix-1124-n512-gbs12288-constlr-from9200-REAL-fixedpos"
+        ),
+        "readme": f"{_DOCS}/2b/n512/README.md",
+        "gbs": 12288,
+        "seq_len": SEQ_LEN,
+        "token_target": OLMO_MIX_1124_TOKENS,
+        "wandb_run_ids": [
+            "vl3xaxrn",  # umbrella 9094039 seat 2 (Nov 16-): 39901-
+        ],
+        "olog_fallbacks": None,
+        "eval_subdir": None,
+        "auto_fill_leaf": False,
+        "auto_fill_rollups": False,
+        "cls": "wandb_only",
+    },
     # ---- Polaris (A100), dolma corpus ----
     {
         "key": "20b_polaris_128",
@@ -899,6 +933,32 @@ TRAJECTORIES: list[dict] = [
         "wandb_run_ids": [
             "uqrribs1",  # umbrella 9053470 seat 3 (Nov 11): 1-2698, step-2600
             "rh5cn13o",  # 9076358 attempt 2 (Nov 14): resumes step-2600; attempt 1 lwewe0xv logged no rows
+            # umbrella 9094039 seat 3: attempt 1 (9ab3q82y, f5he60qt) never
+            # finished loading step-8900; attempt 2 trained 8901-.
+            "hj0uuv74",
+            "d2et3x1m",
+        ],
+        "olog_fallbacks": None,
+        "eval_subdir": None,
+        "cls": "live",
+    },
+    {
+        # agpt-v2 9.48B (10b_olmo2tok_dp12), OLMo-3 tokenizer, seq 4096, raw
+        # olmo-mix-1124 streamed through Grain, 512N. Page: docs/production/agpt/10b.
+        # The 768N attempts in umbrella 9053470 diverged at step 1 and are not
+        # part of this chain. Umbrella 9094039 seat 4 never finished loading
+        # step-4900 (r7hdknxn, mgic8zch, s96fwjd0 logged no steps).
+        "key": "10b_v2_512",
+        "model": "10b",
+        "version": "v2",
+        "num_nodes": 512,
+        "ckpt_dir": str(_MAIN_CKPTS / "agpt-v2-10b-4k-olmo-mix-n512-20261111"),
+        "readme": f"{_DOCS}/10b/README.md",
+        "gbs": 6144,
+        "seq_len": 4096,
+        "token_target": OLMO_MIX_1124_TOKENS,
+        "wandb_run_ids": [
+            "21detr4f",  # 9076371 (Nov 14-15): fresh 1-5000, step-4900
         ],
         "olog_fallbacks": None,
         "eval_subdir": None,

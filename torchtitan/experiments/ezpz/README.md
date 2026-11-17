@@ -121,7 +121,7 @@ structural map of every file under `docs/`, see
 
 | Page | What's there |
 |------|--------------|
-| [Production index](docs/production/README.md) | Snapshot of every active training trajectory — 2B / 20B / 80B at 256N / 512N / 1024N+ |
+| [Production index](docs/production/README.md) | Snapshot of every training trajectory. Active (umbrella `9094039`): 20B-512, 20B-256, 2B const-LR fork, 4B; 10B stopped; 80B blocked |
 | [Eval index](docs/evals/README.md) | lm-eval scores per model with v1-vs-v2 plots (the bf16-master fix is decisively validated) |
 | [Journal](docs/journal.md) | Day-by-day session log |
 | [Upstream sync log](docs/upstream-sync.md) | What each upstream sync changed, how it was validated, what it left open |
@@ -131,7 +131,8 @@ structural map of every file under `docs/`, see
 | Page | What's there |
 |------|--------------|
 | [Running with newer PyTorch](docs/guides/running-with-newer-pytorch.md) | Module loads, venv install, tokenizer download, large-scale (>512 nodes) workflow |
-| [`scripts/submit_agpt_{2b,20b,80b}_aurora_venv*.sh`](scripts/) | Aurora PBS production submitters (venv + failover wrapper) |
+| [`submit/aurora/umbrella-*.pbs`](submit/aurora/) | Current Aurora production: one multi-seat umbrella PBS job (`umbrella-20261116.pbs` runs `9094039`) on `frameworks/2026.1.0` with Lustre uv overlay venvs and pinned worktrees per seat |
+| [`scripts/submit_agpt_{2b,20b,80b,multi}_autoretry.sh`](scripts/) | Single-chain `ezpz launch --auto-retry` submitters (torch 2.13 venv); `*_aurora_venv_failover.sh` are the legacy bash-failover wrappers |
 | [`submit/README.md`](submit/README.md) | Legacy torch-2.10-conda submit scripts (kept for v1 reproduction only) |
 
 ### Big findings + workarounds

@@ -1,6 +1,6 @@
 # Production Training — Dense (agpt) Models
 
-> Last updated: 2026-08-31
+> Last updated: 2026-11-17 (live numbers as of 03:40 UTC)
 >
 > **Restarted in v2 clones on 2026-04-30** after the bf16-master
 > RMSNorm-freeze regression. All current production training is on
@@ -30,7 +30,22 @@ Per-model pages for these OLMo-3 tokenizer, 4K runs on every machine (Aurora
 olmo-mix seats, Sirius and Polaris Dolma runs): [agpt 4B](4b/README.md),
 [agpt 10B](10b/README.md).
 
-## Headline (2026-08-31): production is idle
+## Headline (2026-11-17): five-seat umbrella `9094039` running
+
+Umbrella `9094039` (2346N, 24h) started 2026-11-16 18:12 UTC. As of
+2026-11-17 03:40 UTC:
+
+| Seat | Chain | Latest checkpoint | Live step | Loss | State |
+|---|---|---|---:|---:|---|
+| 0 | 20B 512N fixedpos | `step-10800` | 10,863 | 2.464 | trains; `step-10900` save segfaults (6x across two jobs) |
+| 1 | 20B 256N fixedpos | `step-22000` | 22,100 | 2.422 | training, 18.3% MFU |
+| 2 | 2B 512N const-LR `-REAL-fixedpos` | `step-40700` | 40,744 | 2.693 | training; re-forked from `step-39900` after the 39,943 NaN |
+| 3 | 4B v2 512N | `step-11700` | 11,800 | 2.672 | training |
+| 4 | 10B v2 512N | `step-4900` | -- | -- | stopped (reloads exceeded the idle watchdog) |
+
+Detail: [umbrella `9094039` write-up](../2026-11-16-umbrella-9094039.md).
+
+## Headline (2026-08-31) -- historical snapshot: production was idle
 
 **Nothing has trained on Aurora since 2026-08-26**, and the blocker is the
 queue rather than the code.

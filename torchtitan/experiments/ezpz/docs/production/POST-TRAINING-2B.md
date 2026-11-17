@@ -1,8 +1,10 @@
 # AuroraGPT-2B post-training: complete status
 
-**Last updated: 2026-11-15 13:35 UTC.** Every number is quoted from a run doc — links go to the source. Most recent first.
+**Last updated: 2026-11-17 03:45 UTC.** Every number is quoted from a run doc — links go to the source. Most recent first.
 
-> **One-line status:** CPT-FineWeb-Edu 4N at **111.2k/190.7k (58.3% budget, `12483856 R` MFU 15.8% tps 4625 healthy, step-111200 `23G` frontier, 556 ckpt dirs)** — `12h` walltime (`99e918b342`) healthy, resumed from `step-100000` at `01:31 UTC`, `+11.2k` steps in `06:04` (`~1.9k steps/hr`). HF converts at `74000/74200` `3.7G` verified; Sunspot `~/torchtitan/outputs/hf*` empty — next convert at 112k gate. Raw CPT CoT `0/200` pre-SFT expected; B2 `0.205` remains best CoT.
+> **2026-11-17 03:45 UTC (CPT only, read from Sunspot):** CPT-FineWeb-Edu 4N frontier **`step-143200` (75.1% of 190,734)** in `~/torchtitan/outputs/outputs/checkpoints/agpt-2b-cpt-fineweb-edu-n4-gbs64`. `12483856` ended at its 12h walltime (`Exit_status=-29`); continuation `12484193` (`cpt-fwe-4n`, 4N) started 03:39 UTC. The SFT/RL/eval lines below were not re-checked.
+
+> **One-line status (2026-11-15):** CPT-FineWeb-Edu 4N at **111.2k/190.7k (58.3% budget, `12483856 R` MFU 15.8% tps 4625 healthy, step-111200 `23G` frontier, 556 ckpt dirs)** — `12h` walltime (`99e918b342`) healthy, resumed from `step-100000` at `01:31 UTC`, `+11.2k` steps in `06:04` (`~1.9k steps/hr`). HF converts at `74000/74200` `3.7G` verified; Sunspot `~/torchtitan/outputs/hf*` empty — next convert at 112k gate. Raw CPT CoT `0/200` pre-SFT expected; B2 `0.205` remains best CoT.
 
 ---
 ## 2026-11-15 — CPT 111.2k/190.7k (58.3%) chain healthy, frontier advanced
