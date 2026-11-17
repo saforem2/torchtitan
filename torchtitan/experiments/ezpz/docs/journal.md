@@ -1,5 +1,21 @@
 # Development Journal
 
+## 2026-11-17: Umbrella `9094039` at 9.5h; production docs refreshed
+
+As of 03:40 UTC, 9h26m into 24h:
+
+| Seat | Latest `.metadata` | Live step | Loss | Since 2026-11-16 |
+|---|---|---:|---:|---|
+| 20B-512 | `step-10800` | 10863 | 2.464 | `step-10900` save segfaulted again at 23:15:54 UTC and ~02:07 UTC; supervisor attempt 2 |
+| 20B-256 | `step-22000` | 22100 | 2.422 | saved 21800, 21900, 22000 |
+| 2B fork | `step-40700` | 40744 | 2.693 | two collective hangs (steps 40253, 40553), each recovered by ezpz auto-retry from the last save |
+| 4B | `step-11700` | 11800 | 2.672 | reload finished, first step 8979 at 23:17 UTC |
+| 10B | `step-4900` | -- | -- | stopped with `trainer-4.nan-stop` at 21:52 UTC after three reloads hit `IDLE_TIMEOUT` |
+
+Decisions: stop the 10B (marker); leave the 20B-512 looping. A `trainer-0.nan-stop` marker set at 23:59 UTC was renamed to `trainer-0.nan-stop.disabled-20261117T011453Z` at 01:14 UTC, so the supervisor keeps relaunching it. Nothing in the job was killed by hand.
+
+A read-only audit found every production page last committed 2026-11-14/15: 25 stale facts, 4 missing rows, 3 stale instructions, 7 stale charts, 0 broken links. This branch refreshes them, adds the [umbrella write-up](production/2026-11-16-umbrella-9094039.md), commits `submit/aurora/umbrella-20261116.pbs` (md5 `6504133e5a18b1bb35dc8fb5d5077d67`, the copy `9094039` runs), and rewrites the frozen 2026-05-04 production section of `AGENTS.md`. CPT on Sunspot is at `step-143200` (75.1%), continuation `12484193` running.
+
 ## 2026-11-16: Latest `ezpz` on torch 2.16 -- 20B padded-shard OOM, load-and-continue per chain
 
 > [!IMPORTANT]
