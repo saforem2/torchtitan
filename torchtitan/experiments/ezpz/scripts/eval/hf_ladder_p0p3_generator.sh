@@ -81,7 +81,8 @@ done
 
 echo "CONVERTED $(ls "$HF_ROOT"/step-*/hf/ezpz_export.json 2>/dev/null | wc -l) HF total"
 EOS
-  sed -i.bak -e "s/__TAG__/$tag/g" -e "s/__STEPS__/$steps/g" "$out" && rm -f "$out.bak"
+  # Rewrite via a temp file: no .bak to clean up.
+  sed -e "s/__TAG__/$tag/g" -e "s/__STEPS__/$steps/g" "$out" >"$out.tmp" && mv "$out.tmp" "$out"
   echo "$out"
 }
 
