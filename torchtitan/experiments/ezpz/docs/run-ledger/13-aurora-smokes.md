@@ -24,21 +24,20 @@
 
 ## Why
 
-- Sunspot CPT `12484882` at 75384 lost to maintenance drain (queued but node-drained); checkpoint safe at `/home/foremans/torchtitan/outputs/checkpoints/agpt-2b-cpt-fineweb-edu-n4-gbs64` to resume post-maintenance.
+- **CPT chain-of-record:** `/home/foremans/torchtitan/outputs/checkpoints/agpt-2b-cpt-fineweb-edu-n4-gbs64` at `step-143400` (HOME). Job `12484882` loaded stale Tegu `step-71800` and wrote `step-73000..74400` to Tegu `/lus/tegu/.../agpt-2b-cpt-fineweb-edu-n4-gbs64` — those Tegu steps duplicate the HOME chain and must NOT be resumed. Any CPT continuation must pass `CKPT_DIR=/home/foremans/torchtitan/outputs/checkpoints/agpt-2b-cpt-fineweb-edu-n4-gbs64` explicitly (fix `afafc7e93` on PR #99, not on `ezpz-cpt111k-eval-sft`). `12484882` itself was lost to Sunspot maintenance drain.
 - Aurora is Intel PVC XPU identical to Sunspot — same `GrainDataLoader` + `EZPZTokenizer` + `xpu-torch216-sync` VENV; validates Aurora XPU compat for Grain anneal and provides maintenance bypass via `flare` filesystem (Aurora `/flare 2.0P 99%` not relevant for smoke with `--checkpoint.no-enable`).
-- Small queue (522 nodes) `workq` has `prod`, but actual routable queues are `debug-scaling`/`small`/`medium`/`large` (Aurora PBS routing — `prod` is `Rou*` routing queue, `workq` does not exist on Aurora). `debug-scaling` is the correct smoke queue (matches `9101414` `int-20b` precedent, 8N `01:00`). `umbrella-20261116.pbs` pattern confirmed: `home:flare`, `A=AuroraGPT`, `ZE_FLAT=1` via `ZE_FLAT_DEVICE_HIERARCHY=FLAT`, `select` handling via `qsub -l select=N` override optional.
+- Small queue (522 nodes) `workq` has `prod`, but actual routable queues are `debug-scaling`/`small`/`medium`/`large` (Aurora PBS routing — `prod` is `Rou*` routing queue, `workq` does not exist on Aurora). `debug-scaling` is the correct smoke queue for PBS-header defaults (matches `9101414` `int-20b` 8N `01:00` precedent), but `capacity` is the correct bypass while production occupies `small` (see Results). `umbrella-20261116.pbs` pattern confirmed: `home:flare`, `A=AuroraGPT`, `ZE_FLAT=1` via `ZE_FLAT_DEVICE_HIERARCHY=FLAT`, `select` handling via `qsub -l select=N` override optional.
 
 ## Results
 
 - **Script:** Created on Aurora, `bash -n` `SYNTAX_OK`, VENV path verified present on target filesystem.
-- **Submit:** `qsub: would exceed queue generic's per-user limit of jobs in 'Q' state` — user at 5 Q in `small` (`9091877, 9091888, 9092662, 9093715, 9101108`) + 1 R `debug-scaling` `9101414` hits per-user Q limit for `debug-scaling`. Script header restored to `#PBS -q debug-scaling` (correct for Aurora smokes). Resubmit when a slot frees: `qsub torchtitan/experiments/ezpz/scripts/grain_cpt_anneal_smoke_aurora.sh` from `/lus/flare/.../torchtitan` (no `-q` override needed — header is `debug-scaling`).
-- **Expected on run:** `IMPORT_OK`, loss ~2.3-2.5, throughput ~4800 tps, all 3 corpora stream, `VERDICT: ok` (same as Sunspot `12484897` criteria).
+- **Submit:** Header default is `q=debug-scaling`, which hit `would exceed queue generic's per-user limit of jobs in 'Q' state` — it shares the per-user `Q` cap with `small`. The five `small` jobs `9091877 9091888 9092662 9093715 9101108` are the **production per-chain continuations (released today) — do NOT qdel, hold, or modify**. `capacity` is the correct bypass for smokes. Resubmitted as `qsub -q capacity ...` — jobs `9101507` (Grain 200-step anneal, 70/20/10 -> 20/50/30 olmo/fwe/cosmo Grain streaming ~4.5k tps/tile, no pre-tokenize) and `9101512` (SFT 20-step MCQ 40/30/20/10) on `capacity`.
+- **Babysit:** See follow-up `13-aurora-smokes` entries / `logs/grain-cpt-anneal-smoke-aurora-<JOBID>/run.log` — expect `IMPORT_OK`, loss `~2.3-2.5`, `VERDICT: ok`.
 
 ## Next
 
-1. Resubmit when Q slot frees (or `qdel`/`qhld` a lower-priority `small` job to free per-user quota): `bash --login -c "cd /lus/flare/projects/AuroraGPT/foremans/projects/saforem2/torchtitan && qsub torchtitan/experiments/ezpz/scripts/grain_cpt_anneal_smoke_aurora.sh"` — record `Job ID` in this doc next edit.
-2. On `Q` limit persist, use `debug` (short, 1N) or `backfill-*` if accessible to operator; otherwise wait for `small` queue drain.
-3. Babysit to `R -> F`: check `VERDICT: ok` + `IMPORT_OK` + loss in `run.log`/`train.log`; on success launch full 4N 100B anneal on Aurora or resume Sunspot chain post-maintenance.
+1. Babysit `9101507`/`9101512` to `R -> F` (loss, `IMPORT_OK`, `VERDICT`). On Grain `VERDICT: ok`, consider full Aurora anneal **or** resume the HOME chain at `step-143400` with the PR #99 fix (`CKPT_DIR=/home/foremans/torchtitan/outputs/checkpoints/agpt-2b-cpt-fineweb-edu-n4-gbs64` explicitly, `afafc7e93`) — do not resume from Tegu `step-73000..74400` duplicate. See `00-cpt-chain-of-record.md`.
+2. If re-submitting smokes, always use `capacity`: `qsub -q capacity torchtitan/experiments/ezpz/scripts/grain_cpt_anneal_smoke_aurora.sh` (production owns `small`; do not touch).
 
 ---
 
