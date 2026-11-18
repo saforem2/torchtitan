@@ -114,7 +114,8 @@ ACCEL=""; [[ -n "${ZE_FLAT_DEVICE_HIERARCHY:-}${CCL_PROCESS_LAUNCHER:-}" ]] && A
 # 2026-11-17 died in the import probe (Sunspot 12484699 and Aurora 9098335:
 # libsycl urGraphGetIdExp; Polaris 7857660 and Sirius 33741: "cannot load MPI
 # library"). They must come after the module loads, which re-prepend the
-# system oneAPI/MPI paths. TODO: drop once ezpz_setup owns them.
+# system oneAPI/MPI paths. TODO: drop once ezpz_setup owns them
+# (https://github.com/saforem2/ezpz/issues/308).
 if [[ "${ACCEL}" == cuda ]]; then
     # The venv's mpi4py is not linked against Cray GTL: MPI_Init aborts with
     # "GPU_SUPPORT_ENABLED is requested, but GTL library is not linked"
