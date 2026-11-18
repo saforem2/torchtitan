@@ -74,21 +74,44 @@ SophiaG is **excluded** from the fixed-LR matrix until re-measurement:
 
 Do not use SophiaG for production at GBS=128 without a clean re-run.
 
-### GBS scaling law -- placeholder (gated)
+### GBS scaling law (5B AdamW, Sirius H100, Nov 2026) -- measured 32/128/512
 
-The GBS scaling law (GBS 32 / 512 / 2048) extends the GBS=128 baseline to test
-how optimal LR varies with batch size. It is **not yet measured**.
+The GBS ladder tests how optimal LR varies with batch size at fixed model.
+Per-GBS live output is isolated (`lr_finder.py:gbs{gbs}`,
+`global_batch_size=GBS*4096`), so curves no longer collide. Sweep
+`1e-08 -> 1e-01` 150 steps, `mult=1.114243`.
 
-**Completion gate:** all 6 ladder jobs (5B x {32,512,2048} + 10B x {32,512,2048})
-must reach **PBS Exit 0** and record **LRF_STEPS** rows (150/150) with finite
-loss and **no** `trajectory_fingerprint mismatch` error. Dispatch: see
-`submit_lr_finder_gbs_ladder_sirius.sh` (5B) and
-`submit_lr_finder_gbs_ladder_10b_sirius.sh` (10B) -- both `GBS_VALUES=(32 512 2048)`.
-Preflight: `preflight_lrf_gbs.sh` / `preflight_lrf_gbs_10b.sh`.
+| GBS | global_batch_size | GAS | job | suggested (blow-up) | min loss | note |
+|-----|-------------------|-----|-----|---------------------|----------|------|
+| 32 | 131072 | 1 | 33628 / **33654** re-run | 3.49e-05 (3.49e-04) | 9.54 | clean, 12:00 |
+| 128 | 524288 | 4 | 33429 (2026-11-12) | 2.48e-04 (2.48e-03) | 9.38 | baseline |
+| 512 | 2097152 | 16 | 33629 / **33655** re-run 5.36e-04 | 5.36e-04 (5.36e-03) | 9.13 | clean, 12:00 |
+| 2048 | 8388608 | 32 (LBS=2) | 33656/33630 | NCCL 300s, rc137 | -- | **data-path blocked, not model-limited** (see below) |
 
-Until the gate passes, treat the fixed-LR matrix as GBS=128 only; do not
-extrapolate optimal LR across batch sizes. When the ladder completes, this
-section will be replaced with the fitted scaling-law table and figures.
+GBS=128 came from [2026-11-12 report](../2026-11-12-olmo3-gbs128-sirius.md) /
+`data/2026-11-12-olmo3-gbs128-sirius/sirius-33429-5b-adamw-150.csv`.
+Live curves: `outputs/lr_finder/ezpz/AgptModel/adamw/gbs*/lr_finder_data.csv`;
+archive re-runs `33654/33655` confirmed the 32/512 numbers above.
+
+**GBS2048 is not a model failure.** Both attempts (GAS=64 at 33630 and
+corrected GAS=32/LBS=2 at 33656) NCCL-timed-out after 300s at step 3
+(3 steps in ~11-16 min vs GBS512 16 steps in 74 min — see `2026-11-12-olmo3-gbs128-sirius.md`).
+The abort stack is in Grain `prefetch.py` (`_put_iterator_elements_in_buffer`):
+`json.gz` streaming + python tokenizer + Grain queue cannot feed 32
+microbatches within the NCCL window on the wiki subset. Production jobs
+avoid this by using pre-tokenized `BlendCorpus`/parquet. Treat GBS2048 as
+not measured for the scaling law; the 32/128/512 trend is the valid basis
+and already covers 16x batch. Walltime was 12:00 for 512 and 2048 (6h killed
+early jobs).
+
+10B arm: GBS32 was degenerate (1.98e-09, noise, job 33657) and is excluded
+from any fit; 10B GBS512/2048 both NCCL-timed-out (33658/33659, same data-path
+cause — 10b is ~4x slower per step than 5b at same GAS, ~180 tps vs ~790).
+Treat the 10B scaling law as not yet measured.
+
+![5B AdamW GBS scaling law — 32 / 128 / 512 clean, 2048 blocked](figures/sirius-5b-gbs-scaling-law.svg)
+
+*Figure: 5B AdamW LR-finder curves at GBS 32 / 128 / 512 (Sirius H100, same 1e-8 -> 1e-1 sweep). Dashed lines mark blow-up/10 (suggested LR); dots mark minima. GBS 2048 both attempts NCCL-timed-out in the data loader (json.gz + tokenizer straggler), not a model limit — excluded from the trend. Style: `ambivalent` + Iosevka25 (Iosevka fallback). Source: `torchtitan/experiments/ezpz/utils/plot_style.apply_style()` via `.venv` `ambivalent.mplstyle`.*
 
 ## GBS=6144 evidence (2026-09-18 campaign, separate batch)
 

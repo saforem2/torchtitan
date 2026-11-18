@@ -67,10 +67,10 @@ SophiaG is **excluded** from the fixed-LR matrix until re-measurement:
 
 Do not use SophiaG for production at GBS=128 without a clean re-run.
 
-### GBS scaling law -- placeholder (gated)
+### GBS scaling law -- deferred (gated)
 
 The GBS scaling law (GBS 32 / 512 / 2048) extends the GBS=128 baseline to test
-how optimal LR varies with batch size. It is **not yet measured**.
+how optimal LR varies with batch size. It is **not yet measured** beyond GBS=128.
 
 **Completion gate:** all 6 ladder jobs (5B x {32,512,2048} + 10B x {32,512,2048})
 must reach **PBS Exit 0** and record **LRF_STEPS** rows (150/150) with finite
@@ -79,10 +79,15 @@ loss and **no** `trajectory_fingerprint mismatch` error. Dispatch: see
 `submit_lr_finder_gbs_ladder_10b_sirius.sh` (10B) -- both `GBS_VALUES=(32 512 2048)`.
 Preflight: `preflight_lrf_gbs.sh` / `preflight_lrf_gbs_10b.sh`.
 
-Until the gate passes, treat the fixed-LR matrix as GBS=128 only; do not
-extrapolate optimal LR across batch sizes. When the ladder completes, this
-section will be replaced with the fitted scaling-law table and figures.
-
+GBS2048 (8388608 tokens/step, `2048 * 4096 / 32 dp / LBS=2 -> GAS=32`, not GAS=64)
+is **deferred** pending the LBS-fix re-run -- the prior NCCL 300s timeout
+(3 steps in 33 min vs GBS512 16 steps in ~74 min, rc134) was observed under
+the uncorrected GAS=64 config and does not apply to the corrected GAS=32 run;
+walltime for GBS2048 is **12:00:00**, not 6h. 10B GBS32 was degenerate
+(1.98e-09, noise) and is excluded from any fit; 10B GBS512/2048 GAS-adjusted
+jobs are pending. Treat GBS2048 and the 10B ladder as not measured; do not
+extrapolate. When the ladder completes, this section will be replaced with the
+fitted scaling-law table and figures.
 ## GBS=6144 evidence (2026-09-18 campaign, separate batch)
 
 

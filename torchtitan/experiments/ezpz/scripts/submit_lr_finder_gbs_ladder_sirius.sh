@@ -3,6 +3,9 @@
 # GBS=128 already done 2026-11-12 (adamw 2.48e-04 / mano 1.81e-04) — NOT requeued here.
 # This wrapper iterates GBS in (32 512 2048) and qsubs submit_lr_finder_sirius.sh
 # for each value. Run on a Sirius login node (sirius.alcf.anl.gov).
+# GBS=2048: base script auto-halves GAS via LBS=2 when GBS >= 1024 (dp 32, GAS 32 not 64).
+#   Without LBS=2 it NCCL-timed-out (GAS 64, 3 steps/33 min); GBS512 GAS 16 succeeded.
+#   Walltime 12h covers GBS512+ accumulation. Keep GBS_VALUES=(32 512 2048).
 #
 # Usage (on sirius):
 #   bash torchtitan/experiments/ezpz/scripts/submit_lr_finder_gbs_ladder_sirius.sh
