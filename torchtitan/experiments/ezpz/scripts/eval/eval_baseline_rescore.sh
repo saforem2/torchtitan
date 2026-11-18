@@ -40,8 +40,10 @@ REPO=/home/foremans/torchtitan
 # legacy/worktree-relative globs. Both checkpoints are already HF exports
 # (no DCP consolidate needed here, unlike consolidate_and_eval_cot.sh).
 CKPT_900_HF="${CKPT_900_HF:-}"
+TEGU_SFT_ROOT=/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan/outputs/sft
 if [[ -z "$CKPT_900_HF" ]]; then
   for c in \
+    "$TEGU_SFT_ROOT/agpt-2b-gs138650-tulu-math-uc-mix-8n-gbs6144/checkpoint-900-hf" \
     "$REPO/outputs/sft/agpt-2b-gs138650-tulu-math-uc-mix-8n-gbs6144/checkpoint-900-hf" \
     "$REPO/outputs/sft/agpt2b-gs138650-tulu-math-uc-mix-8n-gbs6144/checkpoint-900-hf" \
     "$SUBMIT_DIR/outputs/sft/agpt-2b-gs138650-tulu-math-uc-mix-8n-gbs6144/checkpoint-900-hf" \
@@ -53,6 +55,7 @@ fi
 CKPT_93_HF="${CKPT_93_HF:-}"
 if [[ -z "$CKPT_93_HF" ]]; then
   for c in \
+    "$TEGU_SFT_ROOT/agpt2b-b2v2-distill-cot-2n-ep3-ckpt93-b2/final" \
     "$REPO/outputs/sft/agpt2b-gsm8k-r1cot-2n/checkpoint-93-hf" \
     "$REPO/outputs/sft/agpt2b-gsm8k-r1cot-2n/checkpoint-93" \
     "$REPO/outputs/checkpoints/agpt-2b-gsm8k-r1cot-2n/step-93" \
@@ -61,6 +64,7 @@ if [[ -z "$CKPT_93_HF" ]]; then
     [[ -d "$c" ]] && { CKPT_93_HF="$c"; break; }
   done
 fi
+
 
 LIMIT="${LIMIT:-200}"
 DTYPE="${DTYPE:-float32}"
@@ -72,12 +76,14 @@ if ! command -v "$PY" >/dev/null 2>&1; then
   PY="$REPO/.venv/bin/python"
 fi
 
-mkdir -p "$REPO/outputs/evals/cot" "$SUBMIT_DIR/logs" logs 2>/dev/null || true
-OUT_900="${OUT_900:-$REPO/outputs/evals/cot/gsm8k-cot-ckpt-900-baseline.jsonl}"
-OUT_93="${OUT_93:-$REPO/outputs/evals/cot/gsm8k-cot-ckpt-93-b2-baseline.jsonl}"
+
+TEGU_EVAL_ROOT=/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan/outputs/evals
+if [[ -d "$TEGU_EVAL_ROOT" ]]; then _EVAL_ROOT="$TEGU_EVAL_ROOT"; else _EVAL_ROOT="$REPO/outputs/evals"; fi
+mkdir -p "$_EVAL_ROOT/cot" "$SUBMIT_DIR/logs" logs 2>/dev/null || true
+OUT_900="${OUT_900:-$_EVAL_ROOT/cot/gsm8k-cot-ckpt-900-baseline.jsonl}"
+OUT_93="${OUT_93:-$_EVAL_ROOT/cot/gsm8k-cot-ckpt-93-b2-baseline.jsonl}"
 [[ -d "$(dirname "$OUT_900")" ]] || OUT_900="$SUBMIT_DIR/outputs/evals/cot/gsm8k-cot-ckpt-900-baseline.jsonl"
 [[ -d "$(dirname "$OUT_93")" ]] || OUT_93="$SUBMIT_DIR/outputs/evals/cot/gsm8k-cot-ckpt-93-b2-baseline.jsonl"
-mkdir -p "$(dirname "$OUT_900")" "$(dirname "$OUT_93")"
 
 echo "BASELINE-RESCORE START $(date +%T) host=$(hostname) limit=$LIMIT dtype=$DTYPE"
 echo "  ckpt-900-hf (general, IFEval 0.253) : ${CKPT_900_HF:-<not found>}"
