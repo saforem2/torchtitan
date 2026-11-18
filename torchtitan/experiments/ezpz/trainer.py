@@ -338,7 +338,8 @@ class EzpzTrainingEngine(TorchFTTrainingEngine):
         states[MODEL] = ModelWrapper(unwrapped_parts)
 
     def _initialize_forward_backward(self) -> None:
-        maybe_disable_accelerator_graphs(self.config)
+        # Accelerator graphs were already disabled where needed, in
+        # Config.__post_init__ (maybe_disable_accelerator_graphs).
         super()._initialize_forward_backward()
         if not self.parallelism_context.pp_enabled:
             self._run_forward_backward = maybe_wrap_with_xpu_graph(
@@ -773,6 +774,10 @@ class FaultTolerantTrainer(TorchFTTrainer):
             update_from_config = getattr(self.model, "update_from_config", None)
             if update_from_config is not None:
                 update_from_config(config=self)
+            # Same ordering problem: the parent's validator rejects graph
+            # capture with an all-to-all EP dispatcher, so ezpz's opt-out
+            # (XPU, native DDP, non-grouped_mm experts) must run first.
+            maybe_disable_accelerator_graphs(self)
             # ``@dataclass(slots=True)`` returns a replacement class object;
             # call the parent explicitly so Python 3.12 does not use the stale
             # class captured by zero-argument ``super()``.
