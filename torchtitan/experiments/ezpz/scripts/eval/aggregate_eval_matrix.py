@@ -109,6 +109,10 @@ def mmlu_band(val_str):
         return ""
 
 
+# Inventory, schema and results CSVs live next to the eval docs.
+_EVAL_MATRIX = Path(__file__).resolve().parents[2] / "docs" / "evals" / "eval-matrix"
+
+
 def _metric(entry, *names):
     """First present metric, as a string. lm-eval >=0.4 keys are 'acc,none'.
 
@@ -199,10 +203,11 @@ def read_cot(path: Path):
 def main():
     ap = argparse.ArgumentParser(description="Aggregate eval matrix CSV")
     ap.add_argument(
-        "--inventory", default=".hermes/plans/checkpoints-inventory-2026-11-16.csv"
+        "--inventory",
+        default=str(_EVAL_MATRIX / "checkpoints-inventory-2026-11-16.csv"),
     )
     ap.add_argument(
-        "--schema", default=".hermes/plans/eval-matrix-schema-2026-11-16.csv"
+        "--schema", default=str(_EVAL_MATRIX / "eval-matrix-schema-2026-11-16.csv")
     )
     ap.add_argument("--mmlu-json", default=None)
     ap.add_argument("--mmlu-per-subject", default=None)
@@ -220,7 +225,9 @@ def main():
         "artifacts are given and the inventory has more than one row; other "
         "rows keep empty score columns.",
     )
-    ap.add_argument("--out", default=".hermes/plans/eval-matrix-results-2026-11-16.csv")
+    ap.add_argument(
+        "--out", default=str(_EVAL_MATRIX / "eval-matrix-results-2026-11-16.csv")
+    )
     args = ap.parse_args()
 
     inv_path = Path(args.inventory)

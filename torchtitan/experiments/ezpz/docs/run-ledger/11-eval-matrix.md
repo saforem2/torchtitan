@@ -8,7 +8,7 @@
 
 ## 1. What is running — checkpoint inventory
 
-Inventory source: `.hermes/plans/checkpoints-inventory-2026-11-16.csv:1-28` (28 rows) and schema `.hermes/plans/eval-matrix-schema-2026-11-16.csv:1-27` (25 rows + header comment).
+Inventory source: `torchtitan/experiments/ezpz/docs/evals/eval-matrix/checkpoints-inventory-2026-11-16.csv:1-28` (28 rows) and schema `torchtitan/experiments/ezpz/docs/evals/eval-matrix/eval-matrix-schema-2026-11-16.csv:1-27` (25 rows + header comment).
 
 | Group | Checkpoints | DCP path | HF path | Tokens | Stage | Source |
 |---|---|---|---|---|---|---|
@@ -23,7 +23,7 @@ Inventory source: `.hermes/plans/checkpoints-inventory-2026-11-16.csv:1-28` (28 
 | SFT-post | checkpoint-900-hf,checkpoint-93-hf,B2v2 ep3/ep6 finals | `/lus/tegu/.../outputs/sft/...` | yes | SFT | IFEval 0.253 / B2 0.205/0.985/282 / retries 0.09/0.105 | `04-sft-broad-distill.md` `inventory:24-27` |
 | RL-post | RL-GRPO-12479177 | `/lus/tegu/.../outputs/rl/...` | RL | 40/40 Exit0 gs4 flat 0.205->0.215 | `05-infra-rl-storage.md` `inventory:28` |
 
-Converter: `torchtitan/experiments/ezpz/scripts/eval/hf_batch_convert_cpt_fwe.sh:1-60` and `hf_ladder_p0p3_generator.sh:1-80` generate 14 P0-P3 ladder entries. Output `results.csv`: `.hermes/plans/eval-matrix-results-2026-11-16.csv:1-26` (25 rows + header, verified `wc -l 26`).
+Converter: `torchtitan/experiments/ezpz/scripts/eval/hf_batch_convert_cpt_fwe.sh:1-60` and `hf_ladder_p0p3_generator.sh:1-80` generate 14 P0-P3 ladder entries. Output `results.csv`: `torchtitan/experiments/ezpz/docs/evals/eval-matrix/eval-matrix-results-2026-11-16.csv:1-26` (25 rows + header, verified `wc -l 26`).
 
 ---
 
