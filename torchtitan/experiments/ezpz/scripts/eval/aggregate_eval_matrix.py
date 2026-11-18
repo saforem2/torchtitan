@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """
 Aggregate eval matrix CSV from inventory + optional artifact paths.
 Grounding refs:
@@ -163,11 +169,12 @@ def read_cot(path: Path):
         fmt = sum(1 for r in lines if r.get("format_hit") or r.get("format_ok")) / n
         gen_lens = [r.get("gen_len", r.get("gen_tokens", 0)) for r in lines]
         mean_gl = sum(gen_lens) / len(gen_lens) if gen_lens else ""
-        n_unclosed = sum(
-            1 for r in lines if not r.get("closed", True) or r.get("n_unclosed")
-        )
-        # fallback: count missing </answer>
-        if n_unclosed == 0:
+        if any("finish_reason" in r for r in lines):
+            # The harness's definition (eval_cot_gsm8k.py summarize()): a
+            # generation is unclosed when it stopped on the length limit.
+            n_unclosed = sum(1 for r in lines if r.get("finish_reason") == "length")
+        else:
+            # Older artifacts without finish_reason: missing </answer> tag.
             n_unclosed = sum(
                 1
                 for r in lines

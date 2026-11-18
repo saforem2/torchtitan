@@ -110,7 +110,14 @@ export HF_DATASETS_OFFLINE=1 HF_HUB_OFFLINE=1
 export PATH="/opt/pbs/bin:$PATH"
 
 CKPT="${CKPT:-$1}"
-STEP_TAG="$(basename "$(dirname "$CKPT")" 2>/dev/null || echo baseline)"
+# .../step-<N>/hf -> step-<N>; any other HF dir (e.g. SFT checkpoint-900-hf)
+# names itself, so two SFT checkpoints under outputs/sft/ get distinct outputs.
+if [[ "$(basename "$CKPT")" == hf ]]; then
+  STEP_TAG="$(basename "$(dirname "$CKPT")")"
+else
+  STEP_TAG="$(basename "$CKPT")"
+fi
+[[ -n "$STEP_TAG" ]] || STEP_TAG=baseline
 OUT="${OUT:-$REPO/outputs/evals/cot/cpt-fwe-${STEP_TAG}-gsm8k-cot.jsonl}"
 LIMIT=200
 DTYPE="${DTYPE:-float32}"
