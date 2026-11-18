@@ -12,7 +12,6 @@ Grounding refs:
 import argparse
 import csv
 import json
-import math
 import re
 from pathlib import Path
 
@@ -46,20 +45,20 @@ def fit_letter_prior(per_subject: dict):
     letters = ["A", "B", "C", "D"]
     n = len(per_subject)
     # X^T X and X^T y
-    XtX = [[0.0]*4 for _ in range(4)]
-    Xty = [0.0]*4
+    XtX = [[0.0] * 4 for _ in range(4)]
+    Xty = [0.0] * 4
     ys = []
     for v in per_subject.values():
         y = v["acc"]
         ys.append(y)
         f = [v["freq"][L] for L in letters]
         for i in range(4):
-            Xty[i] += f[i]*y
+            Xty[i] += f[i] * y
             for j in range(4):
-                XtX[i][j] += f[i]*f[j]
+                XtX[i][j] += f[i] * f[j]
     # Solve via Gaussian elimination 4x4
     # Augment
-    aug = [XtX[i]+[Xty[i]] for i in range(4)]
+    aug = [XtX[i] + [Xty[i]] for i in range(4)]
     for col in range(4):
         # pivot
         piv = max(range(col, 4), key=lambda r: abs(aug[r][col]))
@@ -69,22 +68,25 @@ def fit_letter_prior(per_subject: dict):
         for row in range(4):
             if row == col:
                 continue
-            factor = aug[row][col]/aug[col][col]
+            factor = aug[row][col] / aug[col][col]
             for k in range(5):
-                aug[row][k] -= factor*aug[col][k]
-    p = [aug[i][4]/aug[i][4-0+i-i] if False else aug[i][4]/aug[i][i] for i in range(4)]
+                aug[row][k] -= factor * aug[col][k]
+    p = [
+        aug[i][4] / aug[i][4 - 0 + i - i] if False else aug[i][4] / aug[i][i]
+        for i in range(4)
+    ]
     # R2
-    ymean = sum(ys)/len(ys) if ys else 0
-    ss_tot = sum((y-ymean)**2 for y in ys)
+    ymean = sum(ys) / len(ys) if ys else 0
+    ss_tot = sum((y - ymean) ** 2 for y in ys)
     ss_res = 0
     for v in per_subject.values():
-        yhat = sum(p[i]*v["freq"][letters[i]] for i in range(4))
-        ss_res += (v["acc"]-yhat)**2
-    r2 = 1 - ss_res/ss_tot if ss_tot else 0
+        yhat = sum(p[i] * v["freq"][letters[i]] for i in range(4))
+        ss_res += (v["acc"] - yhat) ** 2
+    r2 = 1 - ss_res / ss_tot if ss_tot else 0
     # chi2/df
-    chi2 = ss_res / (max(1e-9, ymean*(1-ymean)/200)) if ymean not in (0,1) else 0
-    df = max(1, n-4)
-    return p, r2, chi2/df
+    chi2 = ss_res / (max(1e-9, ymean * (1 - ymean) / 200)) if ymean not in (0, 1) else 0
+    df = max(1, n - 4)
+    return p, r2, chi2 / df
 
 
 def mmlu_band(val_str):
@@ -101,71 +103,105 @@ def mmlu_band(val_str):
         return ""
 
 
+def _metric(entry, *names):
+    """First present metric, as a string. lm-eval >=0.4 keys are 'acc,none'.
+
+    Keeps an explicit 0.0 (a plain `or` chain would drop it)."""
+    if not isinstance(entry, dict):
+        return ""
+    for name in names:
+        for key in (f"{name},none", name):
+            if entry.get(key) is not None:
+                return str(entry[key])
+    return ""
+
+
 def read_mmlu(path: Path):
+    """(MCF, CF) from one lm-eval results JSON.
+
+    lm-eval's `mmlu` group scores the answer letter (MCF);
+    `mmlu_continuation` scores the answer text (CF).
+    """
     if not path or not path.exists():
         return "", ""
     try:
         data = json.loads(path.read_text())
-        # group key mmlu not leaf macro
-        mmlu = data.get("results", {}).get("mmlu") or data.get("mmlu") or {}
-        # try MCF/CF keys
-        mcf = mmlu.get("acc_mcf") or mmlu.get("mcf") or mmlu.get("MCF") or ""
-        cf = mmlu.get("acc") or mmlu.get("cf") or mmlu.get("CF") or ""
-        # also check top-level
-        if not mcf:
-            mcf = data.get("MMLU_MCF", "")
-        if not cf:
-            cf = data.get("MMLU_CF", "")
-        return str(mcf) if mcf != "" else "", str(cf) if cf != "" else ""
+        res = data.get("results", data)
+        mcf = _metric(res.get("mmlu"), "acc")
+        cf = _metric(res.get("mmlu_continuation"), "acc")
+        return mcf, cf
     except Exception:
         return "", ""
 
 
 def read_commonsense(path: Path):
+    """[HS acc_norm, ARC-E acc, PIQA acc_norm, ARC-C acc_norm] (schema columns)."""
     if not path or not path.exists():
-        return [""]*4
+        return [""] * 4
     try:
         data = json.loads(path.read_text())
         res = data.get("results", data)
-        def get(k):
-            v = res.get(k, {})
-            if isinstance(v, dict):
-                return str(v.get("acc_norm", v.get("acc", "")))
-            return str(v) if v else ""
-        return [get("hellaswag"), get("arc_easy"), get("piqa"), get("arc_challenge")]
+        return [
+            _metric(res.get("hellaswag"), "acc_norm"),
+            _metric(res.get("arc_easy"), "acc"),
+            _metric(res.get("piqa"), "acc_norm"),
+            _metric(res.get("arc_challenge"), "acc_norm"),
+        ]
     except Exception:
-        return [""]*4
+        return [""] * 4
 
 
 def read_cot(path: Path):
     if not path or not path.exists():
-        return [""]*4
+        return [""] * 4
     try:
         lines = [json.loads(l) for l in path.read_text().splitlines() if l.strip()]
         if not lines:
-            return [""]*4
+            return [""] * 4
         n = len(lines)
-        acc = sum(1 for r in lines if r.get("correct"))/n
-        fmt = sum(1 for r in lines if r.get("format_hit") or r.get("format_ok"))/n
+        acc = sum(1 for r in lines if r.get("correct")) / n
+        fmt = sum(1 for r in lines if r.get("format_hit") or r.get("format_ok")) / n
         gen_lens = [r.get("gen_len", r.get("gen_tokens", 0)) for r in lines]
-        mean_gl = sum(gen_lens)/len(gen_lens) if gen_lens else ""
-        n_unclosed = sum(1 for r in lines if not r.get("closed", True) or r.get("n_unclosed"))
+        mean_gl = sum(gen_lens) / len(gen_lens) if gen_lens else ""
+        n_unclosed = sum(
+            1 for r in lines if not r.get("closed", True) or r.get("n_unclosed")
+        )
         # fallback: count missing </answer>
         if n_unclosed == 0:
-            n_unclosed = sum(1 for r in lines if "</answer>" not in r.get("generation", r.get("text","")))
-        return [f"{acc:.3f}", f"{fmt:.3f}", f"{mean_gl:.0f}" if mean_gl != "" else "", str(n_unclosed)]
+            n_unclosed = sum(
+                1
+                for r in lines
+                if "</answer>" not in r.get("generation", r.get("text", ""))
+            )
+        return [
+            f"{acc:.3f}",
+            f"{fmt:.3f}",
+            f"{mean_gl:.0f}" if mean_gl != "" else "",
+            str(n_unclosed),
+        ]
     except Exception:
-        return [""]*4
+        return [""] * 4
 
 
 def main():
     ap = argparse.ArgumentParser(description="Aggregate eval matrix CSV")
-    ap.add_argument("--inventory", default=".hermes/plans/checkpoints-inventory-2026-11-16.csv")
-    ap.add_argument("--schema", default=".hermes/plans/eval-matrix-schema-2026-11-16.csv")
+    ap.add_argument(
+        "--inventory", default=".hermes/plans/checkpoints-inventory-2026-11-16.csv"
+    )
+    ap.add_argument(
+        "--schema", default=".hermes/plans/eval-matrix-schema-2026-11-16.csv"
+    )
     ap.add_argument("--mmlu-json", default=None)
     ap.add_argument("--mmlu-per-subject", default=None)
     ap.add_argument("--commonsense-json", default=None)
     ap.add_argument("--cot-jsonl", default=None)
+    ap.add_argument(
+        "--checkpoint",
+        default=None,
+        help="Inventory checkpoint the artifact files belong to. Required when "
+        "artifacts are given and the inventory has more than one row; other "
+        "rows keep empty score columns.",
+    )
     ap.add_argument("--out", default=".hermes/plans/eval-matrix-results-2026-11-16.csv")
     args = ap.parse_args()
 
@@ -183,12 +219,35 @@ def main():
             else:
                 header = first
     else:
-        header = ["group","checkpoint","dcp_path","hf_path","tokens","dcp_exists","hf_exists","stage_note",
-                   "MMLU_MCF","MMLU_CF","MMLU_max","HS_acc_norm","ARC_E_acc","PIQA_acc_norm","ARC_C_acc_norm",
-                   "GSM8K_pre","GSM8K_post","format_hit_rate","mean_gen_len","n_unclosed",
-                   "delta_CPT_vs_MDS","delta_SFT_vs_base","delta_RL_vs_SFT","source_job","verified"]
+        header = [
+            "group",
+            "checkpoint",
+            "dcp_path",
+            "hf_path",
+            "tokens",
+            "dcp_exists",
+            "hf_exists",
+            "stage_note",
+            "MMLU_MCF",
+            "MMLU_CF",
+            "MMLU_max",
+            "HS_acc_norm",
+            "ARC_E_acc",
+            "PIQA_acc_norm",
+            "ARC_C_acc_norm",
+            "GSM8K_pre",
+            "GSM8K_post",
+            "format_hit_rate",
+            "mean_gen_len",
+            "n_unclosed",
+            "delta_CPT_vs_MDS",
+            "delta_SFT_vs_base",
+            "delta_RL_vs_SFT",
+            "source_job",
+            "verified",
+        ]
 
-    extra_cols = ["mmlu_band","mmlu_letter_prior","notes"]
+    extra_cols = ["mmlu_band", "mmlu_letter_prior", "notes"]
     out_header = header + [c for c in extra_cols if c not in header]
 
     # Letter prior
@@ -216,9 +275,29 @@ def main():
                 for r in dr2:
                     rows.append(r)
 
+    # Artifact files are one checkpoint's results; never copy them into
+    # every inventory row.
+    have_artifacts = any((args.mmlu_json, args.commonsense_json, args.cot_jsonl))
+    target = args.checkpoint
+    if have_artifacts and target is None:
+        if len(rows) > 1:
+            raise SystemExit(
+                "--checkpoint is required with artifact files when the "
+                f"inventory has {len(rows)} rows"
+            )
+        target = rows[0].get("checkpoint", "") if rows else None
+    if (
+        target is not None
+        and rows
+        and not any(r.get("checkpoint", "") == target for r in rows)
+    ):
+        raise SystemExit(f"--checkpoint {target!r} is not in {inv_path}")
+
     # Prepare optional artifact reads
     mmlu_mcf, mmlu_cf = read_mmlu(Path(args.mmlu_json) if args.mmlu_json else None)
-    cs_vals = read_commonsense(Path(args.commonsense_json) if args.commonsense_json else None)
+    cs_vals = read_commonsense(
+        Path(args.commonsense_json) if args.commonsense_json else None
+    )
     cot_vals = read_cot(Path(args.cot_jsonl) if args.cot_jsonl else None)
 
     # Also probe known CoT output files (best-effort, do not fail)
@@ -227,77 +306,81 @@ def main():
 
     out_rows = []
     for r in rows:
-        ckpt = r.get("checkpoint","")
-        tokens = r.get("tokens","").strip()
+        ckpt = r.get("checkpoint", "")
+        tokens = r.get("tokens", "").strip()
         if not tokens:
             step = parse_step(ckpt)
             if step is not None:
                 tokens = format_tokens(step)
-        # grounding: grounded MDS/TT SFT numbers injected via stage_note matching
-        # No invented eval scores: MMLU/CoT filled only from artifact paths; otherwise empty
-        # Delta columns
+        # No invented eval scores: scores come only from this row's artifacts.
+        mine = ckpt == target
+        r_mcf, r_cf = (mmlu_mcf, mmlu_cf) if mine else ("", "")
+        r_cs = cs_vals if mine else [""] * 4
+        r_cot = cot_vals if mine else [""] * 4
+
+        mmax_str = ""
+        if r_mcf and r_cf:
+            try:
+                mmax_str = f"{max(float(r_mcf), float(r_cf)):.4f}"
+            except ValueError:
+                pass
+
+        # Deltas compare the same benchmark against a grounded predecessor,
+        # or stay empty: CPT MMLU_max vs the MDS stage-3 MMLU_max; RL GSM8K vs
+        # the B2 SFT GSM8K. No grounded base GSM8K exists for SFT-vs-base.
+        group = r.get("group", "")
         delta_cpt = ""
         delta_sft = ""
         delta_rl = ""
-        # Only compute if we have mmlu values; otherwise leave empty (no invention)
-        if mmlu_mcf and mmlu_cf:
-            try:
-                mmax = max(float(mmlu_mcf), float(mmlu_cf))
-                group = r.get("group","")
-                if "CPT" in group:
-                    delta_cpt = f"{mmax - GROUNDED_MDS_STAGE3:.4f}"
-                if "SFT" in group:
-                    delta_sft = f"{mmax - B2_GSM8K:.4f}"
-                if "RL" in group:
-                    delta_rl = f"{mmax - B2_GSM8K:.4f}"
-            except Exception:
-                pass
-
-        mmax_str = ""
-        if mmlu_mcf and mmlu_cf:
-            try:
-                mmax_str = f"{max(float(mmlu_mcf), float(mmlu_cf)):.4f}"
-            except Exception:
-                pass
+        if "CPT" in group and mmax_str:
+            delta_cpt = f"{float(mmax_str) - GROUNDED_MDS_STAGE3:.4f}"
+        if "RL" in group and r_cot[0]:
+            delta_rl = f"{float(r_cot[0]) - B2_GSM8K:.4f}"
 
         verified = "no"
         # HF existence check
-        hf_path = r.get("hf_path","").strip()
+        hf_path = r.get("hf_path", "").strip()
         if hf_path and Path(hf_path).exists():
             verified = "no"  # existence alone not verification
 
-        notes = r.get("stage_note","")
+        notes = r.get("stage_note", "")
         # Append grounding note for known checkpoints
         if ckpt == "checkpoint-93-hf":
-            notes = (notes + f"; B2 {B2_GSM8K}/{B2_FORMAT}/{B2_GENLEN} SE {COT_SE_200}@200 +0.06=2sigma per 03-eval-harness.md:33").strip("; ")
+            notes = (
+                notes
+                + f"; B2 {B2_GSM8K}/{B2_FORMAT}/{B2_GENLEN} SE {COT_SE_200}@200 +0.06=2sigma per 03-eval-harness.md:33"
+            ).strip("; ")
         elif ckpt == "step-92859":
-            notes = (notes + "; MMLU 0.2437 HS 0.561 per run-ledger/01-cpt-frontier + summaries/2026-08-10").strip("; ")
+            notes = (
+                notes
+                + "; MMLU 0.2437 HS 0.561 per run-ledger/01-cpt-frontier + summaries/2026-08-10"
+            ).strip("; ")
 
         out = {
-            "group": r.get("group",""),
+            "group": r.get("group", ""),
             "checkpoint": ckpt,
-            "dcp_path": r.get("dcp_path",""),
+            "dcp_path": r.get("dcp_path", ""),
             "hf_path": hf_path,
             "tokens": tokens,
-            "dcp_exists": r.get("dcp_exists",""),
-            "hf_exists": r.get("hf_exists",""),
-            "stage_note": r.get("stage_note",""),
-            "MMLU_MCF": mmlu_mcf,
-            "MMLU_CF": mmlu_cf,
+            "dcp_exists": r.get("dcp_exists", ""),
+            "hf_exists": r.get("hf_exists", ""),
+            "stage_note": r.get("stage_note", ""),
+            "MMLU_MCF": r_mcf,
+            "MMLU_CF": r_cf,
             "MMLU_max": mmax_str,
-            "HS_acc_norm": cs_vals[0],
-            "ARC_E_acc": cs_vals[1],
-            "PIQA_acc_norm": cs_vals[2],
-            "ARC_C_acc_norm": cs_vals[3],
-            "GSM8K_pre": cot_vals[0],
-            "GSM8K_post": cot_vals[0],
-            "format_hit_rate": cot_vals[1],
-            "mean_gen_len": cot_vals[2],
-            "n_unclosed": cot_vals[3],
+            "HS_acc_norm": r_cs[0],
+            "ARC_E_acc": r_cs[1],
+            "PIQA_acc_norm": r_cs[2],
+            "ARC_C_acc_norm": r_cs[3],
+            "GSM8K_pre": r_cot[0],
+            "GSM8K_post": r_cot[0],
+            "format_hit_rate": r_cot[1],
+            "mean_gen_len": r_cot[2],
+            "n_unclosed": r_cot[3],
             "delta_CPT_vs_MDS": delta_cpt,
             "delta_SFT_vs_base": delta_sft,
             "delta_RL_vs_SFT": delta_rl,
-            "source_job": r.get("source_job",""),
+            "source_job": r.get("source_job", ""),
             "verified": verified,
             "mmlu_band": mmlu_band(mmax_str),
             "mmlu_letter_prior": letter_prior_str,
@@ -311,7 +394,7 @@ def main():
         w = csv.DictWriter(f, fieldnames=out_header)
         w.writeheader()
         for o in out_rows:
-            w.writerow({k: o.get(k,"") for k in out_header})
+            w.writerow({k: o.get(k, "") for k in out_header})
     print(f"Wrote {len(out_rows)} rows to {out_path}")
 
 
