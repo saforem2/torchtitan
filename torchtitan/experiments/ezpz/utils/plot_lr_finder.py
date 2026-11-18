@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import re
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -56,17 +57,24 @@ def find_data(
 ) -> dict[str, dict[str, tuple[np.ndarray, np.ndarray]]]:
     """Find all lr_finder_data.csv files organized by model/optimizer.
 
+    Handles both layouts lr_finder.py writes: ``<model>/<opt>/`` and
+    ``<model>/<opt>/gbs<N>/`` (or ``tokens<N>/``). In the second, the batch
+    size is kept in the optimizer key (``adamw gbs512``) so each GBS curve
+    stays distinct.
+
     Returns: {model: {optimizer: (lrs, losses)}}
     """
     results: dict[str, dict[str, tuple[np.ndarray, np.ndarray]]] = {}
 
     for csv_path in sorted(data_dir.rglob("lr_finder_data.csv")):
-        parts = csv_path.relative_to(data_dir).parts
-        if len(parts) >= 2:
-            model = parts[-3] if len(parts) >= 3 else "unknown"
-            optimizer = parts[-2]
-        else:
+        parts = list(csv_path.relative_to(data_dir).parts[:-1])
+        batch = None
+        if parts and re.fullmatch(r"(gbs|tokens)\d+", parts[-1]):
+            batch = parts.pop()
+        if not parts:
             continue
+        optimizer = parts[-1] if batch is None else f"{parts[-1]} {batch}"
+        model = parts[-2] if len(parts) >= 2 else "unknown"
 
         if model not in results:
             results[model] = {}
@@ -107,7 +115,9 @@ def plot_single_model(
         blow_ups = find_optimal_lr(lrs.tolist(), losses.tolist())
         if blow_ups:
             min_lr = lrs[min_idx]
-            best_blowup = min(blow_ups, key=lambda b: abs(np.log10(b) - np.log10(min_lr)))
+            best_blowup = min(
+                blow_ups, key=lambda b: abs(np.log10(b) - np.log10(min_lr))
+            )
             suggested = best_blowup / 10
             ax.axvline(
                 x=suggested,
@@ -206,7 +216,9 @@ def plot_comparison(
             blow_ups = find_optimal_lr(lrs.tolist(), losses.tolist())
             if blow_ups:
                 min_lr = lrs[min_idx]
-                best_blowup = min(blow_ups, key=lambda b: abs(np.log10(b) - np.log10(min_lr)))
+                best_blowup = min(
+                    blow_ups, key=lambda b: abs(np.log10(b) - np.log10(min_lr))
+                )
                 suggested = best_blowup / 10
                 ax.axvline(
                     x=suggested,
@@ -272,7 +284,9 @@ def plot_optimal_lr_summary(
                 if blow_ups:
                     # Use the blow-up closest to the global min loss
                     min_lr = lrs[np.argmin(losses)]
-                    best = min(blow_ups, key=lambda b: abs(np.log10(b) - np.log10(min_lr)))
+                    best = min(
+                        blow_ups, key=lambda b: abs(np.log10(b) - np.log10(min_lr))
+                    )
                     optimal_lrs.append(best / 10)
                 else:
                     min_idx = np.argmin(losses)
@@ -283,7 +297,9 @@ def plot_optimal_lr_summary(
         offset = (i - n_opts / 2 + 0.5) * width
         color = OPTIMIZER_COLORS.get(opt, "#888888")
         label = OPTIMIZER_LABELS.get(opt, opt)
-        bars = ax.bar(x + offset, optimal_lrs, width, color=color, label=label, alpha=0.85)
+        bars = ax.bar(
+            x + offset, optimal_lrs, width, color=color, label=label, alpha=0.85
+        )
 
         for bar, lr in zip(bars, optimal_lrs):
             if lr > 0:

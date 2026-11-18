@@ -518,17 +518,18 @@ def run_lr_finder(trainer: FaultTolerantTrainer) -> None:
             or "adamw"
         )
         model_name = type(model_config).__qualname__.removesuffix(".Config")
-        # GBS is the only thing that varies across the ladder, but the
-        # out_dir before this fix was model/opt only, so every GBS value
-        # atomically overwrote the same lr_finder_data.csv (e.g. 5b
-        # gbs32 -> 5b gbs512 -> 10b gbs32 clobbered the good 5b curve).
-        # Keep it per-GBS; world_size (dp*pp) is constant on Sirius (32),
-        # so use global_batch_size (GBS*seq_len) as the disambiguator.
-        gbs = int(getattr(trainer.config.training, "num_tokens_per_train_step", 0) or 0)
-        if gbs:
-            sub_path = os.path.join("ezpz", model_name, opt_name, f"gbs{gbs}")
-        else:
-            sub_path = os.path.join("ezpz", model_name, opt_name)
+        # One directory per global batch size, so a GBS ladder sharing a
+        # dump folder does not overwrite one lr_finder_data.csv. The label
+        # is the GBS in sequences (tokens per step / context length), the
+        # unit the ladder scripts and docs use. -1 (unset) keeps the
+        # unsuffixed path.
+        tokens = int(getattr(trainer.config.training, "num_tokens_per_train_step", -1))
+        seq_len = int(getattr(model_config, "max_context_length", 0) or 0)
+        sub_path = os.path.join("ezpz", model_name, opt_name)
+        if tokens > 0 and seq_len > 0 and tokens % seq_len == 0:
+            sub_path = os.path.join(sub_path, f"gbs{tokens // seq_len}")
+        elif tokens > 0:
+            sub_path = os.path.join(sub_path, f"tokens{tokens}")
         out_dir = os.path.join(trainer.config.dump_folder, "lr_finder", sub_path)
         os.makedirs(out_dir, exist_ok=True)
 
