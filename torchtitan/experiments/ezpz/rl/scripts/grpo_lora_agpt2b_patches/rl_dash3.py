@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Live multi-run GRPO reward dashboard (kitcat inline, ambivalent + Iosevka).
 
 Self-contained: reads each run's rollout_samples.jsonl directly (over SSH if run
@@ -12,20 +18,21 @@ Run in a kitty terminal:
 Env: RL_INTERVAL (sec, default 30), RL_LOCAL=1 (read local FS instead of SSH),
      RL_SSH (ssh target, default 'sunspot'), RL_SOCK (control socket).
 """
-import os
-import sys
-import json
-import time
 import glob
-import subprocess
+import json
+import os
 import statistics
+import subprocess
+import sys
+import time
 import zlib
 
 import matplotlib
+
 matplotlib.use("module://kitcat")
+import ambivalent
 import matplotlib.pyplot as plt
 from matplotlib import font_manager as fm
-import ambivalent
 
 
 # ---- HiDPI fix: make kitcat render at true device resolution --------------
@@ -38,9 +45,10 @@ import ambivalent
 # keeping the same terminal footprint (placeholder grid unchanged).
 def _tty_query(seq, timeout=0.3):
     """Send an escape sequence to the controlling tty and read the reply."""
+    import select
     import termios
     import tty as _tty
-    import select
+
     if "TMUX" in os.environ:  # wrap so bytes reach the outer terminal
         seq = "\033Ptmux;" + seq.replace("\033", "\033\033") + "\033\\"
     try:
@@ -68,6 +76,7 @@ def _tty_query(seq, timeout=0.3):
 def _csi_t(n):
     """CSI <n> t -> (a, b) from the '\\e[k;a;bt' reply, or None."""
     import re
+
     m = re.search(r"\033\[\d+;(\d+);(\d+)t", _tty_query("\033[%dt" % n))
     return (int(m.group(1)), int(m.group(2))) if m else None
 
@@ -78,6 +87,7 @@ def _backing_and_cells():
     import array
     import fcntl
     import termios
+
     buf = array.array("H", [0, 0, 0, 0])
     try:
         fcntl.ioctl(sys.stdout, termios.TIOCGWINSZ, buf)
@@ -110,9 +120,10 @@ if sys.stdout.isatty():
     try:
         _BACKING, _DEV_CW, _DEV_CH = _backing_and_cells()
         if _BACKING > 1.0:
+            import kitcat.backend as _kb
             import kitcat.terminal_query as _ktq
             import kitcat.utils as _ku
-            import kitcat.backend as _kb
+
             # render at device resolution ...
             for _m in (_ktq, _ku, _kb):
                 _m.get_dpi_scale = lambda: _BACKING
@@ -120,14 +131,15 @@ if sys.stdout.isatty():
             # cell_px) is unchanged -> same footprint, just more pixels.
             _ku.get_char_cell_width = lambda: max(1, int(round(_DEV_CW)))
             _ku.get_char_cell_height = lambda: max(1, int(round(_DEV_CH)))
-            print("kitcat HiDPI: backing=%.2f cell=%dx%d(dev)"
-                  % (_BACKING, round(_DEV_CW), round(_DEV_CH)))
+            print(
+                "kitcat HiDPI: backing=%.2f cell=%dx%d(dev)"
+                % (_BACKING, round(_DEV_CW), round(_DEV_CH))
+            )
     except Exception as _e:
         print("kitcat HiDPI patch skipped:", _e)
 
 # ---- the runs to track --------------------------------------------------
-BASE = ("/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan/"
-        "outputs")
+BASE = "/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan/" "outputs"
 # Curated pretty labels + non-glob run declarations, keyed by output subdir.
 # Monarch runs are AUTO-DISCOVERED in _AGG (glob of
 # outputs/rl_lora_agpt2b_*/rollout_samples.jsonl); an entry here only overrides
@@ -135,21 +147,33 @@ BASE = ("/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan/"
 # Non-"monarch" kinds (e.g. "trl") are NOT globbed and MUST be listed here to
 # appear. value = (label, kind).
 LABELS = {
-    "rl_lora_agpt2b_train_v5":       ("v5 alphabet (monarch)",              "monarch"),
-    "rl_lora_agpt2b_w1":             ("w1 alphabet (monarch)",              "monarch"),
-    "rl_lora_agpt2b_w2":             ("w2 alphabet (monarch)",              "monarch"),
-    "rl_lora_agpt2b_w3":             ("w3 alphabet (monarch)",              "monarch"),
-    "rl_lora_agpt2b_shaped":         ("shaped alphabet (monarch)",          "monarch"),
-    "rl_lora_agpt2b_cot":            ("gsm8k CoT monarch (100st)",          "monarch"),
-    "rl_lora_agpt2b_cot_long":       ("gsm8k CoT monarch (400st)",          "monarch"),
-    "rl_lora_agpt2b_cot_gated":      ("gsm8k CoT gated-reward (monarch)",   "monarch"),
-    "rl_lora_agpt2b_cot_zeroshot":   ("gsm8k CoT zero-shot+gated (monarch)","monarch"),
-    "rl_lora_agpt2b_cot_b2smoke":    ("gsm8k CoT B2 smoke (monarch)",       "monarch"),
-    "rl_lora_agpt2b_cot_b2smoke_v2": ("gsm8k CoT B2 smoke v2 (monarch)",    "monarch"),
-    "grpo-agpt2b-gsm8k-reason-cot-12471247": ("gsm8k CoT TRL (12471247)",   "trl"),
+    "rl_lora_agpt2b_train_v5": ("v5 alphabet (monarch)", "monarch"),
+    "rl_lora_agpt2b_w1": ("w1 alphabet (monarch)", "monarch"),
+    "rl_lora_agpt2b_w2": ("w2 alphabet (monarch)", "monarch"),
+    "rl_lora_agpt2b_w3": ("w3 alphabet (monarch)", "monarch"),
+    "rl_lora_agpt2b_shaped": ("shaped alphabet (monarch)", "monarch"),
+    "rl_lora_agpt2b_cot": ("gsm8k CoT monarch (100st)", "monarch"),
+    "rl_lora_agpt2b_cot_long": ("gsm8k CoT monarch (400st)", "monarch"),
+    "rl_lora_agpt2b_cot_gated": ("gsm8k CoT gated-reward (monarch)", "monarch"),
+    "rl_lora_agpt2b_cot_zeroshot": ("gsm8k CoT zero-shot+gated (monarch)", "monarch"),
+    "rl_lora_agpt2b_cot_b2smoke": ("gsm8k CoT B2 smoke (monarch)", "monarch"),
+    "rl_lora_agpt2b_cot_b2smoke_v2": ("gsm8k CoT B2 smoke v2 (monarch)", "monarch"),
+    "grpo-agpt2b-gsm8k-reason-cot-12471247": ("gsm8k CoT TRL (12471247)", "trl"),
 }
-COLORS = ["#4c78a8", "#f58518", "#54a24b", "#e45756", "#72b7b2", "#b279a2",
-          "#ff9da6", "#9d755d", "#bab0ac", "#edc948", "#b07aa1", "#86bcb6"]
+COLORS = [
+    "#4c78a8",
+    "#f58518",
+    "#54a24b",
+    "#e45756",
+    "#72b7b2",
+    "#b279a2",
+    "#ff9da6",
+    "#9d755d",
+    "#bab0ac",
+    "#edc948",
+    "#b07aa1",
+    "#86bcb6",
+]
 # PREFIX lives inside _AGG (remote). LABELS is passed to _AGG via repr(LABELS).
 
 INTERVAL = float(os.environ.get("RL_INTERVAL", "30"))
@@ -158,8 +182,12 @@ SSH_TGT = os.environ.get("RL_SSH", "sunspot")
 SOCK = os.environ.get("RL_SOCK", "/tmp/sunspot-master.sock")
 
 # ---- style: ambivalent + Iosevka + transparent ---------------------------
-for d in (os.path.expanduser("~/Library/Fonts"), "/Library/Fonts",
-          os.path.expanduser("~/.local/share/fonts"), "/usr/share/fonts"):
+for d in (
+    os.path.expanduser("~/Library/Fonts"),
+    "/Library/Fonts",
+    os.path.expanduser("~/.local/share/fonts"),
+    "/usr/share/fonts",
+):
     for f in glob.glob(os.path.join(d, "**", "Iosevka*.tt*"), recursive=True):
         try:
             fm.fontManager.addfont(f)
@@ -169,12 +197,15 @@ plt.style.use(ambivalent.STYLES["ambivalent"])
 _ios = sorted({f.name for f in fm.fontManager.ttflist if "iosevka" in f.name.lower()})
 if _ios:
     plt.rcParams["font.family"] = next(
-        (n for n in _ios if n.lower() in ("iosevka25", "iosevka", "iosevka term")), _ios[0])
-plt.rcParams.update({"savefig.transparent": True, "figure.facecolor": "none",
-                     "axes.facecolor": "none"})
+        (n for n in _ios if n.lower() in ("iosevka25", "iosevka", "iosevka term")),
+        _ios[0],
+    )
+plt.rcParams.update(
+    {"savefig.transparent": True, "figure.facecolor": "none", "axes.facecolor": "none"}
+)
 
 # remote python that aggregates ALL runs' reward-by-version in one shot ------
-_AGG = r'''
+_AGG = r"""
 import json, collections, statistics, os, glob, re, time
 BASE = "%s"                 # .../outputs
 REPO = os.path.dirname(BASE)  # repo root (for logs/)
@@ -236,22 +267,27 @@ for tag, (sub, kind) in runs.items():
         except Exception:
             live[tag] = None
 print(json.dumps({"rewards": out, "live": live, "meta": meta}))
-'''
+"""
 
 
 def fetch():
     script = _AGG % (BASE, repr(LABELS))
     if LOCAL:
-        r = subprocess.run([sys.executable, "-c", script],
-                           capture_output=True, text=True, timeout=90)
+        r = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, text=True, timeout=90
+        )
     else:
         # base64 the script so no quoting survives the ssh -> remote-shell hop.
         import base64
+
         b64 = base64.b64encode(script.encode()).decode()
         remote = "echo %s | base64 -d | python3" % b64
         r = subprocess.run(
             ["ssh", "-o", "ControlPath=" + SOCK, SSH_TGT, remote],
-            capture_output=True, text=True, timeout=90)
+            capture_output=True,
+            text=True,
+            timeout=90,
+        )
     for line in r.stdout.splitlines():
         line = line.strip()
         if line.startswith("{"):
@@ -271,6 +307,7 @@ def terminal_pixels():
         import fcntl
         import struct
         import termios
+
         buf = fcntl.ioctl(sys.stdout, termios.TIOCGWINSZ, b"\0" * 8)
         _, _, xp, yp = struct.unpack("HHHH", buf)
         if xp and yp:
@@ -289,8 +326,9 @@ def draw(payload, wpx, hpx):
     live = payload.get("live", {})
     meta = payload.get("meta", {})
     dpi = 100
-    fig, ax = plt.subplots(figsize=(max(4.0, wpx * 0.92 / dpi),
-                                    max(2.6, hpx * 0.80 / dpi)), dpi=dpi)
+    fig, ax = plt.subplots(
+        figsize=(max(4.0, wpx * 0.92 / dpi), max(2.6, hpx * 0.80 / dpi)), dpi=dpi
+    )
     parts = []
     # Stable order: group by kind (monarch, then trl), alpha within kind. Groups
     # cot_*/train_*/w* adjacently and never reshuffles as liveness flips. Color
@@ -305,7 +343,7 @@ def draw(payload, wpx, hpx):
         keys = sorted(d, key=lambda k: int(k))
         vs = [int(k) for k in keys]
         means = [d[k] for k in keys]
-        sm = [statistics.mean(means[max(0, j - 2):j + 1]) for j in range(len(means))]
+        sm = [statistics.mean(means[max(0, j - 2) : j + 1]) for j in range(len(means))]
         age = live.get(tag)
         is_live = age is not None and age <= LIVE_WINDOW
         alpha = 1.0 if is_live else 0.28
@@ -316,9 +354,8 @@ def draw(payload, wpx, hpx):
         # process restarts (unlike hash(), PYTHONHASHSEED-salted) and does not
         # shift when other runs appear/disappear.
         color = COLORS[zlib.crc32(tag.encode()) % len(COLORS)]
-        ax.plot(vs, sm, "-", lw=lw, color=color,
-                alpha=alpha, zorder=z, label=lbl)
-        if is_live:                       # keep the title readable with ~20 runs
+        ax.plot(vs, sm, "-", lw=lw, color=color, alpha=alpha, zorder=z, label=lbl)
+        if is_live:  # keep the title readable with ~20 runs
             parts.append("%s=%.2f" % (tag, means[-1]))
     ax.axhline(0.248, lw=0.8, ls=":", alpha=0.5)
     ax.set_xlabel("policy version (~ training step)")
@@ -332,7 +369,9 @@ def draw(payload, wpx, hpx):
 
 
 def main():
-    print("Live GRPO dashboard (autodiscovered runs, kitcat+ambivalent). Ctrl-C to stop.")
+    print(
+        "Live GRPO dashboard (autodiscovered runs, kitcat+ambivalent). Ctrl-C to stop."
+    )
     while True:
         try:
             data = fetch()
@@ -344,8 +383,14 @@ def main():
         rewards = data.get("rewards", {}) if isinstance(data, dict) else {}
         liveinfo = data.get("live", {}) if isinstance(data, dict) else {}
         latest = {k: (max(int(x) for x in v) if v else 0) for k, v in rewards.items()}
-        nlive = sum(1 for a in liveinfo.values() if a is not None and a <= float(os.environ.get("RL_LIVE_WINDOW", "300")))
-        print("[%s] %d live | versions: %s" % (time.strftime("%H:%M:%S"), nlive, latest))
+        nlive = sum(
+            1
+            for a in liveinfo.values()
+            if a is not None and a <= float(os.environ.get("RL_LIVE_WINDOW", "300"))
+        )
+        print(
+            "[%s] %d live | versions: %s" % (time.strftime("%H:%M:%S"), nlive, latest)
+        )
         draw(data, *terminal_pixels())
         try:
             time.sleep(INTERVAL)

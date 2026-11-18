@@ -26,9 +26,11 @@ import re
 from dataclasses import dataclass, field
 
 import matplotlib
+
 matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
+
 from torchtitan.experiments.ezpz.utils.plot_style import apply_style  # noqa: E402
 
 apply_style()
@@ -74,7 +76,9 @@ def compute_wsd_lr_schedule(
             decay_step = step - warmup_steps - stable_steps
             progress = decay_step / max(decay_steps - 1, 1)
             if decay_type == "cosine":
-                lr = min_lr + (peak_lr - min_lr) * 0.5 * (1 + math.cos(math.pi * progress))
+                lr = min_lr + (peak_lr - min_lr) * 0.5 * (
+                    1 + math.cos(math.pi * progress)
+                )
             elif decay_type == "linear":
                 lr = peak_lr + (min_lr - peak_lr) * progress
             else:
@@ -209,24 +213,48 @@ def plot_loss_curves(
         c = run.color or colors[i % len(colors)]
         if "loss" not in run.metrics:
             continue
-        ax1.plot(run.steps, run.metrics["loss"], label=run.label,
-                 color=c, linestyle=run.linestyle, linewidth=1.5)
+        ax1.plot(
+            run.steps,
+            run.metrics["loss"],
+            label=run.label,
+            color=c,
+            linestyle=run.linestyle,
+            linewidth=1.5,
+        )
         tokens = [s * gbs * seq_len / 1e9 for s in run.steps]
-        ax2.plot(tokens, run.metrics["loss"], label=run.label,
-                 color=c, linestyle=run.linestyle, linewidth=1.5)
+        ax2.plot(
+            tokens,
+            run.metrics["loss"],
+            label=run.label,
+            color=c,
+            linestyle=run.linestyle,
+            linewidth=1.5,
+        )
 
-    ax1.set_xlabel("Step"); ax1.set_ylabel("Loss (EMA)")
-    ax1.set_title(f"{title} — by Step"); ax1.legend(fontsize=7, loc="upper right")
-    ax2.set_xlabel("Tokens (B)"); ax2.set_ylabel("Loss (EMA)")
-    ax2.set_title(f"{title} — by Tokens"); ax2.legend(fontsize=7, loc="upper right")
+    ax1.set_xlabel("Step")
+    ax1.set_ylabel("Loss (EMA)")
+    ax1.set_title(f"{title} — by Step")
+    ax1.legend(fontsize=7, loc="upper right")
+    ax2.set_xlabel("Tokens (B)")
+    ax2.set_ylabel("Loss (EMA)")
+    ax2.set_title(f"{title} — by Tokens")
+    ax2.legend(fontsize=7, loc="upper right")
 
     if inset and runs:
         max_step = max(r.steps[-1] for r in runs if r.steps)
         start = int(max_step * inset_start_frac)
-        for ax, x_fn in [(ax1, lambda r: r.steps),
-                          (ax2, lambda r: [s * gbs * seq_len / 1e9 for s in r.steps])]:
-            axins = inset_axes(ax, width="45%", height="45%", loc="center right",
-                              bbox_to_anchor=(0, 0.05, 1, 1), bbox_transform=ax.transAxes)
+        for ax, x_fn in [
+            (ax1, lambda r: r.steps),
+            (ax2, lambda r: [s * gbs * seq_len / 1e9 for s in r.steps]),
+        ]:
+            axins = inset_axes(
+                ax,
+                width="45%",
+                height="45%",
+                loc="center right",
+                bbox_to_anchor=(0, 0.05, 1, 1),
+                bbox_transform=ax.transAxes,
+            )
             for i, run in enumerate(runs):
                 if "loss" not in run.metrics or "--" in run.linestyle:
                     continue
@@ -234,9 +262,13 @@ def plot_loss_curves(
                 xs = x_fn(run)
                 mask = [j for j, s in enumerate(run.steps) if s >= start]
                 if mask:
-                    axins.plot([xs[j] for j in mask],
-                              [run.metrics["loss"][j] for j in mask],
-                              color=c, linestyle=run.linestyle, linewidth=1.5)
+                    axins.plot(
+                        [xs[j] for j in mask],
+                        [run.metrics["loss"][j] for j in mask],
+                        color=c,
+                        linestyle=run.linestyle,
+                        linewidth=1.5,
+                    )
             axins.set_title("Tail zoom", fontsize=8)
             axins.tick_params(labelsize=7)
 
@@ -255,6 +287,7 @@ def plot_metrics_panel(
 ) -> matplotlib.figure.Figure:
     """Plot a multi-panel grid of training metrics with tail-zoom insets."""
     from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+
     if metrics is None:
         # Check if any run has LR data
         has_lr = any("lr" in r.metrics for r in runs)
@@ -290,10 +323,18 @@ def plot_metrics_panel(
             if metric not in run.metrics:
                 continue
             c = run.color or colors[i % len(colors)]
-            ax.plot(run.steps, run.metrics[metric], label=run.label,
-                    color=c, linestyle=run.linestyle, linewidth=1.5)
-        ax.set_xlabel("Step"); ax.set_ylabel(ylabel)
-        ax.set_title(ylabel); ax.legend(fontsize=7, loc="best")
+            ax.plot(
+                run.steps,
+                run.metrics[metric],
+                label=run.label,
+                color=c,
+                linestyle=run.linestyle,
+                linewidth=1.5,
+            )
+        ax.set_xlabel("Step")
+        ax.set_ylabel(ylabel)
+        ax.set_title(ylabel)
+        ax.legend(fontsize=7, loc="best")
 
         # Add inset zoom for applicable metrics
         if metric in inset_metrics and runs:
@@ -302,9 +343,12 @@ def plot_metrics_panel(
                 max_step = max(r.steps[-1] for r in valid_runs)
                 start = int(max_step * 0.6)
                 axins = inset_axes(
-                    ax, width="40%", height="40%",
+                    ax,
+                    width="40%",
+                    height="40%",
                     loc="center right",
-                    bbox_to_anchor=(0, 0.05, 1, 1), bbox_transform=ax.transAxes,
+                    bbox_to_anchor=(0, 0.05, 1, 1),
+                    bbox_transform=ax.transAxes,
                 )
                 for i, run in enumerate(valid_runs):
                     c = run.color or colors[i % len(colors)]
@@ -313,7 +357,9 @@ def plot_metrics_panel(
                         axins.plot(
                             [run.steps[j] for j in mask],
                             [run.metrics[metric][j] for j in mask],
-                            color=c, linestyle=run.linestyle, linewidth=1.2,
+                            color=c,
+                            linestyle=run.linestyle,
+                            linewidth=1.2,
                         )
                 axins.set_title("Tail zoom", fontsize=7)
                 axins.tick_params(labelsize=6)
@@ -327,22 +373,37 @@ def plot_metrics_panel(
 
 def main():
     parser = argparse.ArgumentParser(description="Plot training metrics")
-    parser.add_argument("--configs", nargs="+", required=True,
-                        help="Config names to plot")
-    parser.add_argument("--labels", nargs="+", default=None,
-                        help="Display labels (must match --configs count)")
-    parser.add_argument("--linestyles", nargs="+", default=None,
-                        help="Line styles (must match --configs count)")
-    parser.add_argument("--output", default="figures",
-                        help="Output directory for plots")
-    parser.add_argument("--title", default="Training Metrics",
-                        help="Plot title prefix")
-    parser.add_argument("--gbs", type=int, default=384,
-                        help="Global batch size for token calculation")
-    parser.add_argument("--seq-len", type=int, default=8192,
-                        help="Sequence length for token calculation")
-    parser.add_argument("--input-dir", default=".",
-                        help="Directory containing output files")
+    parser.add_argument(
+        "--configs", nargs="+", required=True, help="Config names to plot"
+    )
+    parser.add_argument(
+        "--labels",
+        nargs="+",
+        default=None,
+        help="Display labels (must match --configs count)",
+    )
+    parser.add_argument(
+        "--linestyles",
+        nargs="+",
+        default=None,
+        help="Line styles (must match --configs count)",
+    )
+    parser.add_argument(
+        "--output", default="figures", help="Output directory for plots"
+    )
+    parser.add_argument("--title", default="Training Metrics", help="Plot title prefix")
+    parser.add_argument(
+        "--gbs", type=int, default=384, help="Global batch size for token calculation"
+    )
+    parser.add_argument(
+        "--seq-len",
+        type=int,
+        default=8192,
+        help="Sequence length for token calculation",
+    )
+    parser.add_argument(
+        "--input-dir", default=".", help="Directory containing output files"
+    )
     args = parser.parse_args()
 
     labels = args.labels or args.configs
@@ -355,8 +416,10 @@ def main():
         if run:
             run.linestyle = ls
             runs.append(run)
-            print(f"Loaded {config}: {len(run.steps)} steps, "
-                  f"final loss={run.metrics.get('loss', [None])[-1]}")
+            print(
+                f"Loaded {config}: {len(run.steps)} steps, "
+                f"final loss={run.metrics.get('loss', [None])[-1]}"
+            )
         else:
             print(f"No data for {config}")
 
@@ -365,11 +428,15 @@ def main():
         return
 
     plot_loss_curves(
-        runs, title=args.title, gbs=args.gbs, seq_len=args.seq_len,
+        runs,
+        title=args.title,
+        gbs=args.gbs,
+        seq_len=args.seq_len,
         output_path=os.path.join(args.output, "loss_curves.png"),
     )
     plot_metrics_panel(
-        runs, title=args.title,
+        runs,
+        title=args.title,
         output_path=os.path.join(args.output, "metrics.png"),
     )
     print(f"Plots saved to {args.output}/")

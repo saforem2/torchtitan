@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Plot 2B CPT (continued-pretraining) training-loss curves per data mix.
 
 Reads per-run TSV files (columns: step<TAB>loss) produced from the CPT job
@@ -51,8 +57,13 @@ def read_tsv(path):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--data-dir", default=os.path.join(os.path.dirname(__file__), "figures"))
-    ap.add_argument("--out", default=os.path.join(os.path.dirname(__file__), "figures", "cpt_loss.svg"))
+    ap.add_argument(
+        "--data-dir", default=os.path.join(os.path.dirname(__file__), "figures")
+    )
+    ap.add_argument(
+        "--out",
+        default=os.path.join(os.path.dirname(__file__), "figures", "cpt_loss.svg"),
+    )
     args = ap.parse_args()
 
     fig, ax = plt.subplots(figsize=(9, 5.5))

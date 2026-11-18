@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Live production-training loss dashboard (kitcat inline / SVG / text board).
 
 Companion to ``rl/scripts/grpo_lora_agpt2b_patches/rl_dash3.py`` but for the
@@ -109,12 +115,32 @@ REPO = os.environ.get(
 # for a dark terminal. Light mode reuses COLORS_LIGHT verbatim, so it is a strict
 # no-op vs. the pre-theme behavior; only dark mode changes. See draw_curves.
 COLORS_LIGHT = [
-    "#4c78a8", "#f58518", "#54a24b", "#e45756", "#72b7b2", "#b279a2",
-    "#ff9da6", "#9d755d", "#bab0ac", "#edc948", "#b07aa1", "#86bcb6",
+    "#4c78a8",
+    "#f58518",
+    "#54a24b",
+    "#e45756",
+    "#72b7b2",
+    "#b279a2",
+    "#ff9da6",
+    "#9d755d",
+    "#bab0ac",
+    "#edc948",
+    "#b07aa1",
+    "#86bcb6",
 ]
 COLORS_DARK = [
-    "#6ea8dc", "#ffa94d", "#7bc96f", "#ff7b7b", "#5fd0c8", "#d29fd8",
-    "#ffc0c8", "#c79a6a", "#d5cfca", "#f6e05e", "#d3a0ce", "#a8ded6",
+    "#6ea8dc",
+    "#ffa94d",
+    "#7bc96f",
+    "#ff7b7b",
+    "#5fd0c8",
+    "#d29fd8",
+    "#ffc0c8",
+    "#c79a6a",
+    "#d5cfca",
+    "#f6e05e",
+    "#d3a0ce",
+    "#a8ded6",
 ]
 # Back-compat alias: any external caller importing COLORS gets the light set,
 # matching the pre-theme default. draw_curves selects the palette at render time.
@@ -130,8 +156,8 @@ COLORS = COLORS_LIGHT
 # keeps the same marker across refreshes and across step/tokens axes.
 MARKERS_CYCLE = ["o", "s", "^", "D", "v", "P", "X", "*"]
 MARKER_MODES = {
-    "none": None,          # lines only (default)
-    "auto": "cycle",       # per-chain marker from MARKERS_CYCLE
+    "none": None,  # lines only (default)
+    "auto": "cycle",  # per-chain marker from MARKERS_CYCLE
     "dot": ".",
     "circle": "o",
     "square": "s",
@@ -153,7 +179,7 @@ def detect_dark_background():
     Precedence:
       1. PD_THEME=dark|light  -- explicit override, always wins.
       2. COLORFGBG='fg;bg'    -- set by many terminals (rxvt, konsole, some
-         iTerm/kitty setups). The trailing field is the background color index;
+         iTerm2/kitty setups). The trailing field is the background color index;
          0-6 and 8 are dark, 7/9-15 (and '15' white) are light. If the value is
          'fg;;bg' (3 fields) the middle is a decoration color -- take the last.
     Defaults to False (light) when nothing is set -- the historical behavior, so
@@ -171,6 +197,7 @@ def detect_dark_background():
         # ANSI background index: 0-6 + 8 are dark tones, 7/9-15 are light.
         return bg <= 6 or bg == 8
     return False
+
 
 # ---------------------------------------------------------------------------
 # Remote aggregator: everything that needs cluster-side data lives here. It is
@@ -1117,24 +1144,25 @@ print(json.dumps(bb))
 # reboots and is the conventional home for expensive-to-regenerate artifacts.
 def _cache_dir() -> str:
     d = os.path.join(
-        os.environ.get("XDG_CACHE_HOME")
-        or os.path.expanduser("~/.cache"),
+        os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"),
         "prod_dash",
     )
     try:
         os.makedirs(d, exist_ok=True)
         return d
     except OSError:
-        return "/tmp"          # unwritable HOME (odd container): degrade, don't crash
+        return "/tmp"  # unwritable HOME (odd container): degrade, don't crash
 
 
 LOCAL_CACHE = os.path.join(
-    _cache_dir(), "backbone_%s.json" % os.environ.get("USER", "foremans"))
+    _cache_dir(), "backbone_%s.json" % os.environ.get("USER", "foremans")
+)
 
 # One-time migration off the old /tmp path so an existing warm cache is not
 # thrown away on upgrade. Best-effort: a failure here just means a cold build.
 _OLD_LOCAL_CACHE = "/tmp/prod_dash_backbone_%s.json" % os.environ.get(
-    "USER", "foremans")
+    "USER", "foremans"
+)
 if not os.path.exists(LOCAL_CACHE) and os.path.exists(_OLD_LOCAL_CACHE):
     try:
         import shutil
@@ -1158,9 +1186,9 @@ def _save_local_cache(bb: dict) -> None:
     concurrent reader can never observe a half-written JSON payload.
     """
     if not bb.get("chains"):
-        return                      # never cache an empty/failed payload
+        return  # never cache an empty/failed payload
     if bb.get("stale"):
-        return                      # do not re-save what we just read back
+        return  # do not re-save what we just read back
     tmp = LOCAL_CACHE + ".partial"
     try:
         os.makedirs(os.path.dirname(LOCAL_CACHE), exist_ok=True)
@@ -1205,8 +1233,8 @@ def _cached_payload(why: str) -> dict | None:
     bb["stale_age_hours"] = round(age_h, 1)
     sys.stderr.write(
         "prod_dash: %s -- serving LOCAL CACHE from %.1fh ago "
-        "(%d chains). Numbers are NOT live.\n"
-        % (why, age_h, len(bb["chains"])))
+        "(%d chains). Numbers are NOT live.\n" % (why, age_h, len(bb["chains"]))
+    )
     return bb
 
 
@@ -1221,11 +1249,14 @@ def fetch(stderr_cb=None) -> dict:
       - stderr_cb None otherwise: inherit stderr so progress streams straight
         to the terminal live (the kitcat/board CLI path).
     """
-    script = _AGG % {"repo": REPO, "ttl": BACKBONE_TTL,
-                     "fresh": 1 if os.environ.get("PD_FRESH") == "1" else 0,
-                     "show_all": 1 if SHOW_ALL else 0,
-                     "exp_max_age": EXP_MAX_AGE,
-                     "live_window": LIVE_WINDOW}
+    script = _AGG % {
+        "repo": REPO,
+        "ttl": BACKBONE_TTL,
+        "fresh": 1 if os.environ.get("PD_FRESH") == "1" else 0,
+        "show_all": 1 if SHOW_ALL else 0,
+        "exp_max_age": EXP_MAX_AGE,
+        "live_window": LIVE_WINDOW,
+    }
     if LOCAL:
         cmd = [sys.executable, "-c", script]
     else:
@@ -1244,9 +1275,12 @@ def fetch(stderr_cb=None) -> dict:
         # stdin from /dev/null so ssh can never grab the terminal. The live master
         # socket still multiplexes normally (no auth needed) when it is healthy.
         cmd = [
-            "ssh", "-n",
-            "-o", "BatchMode=yes",
-            "-o", "ConnectTimeout=%d" % int(os.environ.get("PD_SSH_CONNECT_TIMEOUT", "10")),
+            "ssh",
+            "-n",
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "ConnectTimeout=%d" % int(os.environ.get("PD_SSH_CONNECT_TIMEOUT", "10")),
         ]
         # Do NOT pass -S by default. An explicit -S OVERRIDES the ControlPath in
         # ~/.ssh/config, so `ControlPersist yes` does not apply to it: when a
@@ -1266,15 +1300,18 @@ def fetch(stderr_cb=None) -> dict:
         # first would deadlock once the child fills the stdout pipe buffer with
         # the (large) JSON payload. A background thread collects stdout.
         import threading
+
         try:
-            p = subprocess.Popen(cmd, stdout=subprocess.PIPE,
-                                 stderr=subprocess.PIPE, text=True)
+            p = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+            )
         except Exception as e:
             sys.stderr.write("prod_dash: aggregator launch failed: %s\n" % e)
             return _cached_payload("aggregator launch failed") or {"chains": {}}
         out_chunks = []
-        t_out = threading.Thread(target=lambda: out_chunks.append(p.stdout.read()),
-                                 daemon=True)
+        t_out = threading.Thread(
+            target=lambda: out_chunks.append(p.stdout.read()), daemon=True
+        )
         t_out.start()
         for line in iter(p.stderr.readline, ""):
             if line:
@@ -1287,7 +1324,9 @@ def fetch(stderr_cb=None) -> dict:
         except subprocess.TimeoutExpired:
             p.kill()
             try:
-                stderr_cb("prod_dash: aggregator timed out after %ds" % int(SSH_TIMEOUT))
+                stderr_cb(
+                    "prod_dash: aggregator timed out after %ds" % int(SSH_TIMEOUT)
+                )
             except Exception:
                 pass
             return _cached_payload("aggregator timed out") or {"chains": {}}
@@ -1296,12 +1335,18 @@ def fetch(stderr_cb=None) -> dict:
     else:
         stderr_dest = subprocess.DEVNULL if os.environ.get("PD_QUIET") == "1" else None
         try:
-            r = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=stderr_dest,
-                               text=True, timeout=SSH_TIMEOUT)
+            r = subprocess.run(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=stderr_dest,
+                text=True,
+                timeout=SSH_TIMEOUT,
+            )
         except subprocess.TimeoutExpired:
             sys.stderr.write(
                 "prod_dash: aggregator timed out after %ds (raise PD_SSH_TIMEOUT "
-                "for a cold build)\n" % int(SSH_TIMEOUT))
+                "for a cold build)\n" % int(SSH_TIMEOUT)
+            )
             return _cached_payload("aggregator timed out") or {"chains": {}}
         stdout_text = r.stdout or ""
     for line in stdout_text.splitlines():
@@ -1322,25 +1367,35 @@ def fetch(stderr_cb=None) -> dict:
         # It also interpolated SOCK, which is EMPTY by default, emitting the
         # broken command `ssh -MNf -S  aurora`.
         tail = (stdout_text or "").strip()
-        detail = ("  (aggregator stdout was empty)" if not tail
-                  else "  last stdout line: %s" % tail.splitlines()[-1][:200])
-        sock_hint = ("    ssh -MNf -S %s %s\n" % (SOCK, SSH_TGT) if SOCK
-                     else "    ssh -O check %s   # then: ssh -fN %s\n"
-                          % (SSH_TGT, SSH_TGT))
+        detail = (
+            "  (aggregator stdout was empty)"
+            if not tail
+            else "  last stdout line: %s" % tail.splitlines()[-1][:200]
+        )
+        sock_hint = (
+            "    ssh -MNf -S %s %s\n" % (SOCK, SSH_TGT)
+            if SOCK
+            else "    ssh -O check %s   # then: ssh -fN %s\n" % (SSH_TGT, SSH_TGT)
+        )
         sys.stderr.write(
             "prod_dash: no JSON from aggregator.\n"
             "%s\n"
             "Likely causes, cheapest check first:\n"
             "  1. The aggregator is SLOW, not broken -- a huge .o log makes\n"
             "     parse_olog scan for minutes. Find the big ones:\n"
-            "       ssh %s \"du -sh %s/logs/*/trainer-*.console.log | sort -h | tail -3\"\n"
+            '       ssh %s "du -sh %s/logs/*/trainer-*.console.log | sort -h | tail -3"\n'
             "     Current per-file cap: EZPZ_OLOG_MAX_BYTES=%d bytes.\n"
             "  2. Cold backbone build exceeded PD_SSH_TIMEOUT=%ds -- raise it.\n"
             "  3. SSH really is down. Verify before assuming:\n"
             "%s"
-            % (detail, SSH_TGT, REPO,
-               int(os.environ.get("EZPZ_OLOG_MAX_BYTES", 256 * 1024 * 1024)),
-               int(SSH_TIMEOUT), sock_hint)
+            % (
+                detail,
+                SSH_TGT,
+                REPO,
+                int(os.environ.get("EZPZ_OLOG_MAX_BYTES", 256 * 1024 * 1024)),
+                int(SSH_TIMEOUT),
+                sock_hint,
+            )
         )
     else:
         sys.stderr.write("prod_dash: no JSON from aggregator\n")
@@ -1356,8 +1411,12 @@ def render_board(payload) -> str:
 
     def order(item):
         k, c = item
-        return (c.get("kind") != "canonical", c.get("model") or "z",
-                -(c.get("num_nodes") or 0), k)
+        return (
+            c.get("kind") != "canonical",
+            c.get("model") or "z",
+            -(c.get("num_nodes") or 0),
+            k,
+        )
 
     def _age(sec):
         if sec is None:
@@ -1371,10 +1430,23 @@ def render_board(payload) -> str:
         return "%.0fd" % (sec / 86400)
 
     rows = []
-    header = ("chain", "state", "step", "loss", "% tgt", "tps", "mfu",
-              "updated", "last", "next", "wandb")
+    header = (
+        "chain",
+        "state",
+        "step",
+        "loss",
+        "% tgt",
+        "tps",
+        "mfu",
+        "updated",
+        "last",
+        "next",
+        "wandb",
+    )
     for key, c in sorted(chains.items(), key=order):
-        st = c.get("queue_state") or ("run" if (c.get("log_age") or 1e9) < LIVE_WINDOW else "idle")
+        st = c.get("queue_state") or (
+            "run" if (c.get("log_age") or 1e9) < LIVE_WINDOW else "idle"
+        )
         tip = c.get("live_tip") or {}
         step = c.get("latest_step")
         loss = c.get("latest_loss")
@@ -1383,33 +1455,46 @@ def render_board(payload) -> str:
         mfu = tip.get("mfu", c.get("wb_mfu"))
         # "updated" = W&B heartbeat age (cleaner than the filesystem log age).
         upd = c.get("updated_ts")
-        rows.append((
-            c.get("label", key)[:34],
-            st,
-            "-" if step is None else str(step),
-            "-" if loss is None else "%.4f" % loss,
-            "-" if c.get("pct_target") is None else "%.1f%%" % c["pct_target"],
-            "-" if tps is None else "%.0f" % tps,
-            "-" if mfu is None else "%.1f%%" % mfu,
-            _age(now - upd) if upd else "-",
-            c.get("last_job") or "-",
-            c.get("next_job") or "-",
-            c.get("wandb_id") or "-",
-        ))
-    widths = [max(len(header[i]), *(len(r[i]) for r in rows)) if rows else len(header[i])
-              for i in range(len(header))]
+        rows.append(
+            (
+                c.get("label", key)[:34],
+                st,
+                "-" if step is None else str(step),
+                "-" if loss is None else "%.4f" % loss,
+                "-" if c.get("pct_target") is None else "%.1f%%" % c["pct_target"],
+                "-" if tps is None else "%.0f" % tps,
+                "-" if mfu is None else "%.1f%%" % mfu,
+                _age(now - upd) if upd else "-",
+                c.get("last_job") or "-",
+                c.get("next_job") or "-",
+                c.get("wandb_id") or "-",
+            )
+        )
+    widths = [
+        max(len(header[i]), *(len(r[i]) for r in rows)) if rows else len(header[i])
+        for i in range(len(header))
+    ]
+
     def fmt(r):
         return "  ".join(str(r[i]).ljust(widths[i]) for i in range(len(r)))
-    nlive = sum(1 for c in chains.values()
-                if c.get("queue_state") == "R"
-                or (c.get("log_age") or 1e9) < LIVE_WINDOW)
+
+    nlive = sum(
+        1
+        for c in chains.values()
+        if c.get("queue_state") == "R" or (c.get("log_age") or 1e9) < LIVE_WINDOW
+    )
     bb_age = payload.get("built_age")
     stale = " (refreshing)" if payload.get("stale") else ""
     base_url = "https://wandb.ai/%s/runs/" % PROJECT
     out = [
         "AuroraGPT production loss board  [%s]  %d live / %d chains  (W&B backbone %s%s)"
-        % (time.strftime("%H:%M:%S", time.localtime(now)), nlive, len(chains),
-           "-" if bb_age is None else "%.0fm old" % (bb_age / 60), stale),
+        % (
+            time.strftime("%H:%M:%S", time.localtime(now)),
+            nlive,
+            len(chains),
+            "-" if bb_age is None else "%.0fm old" % (bb_age / 60),
+            stale,
+        ),
         "W&B: %s<wandb>   'updated' = W&B heartbeat age" % base_url,
         fmt(header),
         "  ".join("-" * w for w in widths),
@@ -1434,17 +1519,30 @@ def render_board(payload) -> str:
     if ev_rows:
         # Stable column order: the EVAL_TASKS order where known, then any
         # extras, so the table does not reshuffle between refreshes.
-        pref = ["hellaswag", "arc_challenge", "arc_easy", "mmlu", "gsm8k",
-                "winogrande", "piqa"]
+        pref = [
+            "hellaswag",
+            "arc_challenge",
+            "arc_easy",
+            "mmlu",
+            "gsm8k",
+            "winogrande",
+            "piqa",
+        ]
         tasks = [t for t in pref if t in tasks] + [t for t in tasks if t not in pref]
         ehdr = ["chain", "step"] + [t[:9] for t in tasks]
-        erows = [[lab, "-" if st is None else str(st)]
-                 + ["-" if t not in sc else "%.3f" % sc[t] for t in tasks]
-                 for lab, st, sc in ev_rows]
-        ew = [max(len(ehdr[i]), *(len(r[i]) for r in erows)) if erows else len(ehdr[i])
-              for i in range(len(ehdr))]
+        erows = [
+            [lab, "-" if st is None else str(st)]
+            + ["-" if t not in sc else "%.3f" % sc[t] for t in tasks]
+            for lab, st, sc in ev_rows
+        ]
+        ew = [
+            max(len(ehdr[i]), *(len(r[i]) for r in erows)) if erows else len(ehdr[i])
+            for i in range(len(ehdr))
+        ]
+
         def efmt(r):
             return "  ".join(str(r[i]).ljust(ew[i]) for i in range(len(r)))
+
         out += [
             "",
             "eval scores (newest evaluated ckpt per chain; acc_norm where "
@@ -1470,6 +1568,7 @@ def _apply_house_style(plt):
     styled = False
     try:
         from torchtitan.experiments.ezpz.utils.plot_style import apply_style
+
         apply_style()
         styled = True
     except Exception:
@@ -1477,18 +1576,22 @@ def _apply_house_style(plt):
     if not styled:
         import glob as _glob
         import importlib.util as _ilu
+
         from matplotlib import font_manager as _fm
-        for d in (os.path.expanduser("~/.local/share/fonts"),
-                  os.path.expanduser("~/Library/Fonts"), "/usr/share/fonts"):
-            for f in _glob.glob(os.path.join(d, "**", "Iosevka*.tt*"),
-                                recursive=True):
+
+        for d in (
+            os.path.expanduser("~/.local/share/fonts"),
+            os.path.expanduser("~/Library/Fonts"),
+            "/usr/share/fonts",
+        ):
+            for f in _glob.glob(os.path.join(d, "**", "Iosevka*.tt*"), recursive=True):
                 try:
                     _fm.fontManager.addfont(f)
                 except Exception:
                     pass
         try:
             spec = _ilu.find_spec("ambivalent")
-            for loc in (spec.submodule_search_locations or []):
+            for loc in spec.submodule_search_locations or []:
                 cand = os.path.join(loc, "stylefiles", "ambivalent.mplstyle")
                 if os.path.isfile(cand):
                     plt.style.use(cand)
@@ -1498,8 +1601,11 @@ def _apply_house_style(plt):
     # Prefer 'Iosevka Term' when present (rl_dash3 convention).
     try:
         from matplotlib import font_manager as _fm
+
         names = {f.name for f in _fm.fontManager.ttflist if "iosevka" in f.name.lower()}
-        pick = next((n for n in ("Iosevka25", "Iosevka Term", "Iosevka") if n in names), None)
+        pick = next(
+            (n for n in ("Iosevka25", "Iosevka Term", "Iosevka") if n in names), None
+        )
         if pick:
             plt.rcParams["font.family"] = [pick, "DejaVu Sans Mono", "monospace"]
     except Exception:
@@ -1527,7 +1633,7 @@ def _auto_marker_map(keys):
             cand = MARKERS_CYCLE[(start + off) % n]
             if cand not in used:
                 break
-        else:                      # more chains than shapes -- accept a repeat
+        else:  # more chains than shapes -- accept a repeat
             cand = MARKERS_CYCLE[start]
         used.add(cand)
         out[key] = cand
@@ -1559,8 +1665,12 @@ def _resolve_marker(mode, key, npts, auto_map=None):
         else:
             style = MARKERS_CYCLE[zlib.crc32(key.encode()) % len(MARKERS_CYCLE)]
     every = max(1, npts // MARKER_TARGET) if npts > MARKER_TARGET else 1
-    return {"marker": style, "markevery": every, "markersize": 4.5,
-            "markeredgewidth": 0.0}
+    return {
+        "marker": style,
+        "markevery": every,
+        "markersize": 4.5,
+        "markeredgewidth": 0.0,
+    }
 
 
 def draw_curves(payload, figsize, save_path=None):
@@ -1568,12 +1678,19 @@ def draw_curves(payload, figsize, save_path=None):
     size_figure() -- already fitted to the terminal window and clamped to the
     kitcat cell limit, so this function does no sizing math of its own."""
     import matplotlib
+
     if save_path:
         matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+
     _apply_house_style(plt)
-    plt.rcParams.update({"savefig.transparent": True, "figure.facecolor": "none",
-                         "axes.facecolor": "none"})
+    plt.rcParams.update(
+        {
+            "savefig.transparent": True,
+            "figure.facecolor": "none",
+            "axes.facecolor": "none",
+        }
+    )
     # Theme: pick the hue-parallel palette for the background, and in dark mode
     # override the (otherwise dark) ambivalent text/axes color to a light tone so
     # labels/ticks/legend stay legible against the transparent-over-dark backdrop.
@@ -1582,10 +1699,16 @@ def draw_curves(payload, figsize, save_path=None):
     palette = COLORS_DARK if dark else COLORS_LIGHT
     if dark:
         fg = "#d5d5d5"
-        plt.rcParams.update({
-            "text.color": fg, "axes.labelcolor": fg, "axes.titlecolor": fg,
-            "xtick.color": fg, "ytick.color": fg, "axes.edgecolor": fg,
-        })
+        plt.rcParams.update(
+            {
+                "text.color": fg,
+                "axes.labelcolor": fg,
+                "axes.titlecolor": fg,
+                "xtick.color": fg,
+                "ytick.color": fg,
+                "axes.edgecolor": fg,
+            }
+        )
     chains = payload.get("chains", {})
     dpi = 100
     fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
@@ -1595,14 +1718,19 @@ def draw_curves(payload, figsize, save_path=None):
     xaxis = os.environ.get("PD_XAXIS", "step")
     marker_mode = os.environ.get("PD_MARKER", "none")
     if marker_mode not in MARKER_MODES:
-        _log("unknown PD_MARKER=%r; valid: %s. Falling back to 'none'."
-             % (marker_mode, ", ".join(sorted(MARKER_MODES))))
+        _log(
+            "unknown PD_MARKER=%r; valid: %s. Falling back to 'none'."
+            % (marker_mode, ", ".join(sorted(MARKER_MODES)))
+        )
         marker_mode = "none"
     # Assign over ALL chains, not just the ones that survive the len<2 /
     # missing-gbs filters below: a chain dropping out for one frame would
     # otherwise reshuffle everyone else's shapes on the next refresh.
-    auto_map = (_auto_marker_map(chains.keys())
-                if MARKER_MODES.get(marker_mode) == "cycle" else None)
+    auto_map = (
+        _auto_marker_map(chains.keys())
+        if MARKER_MODES.get(marker_mode) == "cycle"
+        else None
+    )
     parts = []
     for key in sorted(chains):
         c = chains[key]
@@ -1627,25 +1755,44 @@ def draw_curves(payload, figsize, save_path=None):
         else:
             xs = [p[0] for p in curve]
         ys = [p[1] for p in curve]
-        is_live = (c.get("queue_state") == "R"
-                   or (c.get("log_age") is not None and c["log_age"] <= LIVE_WINDOW))
+        is_live = c.get("queue_state") == "R" or (
+            c.get("log_age") is not None and c["log_age"] <= LIVE_WINDOW
+        )
         is_exp = c.get("kind") == "experiment"
         color = palette[zlib.crc32(key.encode()) % len(palette)]
         alpha = 1.0 if is_live else 0.30
         lw = 2.4 if is_live else 1.2
         ls = "--" if is_exp else "-"
         z = 5 if is_live else 2
-        label = ("* " if is_live else "") + c.get("label", key) + (
-            "" if is_live else " (idle)")
+        label = (
+            ("* " if is_live else "")
+            + c.get("label", key)
+            + ("" if is_live else " (idle)")
+        )
         mk = _resolve_marker(marker_mode, key, len(xs), auto_map)
-        ax.plot(xs, ys, ls, lw=lw, color=color, alpha=alpha, zorder=z,
-                label=label, rasterized=len(xs) > 2000, **mk)
+        ax.plot(
+            xs,
+            ys,
+            ls,
+            lw=lw,
+            color=color,
+            alpha=alpha,
+            zorder=z,
+            label=label,
+            rasterized=len(xs) > 2000,
+            **mk,
+        )
         if is_live:
             parts.append("%s=%.3f@%d" % (c.get("label", key), ys[-1], curve[-1][0]))
-    ax.set_xlabel("tokens seen (billions)" if xaxis == "tokens"
-                  else "training step (cumulative across resumes)")
+    ax.set_xlabel(
+        "tokens seen (billions)"
+        if xaxis == "tokens"
+        else "training step (cumulative across resumes)"
+    )
     ax.set_ylabel("loss (global avg)")
-    ax.set_title("AuroraGPT production loss" + ("  --  " + "  ".join(parts) if parts else ""))
+    ax.set_title(
+        "AuroraGPT production loss" + ("  --  " + "  ".join(parts) if parts else "")
+    )
     ax.legend(loc="upper right", fontsize=8, ncol=2)
     fig.tight_layout()
     if save_path:
@@ -1672,6 +1819,7 @@ def terminal_cells():
         import array
         import fcntl
         import termios
+
         buf = array.array("H", [0, 0, 0, 0])
         fcntl.ioctl(sys.stdout, termios.TIOCGWINSZ, buf)
         rows, cols, xp, yp = buf
@@ -1689,6 +1837,7 @@ def terminal_cells():
         scale = 1.0
         try:
             from kitcat.terminal_query import get_dpi_scale
+
             scale = float(get_dpi_scale()) or 1.0
         except Exception:
             if sys.platform == "darwin":
@@ -1729,6 +1878,7 @@ def size_figure(reserved_rows=0, dpi=100):
     scale = 1.0
     try:
         from kitcat.terminal_query import get_dpi_scale
+
         scale = float(get_dpi_scale()) or 1.0
     except Exception:
         if sys.platform == "darwin":
@@ -1758,15 +1908,16 @@ def size_figure(reserved_rows=0, dpi=100):
 def _init_kitcat():
     """kitcat inline backend + HiDPI crispness (ported from rl_dash3)."""
     import matplotlib
+
     matplotlib.use("module://kitcat")
     # HiDPI: render at device resolution so Retina text isn't upscaled/fuzzy.
     try:
         import array
         import fcntl
         import re as _re
+        import select
         import termios
         import tty as _tty
-        import select
 
         def _tty_query(seq, timeout=0.3):
             if "TMUX" in os.environ:
@@ -1806,9 +1957,10 @@ def _init_kitcat():
             backing = 1.0
         backing = max(1.0, min(3.0, backing))
         if backing > 1.0:
+            import kitcat.backend as _kb
             import kitcat.terminal_query as _ktq
             import kitcat.utils as _ku
-            import kitcat.backend as _kb
+
             for _m in (_ktq, _ku, _kb):
                 _m.get_dpi_scale = lambda: backing
             if dev:
@@ -1821,32 +1973,37 @@ def _init_kitcat():
 def main():
     global SHOW_ALL
     argv = sys.argv[1:]
-    if "--all" in argv:            # include stale experiment forks
+    if "--all" in argv:  # include stale experiment forks
         SHOW_ALL = True
-    if "--fresh" in argv:          # force a W&B backbone rebuild this call
+    if "--fresh" in argv:  # force a W&B backbone rebuild this call
         os.environ["PD_FRESH"] = "1"
-    if "--tokens" in argv:         # x-axis in tokens instead of steps
+    if "--tokens" in argv:  # x-axis in tokens instead of steps
         os.environ["PD_XAXIS"] = "tokens"
-    if "--marker" in argv:         # marker style on the curves
+    if "--marker" in argv:  # marker style on the curves
         i = argv.index("--marker")
         if i + 1 >= len(argv):
-            sys.stderr.write("prod_dash: --marker needs a style: %s\n"
-                             % ", ".join(sorted(MARKER_MODES)))
+            sys.stderr.write(
+                "prod_dash: --marker needs a style: %s\n"
+                % ", ".join(sorted(MARKER_MODES))
+            )
             return
         style = argv[i + 1]
         if style not in MARKER_MODES:
-            sys.stderr.write("prod_dash: unknown marker %r; valid: %s\n"
-                             % (style, ", ".join(sorted(MARKER_MODES))))
+            sys.stderr.write(
+                "prod_dash: unknown marker %r; valid: %s\n"
+                % (style, ", ".join(sorted(MARKER_MODES)))
+            )
             return
         os.environ["PD_MARKER"] = style
-    if "--app" in argv:            # Textual multi-metric TUI (opt-in)
+    if "--app" in argv:  # Textual multi-metric TUI (opt-in)
         try:
             import prod_dash_app
         except ImportError:
             sys.stderr.write(
                 "prod_dash: textual not installed -- run\n"
                 "  uv pip install textual textual-plotext\n"
-                "falling back to --board.\n")
+                "falling back to --board.\n"
+            )
             print(render_board(fetch()))
             return
         prod_dash_app.run_app()
@@ -1866,10 +2023,13 @@ def main():
         _init_kitcat()
     else:
         import matplotlib
+
         matplotlib.use("module://kitcat")
     print("Live production loss dashboard (kitcat+ambivalent). Ctrl-C to stop.")
-    print("  (first frame on a cold cache builds the W&B backbone -- ~3-6 min, "
-          "live progress below; later frames are instant from cache)")
+    print(
+        "  (first frame on a cold cache builds the W&B backbone -- ~3-6 min, "
+        "live progress below; later frames are instant from cache)"
+    )
     sys.stdout.flush()
     while True:
         try:

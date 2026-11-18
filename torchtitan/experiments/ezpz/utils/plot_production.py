@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Plot production training metrics from PBS output files.
 
 DEPRECATED: prefer ``plot_production_wandb.py``, which pulls history
@@ -84,7 +90,9 @@ def parse_file(path: Path) -> list[StepRecord]:
     return records
 
 
-def parse_files(paths: list[Path]) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+def parse_files(
+    paths: list[Path],
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Parse multiple PBS output files, deduplicate by step, sort, return arrays.
 
     When multiple files contain the same step number, the last occurrence
@@ -158,7 +166,9 @@ def plot_model_dashboard(
     # --- Loss ---
     ax = axes[0]
     ax.plot(steps, losses, color=color, alpha=0.25, linewidth=0.5)
-    ax.plot(steps, smooth(losses, 100), color=color, linewidth=1.8, label="Loss (smoothed)")
+    ax.plot(
+        steps, smooth(losses, 100), color=color, linewidth=1.8, label="Loss (smoothed)"
+    )
     ax.set_ylabel("Loss")
     ax.set_title("Training Loss")
     ax.legend()
@@ -181,7 +191,9 @@ def plot_model_dashboard(
     # --- MFU ---
     ax = axes[2]
     ax.plot(steps, mfu, color="#FF9800", alpha=0.25, linewidth=0.5)
-    ax.plot(steps, smooth(mfu, 100), color="#FF9800", linewidth=1.8, label="MFU (smoothed)")
+    ax.plot(
+        steps, smooth(mfu, 100), color="#FF9800", linewidth=1.8, label="MFU (smoothed)"
+    )
     ax.set_ylabel("MFU (%)")
     ax.set_xlabel("Training Step")
     ax.set_title("Model FLOPs Utilization")
@@ -266,7 +278,12 @@ PRODUCTION_RUNS: dict[str, dict] = {
 }
 
 COMBINED_OUTPUT = (
-    DOCS_BASE / "experiments" / "agpt" / "aurora" / "figures" / "production_training_loss.png"
+    DOCS_BASE
+    / "experiments"
+    / "agpt"
+    / "aurora"
+    / "figures"
+    / "production_training_loss.png"
 )
 
 
@@ -325,7 +342,9 @@ def main() -> None:
 
     for model_name in models_to_plot:
         if args.files:
-            file_paths = [Path(f) if f.is_absolute() else repo_root / f for f in args.files]
+            file_paths = [
+                Path(f) if f.is_absolute() else repo_root / f for f in args.files
+            ]
             num_nodes = args.num_nodes
             output_dir = args.output_dir or PRODUCTION_RUNS.get(model_name, {}).get(
                 "output_dir",
@@ -353,9 +372,7 @@ def main() -> None:
 
         print(f"\nParsing {model_name.upper()} from {len(existing)} file(s)...")
         steps, losses, tps, mfu = parse_files(existing)
-        print(
-            f"  {len(steps)} unique steps, range [{int(steps[0])}, {int(steps[-1])}]"
-        )
+        print(f"  {len(steps)} unique steps, range [{int(steps[0])}, {int(steps[-1])}]")
         print(f"  Loss: {losses[-1]:.4f} (latest), {losses.min():.4f} (min)")
         print(f"  TPS:  {int(tps[-10:].mean()):,} (recent avg)")
         print(f"  MFU:  {mfu[-10:].mean():.2f}% (recent avg)")
@@ -364,11 +381,17 @@ def main() -> None:
 
         if not args.combined_only:
             output_path = Path(output_dir) / f"production_{model_name}_{num_nodes}n.png"
-            plot_model_dashboard(steps, losses, tps, mfu, model_name, num_nodes, output_path)
+            plot_model_dashboard(
+                steps, losses, tps, mfu, model_name, num_nodes, output_path
+            )
 
     # Combined loss plot
     if len(combined_data) >= 1:
-        combined_path = args.output_dir / "production_training_loss.png" if args.output_dir else COMBINED_OUTPUT
+        combined_path = (
+            args.output_dir / "production_training_loss.png"
+            if args.output_dir
+            else COMBINED_OUTPUT
+        )
         plot_combined_loss(combined_data, combined_path)
 
 

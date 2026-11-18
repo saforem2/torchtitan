@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Coordinate-check slopes: standard parametrization vs muP.
 
 The number quoted in the sync notes ("max |slope| 0.020 against a 0.05
@@ -17,6 +23,7 @@ presentation script, not a measurement. If the table changes, change this too.
 from pathlib import Path
 
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
@@ -73,8 +80,7 @@ ax_sp.set_xlim(-0.15, 1.75)
 # --- right: muP, same rows, axis zoomed to the tolerance band ---------------
 vals_mup = [v if v is not None else np.nan for v in mup]
 colors = [
-    "#55a868" if (v is not None and abs(v) <= TOLERANCE) else "#dd8452"
-    for v in mup
+    "#55a868" if (v is not None and abs(v) <= TOLERANCE) else "#dd8452" for v in mup
 ]
 ax_mup.barh(y, vals_mup, color=colors, alpha=0.9)
 ax_mup.axvline(0.0, color="0.4", lw=1)
@@ -93,15 +99,18 @@ for i, v in enumerate(mup):
         ax_mup.text(v + off, i, f"{v:+.3f}", va="center", ha=ha, fontsize=8.5)
 ax_mup.set_xlim(-0.16, 0.10)
 ax_mup.text(
-    TOLERANCE, len(ROWS) - 0.35, f" tolerance +/-{TOLERANCE}",
-    fontsize=8, color="#3d7a4e", va="center",
+    TOLERANCE,
+    len(ROWS) - 0.35,
+    f" tolerance +/-{TOLERANCE}",
+    fontsize=8,
+    color="#3d7a4e",
+    va="center",
 )
 
 # --- right: after the readout fix, same axis as the middle panel ----------
 vals_fix = [v if v is not None else np.nan for v in fixed]
 colors_fix = [
-    "#55a868" if (v is not None and abs(v) <= TOLERANCE) else "#dd8452"
-    for v in fixed
+    "#55a868" if (v is not None and abs(v) <= TOLERANCE) else "#dd8452" for v in fixed
 ]
 ax_fix.barh(y, vals_fix, color=colors_fix, alpha=0.9)
 ax_fix.axvline(0.0, color="0.4", lw=1)
@@ -125,18 +134,20 @@ fig.suptitle(
     fontsize=12.5,
 )
 fig.text(
-    0.5, 0.005,
+    0.5,
+    0.005,
     "4 widths x 8 steps, lr 1e-4. muP promises slope 0; tolerance 0.05. "
     "Reading Table 3 literally (std = $d^{-1}$) over-scales the readout DOWN to -0.130 "
     "-- and scaling its LR too made it -0.483, worse. Keeping $fan\\_in^{-1/2}$ and "
     "letting the eta/m LR group carry the width scaling gives 0.001.",
-    ha="center", fontsize=8.5, color="0.35",
+    ha="center",
+    fontsize=8.5,
+    color="0.35",
 )
 fig.tight_layout(rect=(0, 0.035, 1, 0.94))
 
 out = Path("torchtitan/experiments/ezpz/docs/experiments/mup/figures")
 out.mkdir(parents=True, exist_ok=True)
 for ext in ("svg", "png"):
-    fig.savefig(out / f"mup_coord_check_slopes.{ext}", dpi=150,
-                bbox_inches="tight")
+    fig.savefig(out / f"mup_coord_check_slopes.{ext}", dpi=150, bbox_inches="tight")
 print(f"wrote {out}/mup_coord_check_slopes.{{svg,png}}")

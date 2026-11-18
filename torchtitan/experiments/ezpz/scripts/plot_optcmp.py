@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Plot the fixed-batch optimizer comparison (AdamW / Mano / SophiaG).
 
 Reads loss + grad_norm straight from the arms' train.log files rather than
@@ -47,14 +53,13 @@ ARMS = {
     "mano": ("Mano  (lr 5.61e-05)", "#d62728"),
     "sophiag": ("SophiaG  (lr 3.55e-05)", "#2ca02c"),
     "sophiag-fresh-seed1234": (
-        "SophiaG  fresh, seed 1234", "#9467bd",
+        "SophiaG  fresh, seed 1234",
+        "#9467bd",
     ),
 }
 
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
-STEP_RE = re.compile(
-    r"step:\s+(\d+)\s+loss:\s+([0-9.]+)\s+grad_norm:\s+([0-9.]+)"
-)
+STEP_RE = re.compile(r"step:\s+(\d+)\s+loss:\s+([0-9.]+)\s+grad_norm:\s+([0-9.]+)")
 
 
 def read_arm(arm: str) -> tuple[list[int], list[float], list[float]]:
@@ -143,15 +148,17 @@ def main() -> int:
         binned: dict[int, list[float]] = {}
         for s, d in zip(common, delta):
             binned.setdefault(s // BIN * BIN, []).append(d)
-        b_tokens = [
-            (k + BIN / 2) * GBS * SEQ_LEN / 1e9 for k in sorted(binned)
-        ]
+        b_tokens = [(k + BIN / 2) * GBS * SEQ_LEN / 1e9 for k in sorted(binned)]
         b_delta = [sum(v) / len(v) for _, v in sorted(binned.items())]
-        ax.plot(b_tokens, b_delta, color="#d62728", lw=2.0,
-                label=f"{BIN}-step mean")
-        ax.fill_between(b_tokens, b_delta, 0,
-                        where=[d < 0 for d in b_delta],
-                        color="#d62728", alpha=0.15)
+        ax.plot(b_tokens, b_delta, color="#d62728", lw=2.0, label=f"{BIN}-step mean")
+        ax.fill_between(
+            b_tokens,
+            b_delta,
+            0,
+            where=[d < 0 for d in b_delta],
+            color="#d62728",
+            alpha=0.15,
+        )
         ax.legend(frameon=False, fontsize=9)
         ax.set_xlabel("tokens (B)")
         ax.set_ylabel("Mano loss  -  AdamW loss  (nats)")

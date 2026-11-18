@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Plot the 2B 100-step *production-batch* LR finder ladder (jobs 12469854-868).
 
 Companion to plot_2b_100step.py (which is the small-batch single-GBS run). This
@@ -10,18 +16,22 @@ batch size is shown by shade (light -> dark), line width (thin -> thick), and
 alpha (faint -> opaque) all increasing with GBS. Only batches whose CSV exists
 are drawn, so this is safe to run before the full ladder finishes.
 """
-import csv, os, glob
+import csv
+import glob
+import os
+
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.font_manager as fm
 import matplotlib.pyplot as plt
 
 # repo root = 4 levels up: scripts/ -> ezpz/ -> experiments/ -> torchtitan/ -> <root>
-REPO = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
+REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 BASE = f"{REPO}/outputs/lrfind-2b-100step-prod"
-FIGDIR = (f"{REPO}/torchtitan/experiments/ezpz/docs/experiments/"
-          f"lr-finder/agpt/2b/figures")
+FIGDIR = (
+    f"{REPO}/torchtitan/experiments/ezpz/docs/experiments/" f"lr-finder/agpt/2b/figures"
+)
 
 GBS_LADDER = [1536, 3072, 6144, 12288, 24576]
 OPTS = ["adamw", "mano", "sophiag"]
@@ -31,8 +41,9 @@ OPT_LABEL = {"adamw": "AdamW", "mano": "mano", "sophiag": "sophiag"}
 
 
 def house_style():
-    hits = glob.glob(f"{REPO}/.venv/**/ambivalent/stylefiles/ambivalent.mplstyle",
-                     recursive=True)
+    hits = glob.glob(
+        f"{REPO}/.venv/**/ambivalent/stylefiles/ambivalent.mplstyle", recursive=True
+    )
     iose = os.path.expanduser("~/.local/share/fonts/Iosevka")
     if os.path.isdir(iose):
         for f in os.listdir(iose):
@@ -40,7 +51,12 @@ def house_style():
                 fm.fontManager.addfont(os.path.join(iose, f))
     if hits:
         plt.style.use(hits[0])
-    plt.rcParams["font.family"] = ["Iosevka25", "Iosevka", "DejaVu Sans Mono", "monospace"]
+    plt.rcParams["font.family"] = [
+        "Iosevka25",
+        "Iosevka",
+        "DejaVu Sans Mono",
+        "monospace",
+    ]
 
 
 def smooth(ys, frac=0.10):
@@ -48,8 +64,11 @@ def smooth(ys, frac=0.10):
     if n < 4:
         return ys[:]
     w = max(2, int(n * frac))
-    return [sum(ys[max(0, i - w // 2):min(n, i + w // 2 + 1)]) /
-            (min(n, i + w // 2 + 1) - max(0, i - w // 2)) for i in range(n)]
+    return [
+        sum(ys[max(0, i - w // 2) : min(n, i + w // 2 + 1)])
+        / (min(n, i + w // 2 + 1) - max(0, i - w // 2))
+        for i in range(n)
+    ]
 
 
 def load(gbs, opt):
@@ -65,7 +84,8 @@ def load(gbs, opt):
         except (ValueError, TypeError, KeyError):
             continue
         if v == v:  # not NaN
-            lr.append(float(r["learning_rate"])); ls.append(v)
+            lr.append(float(r["learning_rate"]))
+            ls.append(v)
         else:
             nan += 1
     if not lr:
@@ -107,22 +127,42 @@ def plot_all_opts_all_gbs(gbs_list):
             ls = smooth(ls_raw)
             color, lw, alpha = shade_width_alpha(OPT_CMAP[opt], i, n)
             mi = min(range(len(ls)), key=lambda k: ls[k])
-            ax.plot(lr, ls, "-", lw=lw, color=color, alpha=alpha,
-                    label=f"{OPT_LABEL[opt]} gbs{gbs} -- "
-                          f"min {ls[mi]:.2f} @ {lr[mi]:.1e} ({nan} NaN)")
-            ax.scatter([lr[mi]], [ls[mi]], s=70, facecolors="none",
-                       edgecolors=color, linewidths=1.4, alpha=alpha, zorder=4)
+            ax.plot(
+                lr,
+                ls,
+                "-",
+                lw=lw,
+                color=color,
+                alpha=alpha,
+                label=f"{OPT_LABEL[opt]} gbs{gbs} -- "
+                f"min {ls[mi]:.2f} @ {lr[mi]:.1e} ({nan} NaN)",
+            )
+            ax.scatter(
+                [lr[mi]],
+                [ls[mi]],
+                s=70,
+                facecolors="none",
+                edgecolors=color,
+                linewidths=1.4,
+                alpha=alpha,
+                zorder=4,
+            )
     ax.set_xscale("log")
     # Minima cluster ~7.5-8.5; cap zooms into the basin (blow-ups run higher).
     ax.set_ylim(top=13)
     ax.set_xlabel("Learning rate")
     ax.set_ylabel("LR-finder smoothed loss")
     miss = [g for g in GBS_LADDER if g not in gbs_list]
-    sub = "complete ladder" if not miss else \
-        "PRELIMINARY -- pending " + ",".join(str(m) for m in miss)
-    ax.set_title("agpt 2B LR finder -- 100 steps, production GBS ladder (dp=192)\n"
-                 "hue=optimizer, shade/width/opacity=batch size; "
-                 f"all 0 NaN (y capped at 13)\n{sub}")
+    sub = (
+        "complete ladder"
+        if not miss
+        else "PRELIMINARY -- pending " + ",".join(str(m) for m in miss)
+    )
+    ax.set_title(
+        "agpt 2B LR finder -- 100 steps, production GBS ladder (dp=192)\n"
+        "hue=optimizer, shade/width/opacity=batch size; "
+        f"all 0 NaN (y capped at 13)\n{sub}"
+    )
     ax.legend(fontsize=7.5, ncol=3, loc="upper left")
     fig.tight_layout()
     out = f"{FIGDIR}/lr_finder_2b_100step_prod_all_opts_all_gbs.png"
@@ -143,20 +183,27 @@ def plot_minlr_vs_gbs(gbs_list):
             lr, ls_raw, _ = d
             ls = smooth(ls_raw)
             mi = min(range(len(ls)), key=lambda k: ls[k])
-            xs.append(gbs); ys.append(lr[mi])
+            xs.append(gbs)
+            ys.append(lr[mi])
         if xs:
-            ax.plot(xs, ys, "o-", color=OPT_COLOR[opt], lw=1.8, ms=8,
-                    label=OPT_LABEL[opt])
-    ax.set_xscale("log"); ax.set_yscale("log")
+            ax.plot(
+                xs, ys, "o-", color=OPT_COLOR[opt], lw=1.8, ms=8, label=OPT_LABEL[opt]
+            )
+    ax.set_xscale("log")
+    ax.set_yscale("log")
     ax.set_xticks(GBS_LADDER)
     ax.set_xticklabels([str(g) for g in GBS_LADDER])
     ax.set_xlabel("Global batch size (tokens/step ladder)")
     ax.set_ylabel("Optimal (min-loss) learning rate")
     miss = [g for g in GBS_LADDER if g not in gbs_list]
-    sub = "complete ladder" if not miss else \
-        "PRELIMINARY -- pending " + ",".join(str(m) for m in miss)
-    ax.set_title("agpt 2B optimal LR vs batch size -- 100-step sweeps (dp=192)\n"
-                 f"{sub}")
+    sub = (
+        "complete ladder"
+        if not miss
+        else "PRELIMINARY -- pending " + ",".join(str(m) for m in miss)
+    )
+    ax.set_title(
+        "agpt 2B optimal LR vs batch size -- 100-step sweeps (dp=192)\n" f"{sub}"
+    )
     ax.legend(fontsize=10)
     fig.tight_layout()
     out = f"{FIGDIR}/lr_finder_2b_100step_prod_minlr_vs_gbs.png"
