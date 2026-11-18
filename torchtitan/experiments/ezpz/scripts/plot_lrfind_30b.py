@@ -27,19 +27,26 @@ import os
 import matplotlib
 
 matplotlib.use("Agg")
+import sys  # noqa: E402
+from pathlib import Path  # noqa: E402
+
 import matplotlib.pyplot as plt
-from torchtitan.experiments.ezpz.utils.plot_style import apply_style
+
+# plot_style.py needs only matplotlib; importing it through the
+# torchtitan package would pull in torch via ezpz/__init__.py.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "utils"))
+from plot_style import apply_style, house_font  # noqa: E402
 
 apply_style()
 
 # Math text should match label family instead of falling back to DejaVu.
 plt.rcParams["mathtext.fontset"] = "custom"
-plt.rcParams["mathtext.rm"] = "Iosevka25"
-plt.rcParams["mathtext.it"] = "Iosevka25:italic"
-plt.rcParams["mathtext.bf"] = "Iosevka25:bold"
-plt.rcParams["mathtext.cal"] = "Iosevka25:italic"
-plt.rcParams["mathtext.sf"] = "Iosevka25"
-plt.rcParams["mathtext.tt"] = "Iosevka25"
+plt.rcParams["mathtext.rm"] = house_font()
+plt.rcParams["mathtext.it"] = f"{house_font()}:italic"
+plt.rcParams["mathtext.bf"] = f"{house_font()}:bold"
+plt.rcParams["mathtext.cal"] = f"{house_font()}:italic"
+plt.rcParams["mathtext.sf"] = house_font()
+plt.rcParams["mathtext.tt"] = house_font()
 
 REPO = "/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan"
 

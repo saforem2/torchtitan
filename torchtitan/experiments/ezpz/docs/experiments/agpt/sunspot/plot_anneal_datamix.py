@@ -30,9 +30,14 @@ import matplotlib
 
 matplotlib.use("Agg")
 
+import sys  # noqa: E402
+
 import matplotlib.pyplot as plt  # noqa: E402
 
-from torchtitan.experiments.ezpz.utils.plot_style import apply_style  # noqa: E402
+# plot_style.py needs only matplotlib; importing it through the
+# torchtitan package would pull in torch via ezpz/__init__.py.
+sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "utils"))
+from plot_style import apply_style  # noqa: E402
 
 apply_style()
 

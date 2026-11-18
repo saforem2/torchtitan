@@ -28,11 +28,16 @@ import matplotlib
 
 matplotlib.use("Agg")
 
-import matplotlib.pyplot as plt  # noqa: E402
-
 # ambivalent is required -- a silent fallback would hide style regressions.
 # uv pip install --no-deps "git+https://github.com/saforem2/ambivalent"
-from torchtitan.experiments.ezpz.utils.plot_style import apply_style  # noqa: E402
+import sys  # noqa: E402
+
+import matplotlib.pyplot as plt  # noqa: E402
+
+# plot_style.py needs only matplotlib; importing it through the
+# torchtitan package would pull in torch via ezpz/__init__.py.
+sys.path.insert(0, str(Path(__file__).resolve().parents[6] / "utils"))
+from plot_style import apply_style  # noqa: E402
 
 apply_style()
 FIGDIR = Path(__file__).parent / "figures"
