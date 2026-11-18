@@ -41,7 +41,10 @@
 #     CKPT="$HF" qsub torchtitan/experiments/ezpz/scripts/eval/eval_cpt_fwe_mmlu_aurora.sh
 #   done
 
-set -euo pipefail
+# No -u: lmod reads an unset ZSH_EVAL_CONTEXT and venv activate scripts
+# reference unbound variables, so nounset would kill the job before eval.
+set -eo pipefail
+unset ZSH_EVAL_CONTEXT 2>/dev/null || true
 
 module load frameworks/2026.1.0
 module load pti-gpu
@@ -56,7 +59,7 @@ export HF_DATASETS_OFFLINE=1
 
 # Aurora checkout path (canonical); fall back to PBS_O_WORKDIR if present.
 AURORA_REPO="/lus/flare/projects/AuroraGPT/foremans/projects/saforem2/torchtitan-ezpz"
-if [ -d "$AURORA_REPO/venvs/aurora/tt-lm-eval/bin/activate" ]; then
+if [ -f "$AURORA_REPO/venvs/aurora/tt-lm-eval/bin/activate" ]; then
     # shellcheck source=/dev/null
     source "$AURORA_REPO/venvs/aurora/tt-lm-eval/bin/activate"
 elif [ -n "${PBS_O_WORKDIR:-}" ] && [ -f "$PBS_O_WORKDIR/venvs/aurora/tt-lm-eval/bin/activate" ]; then

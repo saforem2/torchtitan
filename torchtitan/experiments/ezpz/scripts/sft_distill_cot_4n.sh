@@ -249,6 +249,7 @@ TEGU_SFT_ROOT=/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtit
 if [[ -d "$TEGU_SFT_ROOT" ]]; then _SFT_ROOT="$TEGU_SFT_ROOT"; else _SFT_ROOT="${SUBMIT_DIR}/outputs/sft"; fi
 CKPT_DIR="${CKPT_DIR:-$_SFT_ROOT/agpt2b-distill-cot-pretok-${NNODES}n-ep${NUM_EPOCHS}}"
 LOG_DIR="${LOG_DIR:-${SUBMIT_DIR}/logs/sft-distill-pretok-${NHOSTS_TRAIN}n-${PBS_JOBID%%.*}}"
+mkdir -p "${CKPT_DIR}" "${LOG_DIR}"
 
 GBS=$(( NGPUS_ACTIVE * 2 * 8 ))  # LBS=2 GAS=8 TP=1 => GBS = NGPU*LBS*GAS
 
