@@ -78,15 +78,24 @@ TRAIN_TOKENS=100000000000
 TRAINING_STEPS=$(( TRAIN_TOKENS / (GBS * SEQ_LEN) ))
 CKPT_INTERVAL=200
 CKPT_KEEP_LATEST_K=0
-# Prefer Tegu project space (per user: avoid /home fill); live chain stays on /home
-# until 190k, but new chains should write to Tegu. Env CKPT_DIR overrides.
+# New chains go to Tegu project space (avoid filling /home), but an existing
+# chain keeps its root: with no step-* in the new folder, CheckpointManager
+# falls back to the model-only MDS_ANNEAL_BASE and silently restarts the
+# optimizer and step count (Sunspot 12484882 resumed a stale Tegu step-71800
+# while the live /home chain was at step-143400). Env CKPT_DIR overrides.
+_ckpt_name="agpt-2b-cpt-fineweb-edu-n${NNODES}-gbs${GBS}"
+_ckpt_local="outputs/checkpoints/${_ckpt_name}"
+_ckpt_tegu="/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan/outputs/checkpoints/${_ckpt_name}"
 if [[ -z "${CKPT_DIR:-}" ]]; then
-  if [[ -d /lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan ]]; then
-    CKPT_DIR="/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan/outputs/checkpoints/agpt-2b-cpt-fineweb-edu-n${NNODES}-gbs${GBS}"
+  if compgen -G "${_ckpt_local}/step-*" >/dev/null; then
+    CKPT_DIR="${_ckpt_local}"
+  elif [[ -d /lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan ]]; then
+    CKPT_DIR="${_ckpt_tegu}"
   else
-    CKPT_DIR="outputs/checkpoints/agpt-2b-cpt-fineweb-edu-n${NNODES}-gbs${GBS}"
+    CKPT_DIR="${_ckpt_local}"
   fi
 fi
+echo "CKPT_DIR=${CKPT_DIR} (latest: $(ls -1d "${CKPT_DIR}"/step-* 2>/dev/null | sed 's#.*/step-##' | sort -n | tail -1))"
 # EXTRA_ARGS passthrough for CPT fork flags
 extra_args=()
 [[ -n "${EXTRA_ARGS:-}" ]] && read -ra extra_args <<< "${EXTRA_ARGS}"
