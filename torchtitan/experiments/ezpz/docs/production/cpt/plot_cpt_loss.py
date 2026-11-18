@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Plot 2B CPT (continued-pretraining) training-loss curves per data mix.
 
 Reads per-run TSV files (columns: step<TAB>loss) produced from the CPT job
@@ -16,16 +22,17 @@ import os
 import matplotlib
 
 matplotlib.use("Agg")
+import sys  # noqa: E402
+from pathlib import Path  # noqa: E402
+
 import matplotlib.pyplot as plt
 
-try:
-    # ezpz docs plots expect the ambivalent style; fall back silently if the
-    # optional IPython/ambivalent stack is missing (see feedback note).
-    import ambivalent
+# plot_style.py needs only matplotlib; importing it through the
+# torchtitan package would pull in torch via ezpz/__init__.py.
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "utils"))
+from plot_style import apply_style  # noqa: E402
 
-    plt.style.use(ambivalent.STYLES["ambivalent"])
-except Exception:
-    pass
+apply_style()
 
 # (label, tsv basename, final validation loss, color)
 RUNS = [
@@ -56,8 +63,13 @@ def read_tsv(path):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--data-dir", default=os.path.join(os.path.dirname(__file__), "figures"))
-    ap.add_argument("--out", default=os.path.join(os.path.dirname(__file__), "figures", "cpt_loss.svg"))
+    ap.add_argument(
+        "--data-dir", default=os.path.join(os.path.dirname(__file__), "figures")
+    )
+    ap.add_argument(
+        "--out",
+        default=os.path.join(os.path.dirname(__file__), "figures", "cpt_loss.svg"),
+    )
     args = ap.parse_args()
 
     fig, ax = plt.subplots(figsize=(9, 5.5))

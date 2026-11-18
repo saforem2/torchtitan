@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Plot the 30B GBS=960 LR-finder sweeps for AdamW / Mano / SophiaG.
 
 The finder writes a per-arm lr_vs_loss.png under outputs/, but outputs/ is
@@ -21,32 +27,26 @@ import os
 import matplotlib
 
 matplotlib.use("Agg")
+import sys  # noqa: E402
+from pathlib import Path  # noqa: E402
 
 import matplotlib.pyplot as plt
 
-# ambivalent is required -- silent fallback hides style regressions.
-import ambivalent  # noqa: F401
+# plot_style.py needs only matplotlib; importing it through the
+# torchtitan package would pull in torch via ezpz/__init__.py.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "utils"))
+from plot_style import apply_style, house_font  # noqa: E402
 
-plt.style.use(ambivalent.STYLES["ambivalent"])
+apply_style()
 
-# ambivalent sets IBM Plex Sans; these figures want Iosevka to match the rest
-# of the docs. Prepend rather than replace so the style's own fallback chain
-# still applies on a machine without Iosevka installed.
-plt.rcParams["font.family"] = "sans-serif"
-plt.rcParams["font.sans-serif"] = ["Iosevka"] + list(
-    plt.rcParams["font.sans-serif"]
-)
-# Math text otherwise renders in DejaVu and visibly disagrees with the labels.
+# Math text should match label family instead of falling back to DejaVu.
 plt.rcParams["mathtext.fontset"] = "custom"
-plt.rcParams["mathtext.rm"] = "Iosevka"
-plt.rcParams["mathtext.it"] = "Iosevka:italic"
-plt.rcParams["mathtext.bf"] = "Iosevka:bold"
-# fontset="custom" makes matplotlib resolve EVERY mathtext family, including
-# mathtext.cal, which defaults to "cursive" -- not installed here, so it warns
-# and falls back to DejaVu on every render. Point it at Iosevka too.
-plt.rcParams["mathtext.cal"] = "Iosevka:italic"
-plt.rcParams["mathtext.sf"] = "Iosevka"
-plt.rcParams["mathtext.tt"] = "Iosevka"
+plt.rcParams["mathtext.rm"] = house_font()
+plt.rcParams["mathtext.it"] = f"{house_font()}:italic"
+plt.rcParams["mathtext.bf"] = f"{house_font()}:bold"
+plt.rcParams["mathtext.cal"] = f"{house_font()}:italic"
+plt.rcParams["mathtext.sf"] = house_font()
+plt.rcParams["mathtext.tt"] = house_font()
 
 REPO = "/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan"
 
@@ -114,8 +114,13 @@ def main() -> int:
         lo = min(losses)
         at = lrs[losses.index(lo)]
         for a_ in (ax, axz):
-            a_.plot(lrs, losses, color=color, lw=1.7,
-                    label=f"{label}  (min {lo:.3f} @ {at:.2e})")
+            a_.plot(
+                lrs,
+                losses,
+                color=color,
+                lw=1.7,
+                label=f"{label}  (min {lo:.3f} @ {at:.2e})",
+            )
             # Mark the minimum and the Smith-2015 suggestion (blow-up / 10).
             # The suggestion sits well LEFT of the minimum by construction --
             # it buys stability margin, it is not the best-loss LR.
@@ -136,7 +141,9 @@ def main() -> int:
             mins.append(min(ls_))
     y_lo = min(mins) - 0.15
     y_hi = max(mins) + 1.20
-    print(f"zoom window: y in [{y_lo:.2f}, {y_hi:.2f}] from minima {[round(m,3) for m in mins]}")
+    print(
+        f"zoom window: y in [{y_lo:.2f}, {y_hi:.2f}] from minima {[round(m,3) for m in mins]}"
+    )
 
     ax.set_xscale("log")
     ax.set_xlabel("learning rate")
@@ -166,8 +173,7 @@ def main() -> int:
     axz.set_title(f"zoom: minima ({y_lo:.2f}-{y_hi:.2f} nats)")
     axz.legend(frameon=False, fontsize=8, loc="upper left")
 
-    fig.suptitle("30B LR finder, GBS=960, fineweb-edu", y=1.02,
-                 fontfamily="sans-serif")
+    fig.suptitle("30B LR finder, GBS=960, fineweb-edu", y=1.02, fontfamily="sans-serif")
 
     fig.tight_layout()
     for ext in ("svg", "png"):

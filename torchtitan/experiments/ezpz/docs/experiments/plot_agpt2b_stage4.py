@@ -11,44 +11,36 @@ companion Markdown report. Training curves are parsed from the retained job
 12478743 log when ``--training-log`` is supplied; otherwise the checked-in
 compact trajectory below is used so figures remain reproducible off-cluster.
 """
-
 from __future__ import annotations
 
 import argparse
 import ast
-import os
 import re
 from pathlib import Path
 
 import matplotlib
 
 matplotlib.use("Agg")
-# ambivalent is required — silent fallback hides style regressions.
-# Install with: uv pip install --no-deps "git+https://github.com/saforem2/ambivalent"
-import ambivalent  # noqa: E402
+import sys  # noqa: E402
+
 import matplotlib.pyplot as plt  # noqa: E402
-from matplotlib import font_manager as fm  # noqa: E402
 
-plt.style.use(ambivalent.STYLES["ambivalent"])
+# plot_style.py needs only matplotlib; importing it through the
+# torchtitan package would pull in torch via ezpz/__init__.py.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "utils"))
+from plot_style import apply_style, house_font  # noqa: E402
 
-# Iosevka may be a user-local drop-in; system installs are already discoverable.
-_IOSEVKA_DIR = Path(os.path.expanduser("~/.local/share/fonts/Iosevka"))
-if _IOSEVKA_DIR.is_dir():
-    for _font in _IOSEVKA_DIR.iterdir():
-        if _font.suffix.lower() in {".ttf", ".ttc", ".otf"}:
-            fm.fontManager.addfont(_font)
-plt.rcParams["font.family"] = ["Iosevka", "DejaVu Sans Mono", "monospace"]
-# Math text must match the label family instead of falling back to DejaVu.
+apply_style()
+
 plt.rcParams["mathtext.fontset"] = "custom"
-plt.rcParams["mathtext.rm"] = "Iosevka"
-plt.rcParams["mathtext.it"] = "Iosevka:italic"
-plt.rcParams["mathtext.bf"] = "Iosevka:bold"
-plt.rcParams["mathtext.sf"] = "Iosevka"
-plt.rcParams["mathtext.tt"] = "Iosevka"
+plt.rcParams["mathtext.rm"] = house_font()
+plt.rcParams["mathtext.it"] = f"{house_font()}:italic"
+plt.rcParams["mathtext.bf"] = f"{house_font()}:bold"
+plt.rcParams["mathtext.sf"] = house_font()
+plt.rcParams["mathtext.tt"] = house_font()
 # Transparent background is the house convention; the checkerboard in previews
 # is intentional transparency, not a rendering defect.
 plt.rcParams["savefig.transparent"] = True
-
 HERE = Path(__file__).parent
 FIGURES = HERE / "figures"
 

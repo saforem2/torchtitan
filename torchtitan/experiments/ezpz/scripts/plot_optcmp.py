@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Plot the fixed-batch optimizer comparison (AdamW / Mano / SophiaG).
 
 Reads loss + grad_norm straight from the arms' train.log files rather than
@@ -19,32 +25,26 @@ import matplotlib
 
 matplotlib.use("Agg")
 
+import sys  # noqa: E402
+from pathlib import Path  # noqa: E402
+
 import matplotlib.pyplot as plt
 
-# ambivalent is required -- silent fallback hides style regressions.
-# Install with: uv pip install --no-deps "git+https://github.com/saforem2/ambivalent"
-import ambivalent  # noqa: F401
+# plot_style.py needs only matplotlib; importing it through the
+# torchtitan package would pull in torch via ezpz/__init__.py.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "utils"))
+from plot_style import apply_style, house_font  # noqa: E402
 
-plt.style.use(ambivalent.STYLES["ambivalent"])
+apply_style()
 
-# ambivalent sets IBM Plex Sans; these figures want Iosevka to match the rest
-# of the docs. Prepend rather than replace so the style's own fallback chain
-# still applies on a machine without Iosevka installed.
-plt.rcParams["font.family"] = "sans-serif"
-plt.rcParams["font.sans-serif"] = ["Iosevka"] + list(
-    plt.rcParams["font.sans-serif"]
-)
-# Math text otherwise renders in DejaVu and visibly disagrees with the labels.
+# Math text should match label family instead of falling back to DejaVu.
 plt.rcParams["mathtext.fontset"] = "custom"
-plt.rcParams["mathtext.rm"] = "Iosevka"
-plt.rcParams["mathtext.it"] = "Iosevka:italic"
-plt.rcParams["mathtext.bf"] = "Iosevka:bold"
-# fontset="custom" makes matplotlib resolve EVERY mathtext family, including
-# mathtext.cal, which defaults to "cursive" -- not installed here, so it warns
-# and falls back to DejaVu on every render. Point it at Iosevka too.
-plt.rcParams["mathtext.cal"] = "Iosevka:italic"
-plt.rcParams["mathtext.sf"] = "Iosevka"
-plt.rcParams["mathtext.tt"] = "Iosevka"
+plt.rcParams["mathtext.rm"] = house_font()
+plt.rcParams["mathtext.it"] = f"{house_font()}:italic"
+plt.rcParams["mathtext.bf"] = f"{house_font()}:bold"
+plt.rcParams["mathtext.cal"] = f"{house_font()}:italic"
+plt.rcParams["mathtext.sf"] = house_font()
+plt.rcParams["mathtext.tt"] = house_font()
 
 REPO = "/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan"
 SEQ_LEN = 4096
@@ -60,14 +60,13 @@ ARMS = {
     "mano": ("Mano  (lr 5.61e-05)", "#d62728"),
     "sophiag": ("SophiaG  (lr 3.55e-05)", "#2ca02c"),
     "sophiag-fresh-seed1234": (
-        "SophiaG  fresh, seed 1234", "#9467bd",
+        "SophiaG  fresh, seed 1234",
+        "#9467bd",
     ),
 }
 
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
-STEP_RE = re.compile(
-    r"step:\s+(\d+)\s+loss:\s+([0-9.]+)\s+grad_norm:\s+([0-9.]+)"
-)
+STEP_RE = re.compile(r"step:\s+(\d+)\s+loss:\s+([0-9.]+)\s+grad_norm:\s+([0-9.]+)")
 
 
 def read_arm(arm: str) -> tuple[list[int], list[float], list[float]]:
@@ -156,15 +155,17 @@ def main() -> int:
         binned: dict[int, list[float]] = {}
         for s, d in zip(common, delta):
             binned.setdefault(s // BIN * BIN, []).append(d)
-        b_tokens = [
-            (k + BIN / 2) * GBS * SEQ_LEN / 1e9 for k in sorted(binned)
-        ]
+        b_tokens = [(k + BIN / 2) * GBS * SEQ_LEN / 1e9 for k in sorted(binned)]
         b_delta = [sum(v) / len(v) for _, v in sorted(binned.items())]
-        ax.plot(b_tokens, b_delta, color="#d62728", lw=2.0,
-                label=f"{BIN}-step mean")
-        ax.fill_between(b_tokens, b_delta, 0,
-                        where=[d < 0 for d in b_delta],
-                        color="#d62728", alpha=0.15)
+        ax.plot(b_tokens, b_delta, color="#d62728", lw=2.0, label=f"{BIN}-step mean")
+        ax.fill_between(
+            b_tokens,
+            b_delta,
+            0,
+            where=[d < 0 for d in b_delta],
+            color="#d62728",
+            alpha=0.15,
+        )
         ax.legend(frameon=False, fontsize=9)
         ax.set_xlabel("tokens (B)")
         ax.set_ylabel("Mano loss  -  AdamW loss  (nats)")

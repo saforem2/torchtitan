@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Plot training metrics for the MDS AuroraGPT-2B SophiaG continuation.
 
 Reads ``train_metrics.csv`` (lm_loss, grad_norm, tflops, tps_per_gpu) and
@@ -34,16 +40,16 @@ import matplotlib
 
 matplotlib.use("Agg")
 
+import sys  # noqa: E402
+
 import matplotlib.pyplot as plt
 
-# ambivalent is required — silent fallback hides style regressions.
-# Install with: uv pip install --no-deps "git+https://github.com/saforem2/ambivalent"
-import ambivalent  # noqa: F401
+# plot_style.py needs only matplotlib; importing it through the
+# torchtitan package would pull in torch via ezpz/__init__.py.
+sys.path.insert(0, str(Path(__file__).resolve().parents[5] / "utils"))
+from plot_style import apply_style  # noqa: E402
 
-plt.style.use(ambivalent.STYLES["ambivalent"])
-
-# Force monospace across every text element in every figure.
-plt.rcParams["font.family"] = "monospace"
+apply_style()
 
 DATA_DIR = Path(__file__).parent
 FIG_DIR = DATA_DIR.parent / "figures"
@@ -61,11 +67,15 @@ DEFAULT_START_ITER = 1000
 
 
 def load_train_metrics(
-    path: Path, start_iter: int,
+    path: Path,
+    start_iter: int,
 ) -> tuple[list[int], dict[str, list[float | None]]]:
     iters: list[int] = []
     cols: dict[str, list[float | None]] = {
-        "lm_loss": [], "grad_norm": [], "tflops": [], "tps_per_gpu": [],
+        "lm_loss": [],
+        "grad_norm": [],
+        "tflops": [],
+        "tps_per_gpu": [],
     }
     with path.open() as f:
         reader = csv.DictReader(f)
@@ -81,7 +91,8 @@ def load_train_metrics(
 
 
 def load_val(
-    path: Path, start_iter: int,
+    path: Path,
+    start_iter: int,
 ) -> tuple[list[int], list[float]]:
     iters: list[int] = []
     vals: list[float] = []
@@ -106,7 +117,8 @@ def ema(vals: list[float], alpha: float = 0.05) -> list[float]:
 
 
 def _drop_none(
-    iters: list[int], vals: list[float | None],
+    iters: list[int],
+    vals: list[float | None],
 ) -> tuple[list[int], list[float]]:
     keep_iters = []
     keep_vals = []
@@ -123,8 +135,14 @@ def _annotate_stages(ax, max_iter: int) -> None:
         if x <= max_iter:
             ax.axvline(x, color="#888", ls=":", lw=1)
             ax.text(
-                x, ymax - 0.03 * (ymax - ymin), label,
-                rotation=90, fontsize=8, va="top", ha="right", color="#666",
+                x,
+                ymax - 0.03 * (ymax - ymin),
+                label,
+                rotation=90,
+                fontsize=8,
+                va="top",
+                ha="right",
+                color="#666",
             )
 
 
@@ -160,29 +178,41 @@ def plot_val_loss(iters: list[int], vals: list[float], out_path: Path) -> None:
 
 
 def plot_train_val(
-    train_iters: list[int], train_vals: list[float],
-    val_iters: list[int], val_vals: list[float],
+    train_iters: list[int],
+    train_vals: list[float],
+    val_iters: list[int],
+    val_vals: list[float],
     out_path: Path,
 ) -> None:
     smooth = ema(train_vals, alpha=0.02)
     fig, ax = plt.subplots(figsize=(11, 5))
     ax.plot(
-        train_iters, train_vals, alpha=0.15, lw=0.6,
-        label="train (raw)", color="#3b82f6",
+        train_iters,
+        train_vals,
+        alpha=0.15,
+        lw=0.6,
+        label="train (raw)",
+        color="#3b82f6",
     )
     ax.plot(
-        train_iters, smooth, lw=1.4,
-        label="train (EMA α=0.02)", color="#1e3a8a",
+        train_iters,
+        smooth,
+        lw=1.4,
+        label="train (EMA α=0.02)",
+        color="#1e3a8a",
     )
     ax.plot(
-        val_iters, val_vals, marker="o", ms=3, lw=1.0,
-        label="validation", color="#dc2626",
+        val_iters,
+        val_vals,
+        marker="o",
+        ms=3,
+        lw=1.0,
+        label="validation",
+        color="#dc2626",
     )
     ax.set_xlabel("Training Iteration")
     ax.set_ylabel("LM Loss")
-    ax.set_title(
-        "AuroraGPT-2B (MDS, SophiaG, lr=2.17e-5) — Training + Validation Loss"
-    )
+    ax.set_title("AuroraGPT-2B (MDS, SophiaG, lr=2.17e-5) — Training + Validation Loss")
     last_iter = max(
         train_iters[-1] if train_iters else 0,
         val_iters[-1] if val_iters else 0,
@@ -215,7 +245,9 @@ def plot_grad_norm(iters: list[int], vals: list[float], out_path: Path) -> None:
 
 
 def _filter_below(
-    iters: list[int], vals: list[float], min_val: float,
+    iters: list[int],
+    vals: list[float],
+    min_val: float,
 ) -> tuple[list[int], list[float]]:
     """Drop (iter, val) pairs where val < min_val.
 
@@ -246,9 +278,7 @@ def plot_tflops(iters: list[int], vals: list[float], out_path: Path) -> None:
     ax.plot(iters, smooth, lw=1.4, label="EMA(α=0.05)", color="#581c87")
     ax.set_xlabel("Training Iteration")
     ax.set_ylabel("TFLOP/s (per replica)")
-    ax.set_title(
-        "AuroraGPT-2B (MDS, SophiaG, lr=2.17e-5) — Throughput (TFLOP/s)"
-    )
+    ax.set_title("AuroraGPT-2B (MDS, SophiaG, lr=2.17e-5) — Throughput (TFLOP/s)")
     _annotate_stages(ax, iters[-1] if iters else 0)
     ax.legend(loc="lower right")
     ax.grid(alpha=0.25)
@@ -268,9 +298,7 @@ def plot_tps(iters: list[int], vals: list[float], out_path: Path) -> None:
     ax.plot(iters, smooth, lw=1.4, label="EMA(α=0.05)", color="#7c2d12")
     ax.set_xlabel("Training Iteration")
     ax.set_ylabel("Tokens / GPU / sec")
-    ax.set_title(
-        "AuroraGPT-2B (MDS, SophiaG, lr=2.17e-5) — Throughput (TPS / GPU)"
-    )
+    ax.set_title("AuroraGPT-2B (MDS, SophiaG, lr=2.17e-5) — Throughput (TPS / GPU)")
     _annotate_stages(ax, iters[-1] if iters else 0)
     ax.legend(loc="lower right")
     ax.grid(alpha=0.25)
@@ -283,7 +311,9 @@ def plot_tps(iters: list[int], vals: list[float], out_path: Path) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--start-iter", type=int, default=DEFAULT_START_ITER,
+        "--start-iter",
+        type=int,
+        default=DEFAULT_START_ITER,
         help=f"Drop iterations below this value (default {DEFAULT_START_ITER})",
     )
     args = parser.parse_args()
@@ -302,7 +332,8 @@ def main() -> None:
         raise SystemExit(0)
 
     train_iters, train_cols = load_train_metrics(
-        DATA_DIR / "train_metrics.csv", args.start_iter,
+        DATA_DIR / "train_metrics.csv",
+        args.start_iter,
     )
     val_iters, val_vals = load_val(DATA_DIR / "val_loss.csv", args.start_iter)
 
@@ -322,7 +353,10 @@ def main() -> None:
     plot_train_loss(loss_iters, loss_vals, FIG_DIR / "train_loss.png")
     plot_val_loss(val_iters, val_vals, FIG_DIR / "val_loss.png")
     plot_train_val(
-        loss_iters, loss_vals, val_iters, val_vals,
+        loss_iters,
+        loss_vals,
+        val_iters,
+        val_vals,
         FIG_DIR / "train_val_loss.png",
     )
     plot_grad_norm(gn_iters, gn_vals, FIG_DIR / "grad_norm.png")

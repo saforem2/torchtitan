@@ -1,22 +1,28 @@
 #!/usr/bin/env python3
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Live agpt-2b GRPO reward dashboard -- kitcat inline rendering, ambivalent +
 transparent + Iosevka styling, auto-fit to the terminal's available pixel space.
 
 Run in a kitty terminal:  /tmp/kitcat-venv/bin/python /tmp/rl_dash.py
 It loops: refresh the TSV via rl_feed.sh, then redraw inline. Ctrl-C to stop.
 """
-import os
-import sys
 import glob
-import time
+import os
 import subprocess
+import sys
+import time
 
 import matplotlib
 
 matplotlib.use("module://kitcat")  # kitcat backend -> inline kitty graphics
+import ambivalent
 import matplotlib.pyplot as plt
 from matplotlib import font_manager as fm
-import ambivalent
 
 TSV = os.environ.get("RL_TSV", "/tmp/rl_reward.tsv")
 FEED = os.environ.get("RL_FEED", "/tmp/rl_feed.sh")
@@ -37,8 +43,10 @@ for d in (os.path.expanduser("~/Library/Fonts"), "/Library/Fonts"):
 plt.style.use(ambivalent.STYLES["ambivalent"])
 _ios = sorted({f.name for f in fm.fontManager.ttflist if "iosevka" in f.name.lower()})
 if _ios:
-    # prefer a plain "Iosevka"/"Iosevka Term" family if present
-    pref = next((n for n in _ios if n.lower() in ("iosevka", "iosevka term")), _ios[0])
+    pref = next(
+        (n for n in _ios if n.lower() in ("iosevka25", "iosevka", "iosevka term")),
+        _ios[0],
+    )
     plt.rcParams["font.family"] = pref
 plt.rcParams["savefig.transparent"] = True
 plt.rcParams["figure.facecolor"] = "none"
