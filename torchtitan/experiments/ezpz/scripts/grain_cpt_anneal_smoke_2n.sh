@@ -53,8 +53,8 @@ python3 -c "import torch;print('torch:  ',torch.__version__)" 2>&1 | tail -1 | t
 echo "" | tee -a "${LOG}"
 echo "--- import probe ---" | tee -a "${LOG}"
 mpiexec -n 1 --ppn 1 "${VENV}/bin/python" -c "
-from torchtitan.experiments.ezpz.agpt.config_registry import _agpt_2b_grain_cpt_anneal
-cfg=_agpt_2b_grain_cpt_anneal()
+from torchtitan.experiments.ezpz.agpt.config_registry import agpt_2b_grain_cpt_anneal
+cfg=agpt_2b_grain_cpt_anneal()
 print('IMPORT_OK', cfg.training.steps)
 " 2>&1 | tee -a "${LOG}"
 if ! grep -q "IMPORT_OK" "${LOG}"; then echo "VERDICT: import_failed" | tee -a "${LOG}"; exit 1; fi
