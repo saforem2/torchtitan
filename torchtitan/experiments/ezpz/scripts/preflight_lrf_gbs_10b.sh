@@ -4,7 +4,7 @@
 #   (1) submit_lr_finder_sirius.sh has LRF_MAX_LR=1e-1 default
 #   (2) config_registry.py has agpt_10b_olmo2tok_smoke
 #   (3) GBS values 32/512/2048 are power-of-2 and world_size-compatible
-#   (4) GAS for GBS_VALUES is power-of-2, <=32, finite (LBS-adjusted: 1 for <1024, 2 for >=1024; GBS=2048 GAS=32 via LBS=2 — see sirius.sh auto-LBS block)
+#   (4) GAS for GBS_VALUES is power-of-2, <=32, finite (LBS-adjusted: 1 for <1024, 2 for >=1024; GBS=2048 GAS=32 via LBS=2 -- see sirius.sh auto-LBS block)
 #   (5) ladder script references submit_lr_finder_sirius.sh and has exactly GBS_VALUES=(32 512 2048)
 #
 # Usage:

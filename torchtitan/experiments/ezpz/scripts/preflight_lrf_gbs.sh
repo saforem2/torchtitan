@@ -4,7 +4,7 @@
 #   (1) submit_lr_finder_sirius.sh has LRF_MAX_LR=1e-1 default
 #   (2) config_registry.py has agpt_5b_olmo2tok_smoke
 #   (3) GBS values 32/512/2048 are power-of-2 and world_size-compatible
-#   (4) GAS for GBS_VALUES is power-of-2, <=32, finite (LBS-adjusted: 1 for <1024, 2 for >=1024; GBS=2048 GAS=32 via LBS=2 — see sirius.sh auto-LBS block)
+#   (4) GAS for GBS_VALUES is power-of-2, <=32, finite (LBS-adjusted: 1 for <1024, 2 for >=1024; GBS=2048 GAS=32 via LBS=2 -- see sirius.sh auto-LBS block)
 # Usage:
 #   bash torchtitan/experiments/ezpz/scripts/preflight_lrf_gbs.sh
 # Exits 0 on all PASS, 1 on any FAIL.
@@ -136,7 +136,7 @@ for gbs in "${GBS_VALUES[@]}"; do
     else
         LBS=1
     fi
-    # GAS = GBS * 4096 / (LBS * 4096 * 32) — keep as integer math, check divisibility
+    # GAS = GBS * 4096 / (LBS * 4096 * 32) -- keep as integer math, check divisibility
     _gas_num=$(( gbs * LRF_SEQ_LEN ))
     _gas_den=$(( LBS * LRF_SEQ_LEN * DP ))
     if (( _gas_num % _gas_den != 0 )); then
