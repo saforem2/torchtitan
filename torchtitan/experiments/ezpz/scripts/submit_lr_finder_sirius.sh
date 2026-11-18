@@ -1,7 +1,8 @@
 #!/bin/bash --login
 #PBS -A datascience
 #PBS -N agpt-lr-finder-sirius
-#PBS -l walltime=06:00:00
+#PBS -l walltime=12:00:00
+# walltime 12:00 required for GBS512+ (GAS 16+); 6h killed GBS512 at 127/150 -- GBS2048 also 12h with LBS=2
 #PBS -l filesystems=home:tegu
 #PBS -l select=8
 #PBS -q workq
@@ -39,7 +40,6 @@ export LD_LIBRARY_PATH="${HOME}/.local/mpi-compat:${LD_LIBRARY_PATH}"
 VENV_DIR="${HOME}/torchtitan/.venv"
 source "${VENV_DIR}/bin/activate"
 # Config registry uses relative ./assets/hf/... (correct from torchtitan checkout).
-export TORCHTITAN_ROOT="${HOME}/torchtitan"
 MODEL_SIZE="${MODEL_SIZE:-5b}"
 export LRF_CONFIG="agpt_${MODEL_SIZE}_olmo2tok_smoke"
 export LRF_OPTIMIZERS="${LRF_OPTIMIZERS:-adamw mano}"
@@ -58,10 +58,36 @@ export LRF_SKIP_MODULE_LOAD=1
 export NGPU_PER_HOST=4
 export LRF_USE_CONFIG_DATALOADER=1
 export LRF_DUMP_FOLDER="outputs/lr_finder_${LRF_MODE}_${MODEL_SIZE}_olmo2tok_gbs${LRF_GBS}_${LRF_OPTIMIZERS// /-}_${PBS_JOBID%%.*}"
+# Auto-adjust LBS at large GBS to keep GAS bounded (prevents NCCL 300s timeout from
+# 64 microbatch accumulations -- observed on GBS2048 with dp=32 LBS=1 -> GAS=64:
+# 3 steps in 33 min vs GBS512 GAS=16 16 steps in 74 min). Smoke config uses
+# _use_hf_streaming where num_tokens_per_microbatch_per_dp_rank = LBS*SEQ_LEN,
+# so LBS=2 doubles tokens per microbatch safely within 4096 ctx.
+if (( LRF_GBS >= 1024 )); then
+  if [[ "${LRF_LBS}" == "1" ]]; then
+    LRF_LBS=2
+    export LRF_LBS
+    echo "LRF_GBS=${LRF_GBS} >= 1024 -> auto-raised LRF_LBS=2 to halve GAS" >&2
+  else
+    echo "WARNING: LRF_GBS=${LRF_GBS} >= 1024 but LRF_LBS=${LRF_LBS} already set -- not overriding" >&2
+  fi
+fi
+# Safety: GBS must split evenly into LBS x dp (dp 32 on Sirius 8N = 32 ranks),
+# or the trainer rejects it only after distributed init; then cap GAS at 32.
+if (( LRF_GBS % (LRF_LBS * 32) != 0 )); then
+  echo "ERROR: GBS=${LRF_GBS} is not divisible by LBS=${LRF_LBS} x dp=32" >&2
+  exit 1
+fi
+_LRF_GAS=$(( LRF_GBS / LRF_LBS / 32 ))
+if (( _LRF_GAS > 32 )); then
+  echo "ERROR: GAS=${_LRF_GAS} (GBS=${LRF_GBS}/LBS=${LRF_LBS}/dp=32) exceeds 32 -- reduce LRF_GBS or increase LRF_LBS" >&2
+  exit 1
+fi
+unset _LRF_GAS
 echo "=========================================================="
 echo " OLMo-2 LR finder on Sirius (shared-NFS, no yeet)"
 echo "   MODEL_SIZE=${MODEL_SIZE} config=${LRF_CONFIG}"
-echo "   GBS/LBS=${LRF_GBS}/${LRF_LBS} @ 8N (dp 32, GAS 4)"
+echo "   GBS/LBS=${LRF_GBS}/${LRF_LBS} @ 8N (dp 32, GAS varies with GBS)"
 echo "   LR window=${LRF_INIT_LR} -> ${LRF_MAX_LR} opts=${LRF_OPTIMIZERS}"
 echo "=========================================================="
 # Inline the Model×Optimizer loop without yeet-env (shared-NFS path)
@@ -84,7 +110,8 @@ for model in ${MODEL_SIZE}; do
       --training.num-tokens-per-train-step "$(( LRF_GBS * LRF_SEQ_LEN ))" \
       --training.max-context-length "${LRF_SEQ_LEN}" \
       --metrics.log_freq 1 \
-      --checkpoint.enable --checkpoint.folder "checkpoints/lr_finder_${model}_${opt}_gbs${LRF_GBS}" \
+      --dump-folder "${LRF_DUMP_FOLDER}" \
+      --checkpoint.enable --checkpoint.folder "checkpoints/lr_finder_${model}_${opt}_gbs${LRF_GBS}_lbs${LRF_LBS}" \
       --checkpoint.interval 5 --checkpoint.no-last-save-model-only \
       --checkpoint.async-mode disabled \
       --lr_finder.enable --lr_finder.init_lr "${LRF_INIT_LR}" \

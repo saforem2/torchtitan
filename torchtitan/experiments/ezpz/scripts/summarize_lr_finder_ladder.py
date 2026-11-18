@@ -55,27 +55,21 @@ def _read(csv_path: str) -> tuple[list[float], list[float]]:
 
 
 def _find_csv(root: str, size: str, opt: str) -> str | None:
-    # run_lr_finder.sh writes under <dump>/lr_finder/ezpz/ezpz.agpt/<flavor>/<opt>/.
+    # run_lr_finder.sh writes under <dump>/lr_finder/ezpz/ezpz.agpt/<flavor>/<opt>/,
+    # and lr_finder.py now adds a gbs<N>/ (or tokens<N>/) level below <opt>.
     # Glob rather than reconstruct: the flavor segment has varied across
     # campaigns (30b vs 30b_olmo2tok), and a wrong guess reads as "no data".
-    pat = os.path.join(
-        root,
-        f"lr_finder_*{size}_olmo2tok_gbs6144*{opt}*",
-        "**",
-        opt,
-        "lr_finder_data.csv",
-    )
-    hits = sorted(glob.glob(pat, recursive=True), key=os.path.getmtime)
+    def _glob(dump: str) -> list[str]:
+        hits: list[str] = []
+        for leaf in ((opt,), (opt, "gbs*"), (opt, "tokens*")):
+            pat = os.path.join(root, dump, "**", *leaf, "lr_finder_data.csv")
+            hits += glob.glob(pat, recursive=True)
+        return sorted(set(hits), key=os.path.getmtime)
+
+    hits = _glob(f"lr_finder_*{size}_olmo2tok_gbs6144*{opt}*")
     if not hits:
         # adamw's first submissions predate the per-optimizer dump suffix.
-        pat = os.path.join(
-            root,
-            f"lr_finder_{size}_olmo2tok_gbs6144",
-            "**",
-            opt,
-            "lr_finder_data.csv",
-        )
-        hits = sorted(glob.glob(pat, recursive=True), key=os.path.getmtime)
+        hits = _glob(f"lr_finder_{size}_olmo2tok_gbs6144")
     return hits[-1] if hits else None
 
 
