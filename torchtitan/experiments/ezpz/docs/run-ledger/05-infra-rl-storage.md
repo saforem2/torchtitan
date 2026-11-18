@@ -211,4 +211,3 @@ Decision gate (per `SYNTHESIS.md:260-264` RL-specific gates): if accuracy lift i
 | VENV refs: xpu-torch216-sync-5a7a622f16, rl-monarch-torch214-locality-20261001, frameworks/2026.1.0 | `torchtitan/experiments/ezpz/scripts/cpt_fineweb_edu_4n.sh:52-65`, `torchtitan/experiments/ezpz/scripts/sft_distill_cot_4n.sh:98-113`, `torchtitan/experiments/ezpz/scripts/eval/submit_cot_eval.sh:16-21` |
 | Storage routing c519de37a5, Tegu prefer vs /home live 15T, PBS `tegu:home` | `c519de37a5` diff (commit message + 4-file stat), `cpt_fineweb_edu_4n.sh:5,39-44,83-89`, `sft_distill_cot_4n.sh:228-233` |
 | CPT VENV LD-first vs SFT VENV LD prepend | `cpt_fineweb_edu_4n.sh:54-65` vs `sft_distill_cot_4n.sh:99-103` |
-

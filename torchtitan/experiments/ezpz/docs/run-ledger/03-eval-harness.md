@@ -382,4 +382,3 @@ Source: `thread-c-eval-harness.md:528-526` operational constraints, `SYNTHESIS.m
 - Decision gates G1-G4 + E2 sweep + thresholds + walltime: `torchtitan/experiments/ezpz/docs/exploration/SYNTHESIS.md` §§3-5 — E2 sweep p.68-77, G1-G4 table p.229-238 (HS>=0.540, AE>=0.621, PIQA>=0.713, MMLU>=0.240, CoT>=0.265)
 - Eval scripts: `torchtitan/experiments/ezpz/scripts/eval/submit_cot_eval.sh` (PBS, VENV, qsub contract p.10,33-34), `torchtitan/experiments/ezpz/scripts/eval/eval_cot_gsm8k.py` (dataset/ prompting/ generation 152-175/ scoring 30-84/ summarize 118-131), `torchtitan/experiments/ezpz/scripts/eval/mmlu_letter_baseline.py` (constant-letter baselines)
 - Eval strategy Tier A/B/C + SHOTS_SPEC + peer numbers: `torchtitan/experiments/ezpz/docs/evals/eval-landscape-2026-07.md` — Tier C deferral (IFEval/BBH/GPQA/MATH/HumanEval ~0 on base)
-
