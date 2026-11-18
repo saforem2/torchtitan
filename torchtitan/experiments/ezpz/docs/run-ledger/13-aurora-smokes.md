@@ -92,3 +92,14 @@ Script still **submitted-intent correct**: same VENV/PBS adaptation as Grain smo
    - Or convert Aurora's `pytorch_model.bin` to safetensors on Aurora: `python -c "import torch; from safetensors.torch import save_file; sd=torch.load('.../pytorch_model.bin', map_location='cpu'); save_file(sd, '.../model-00001-of-00001.safetensors')"` + copy `tokenizer.*` + write `config.json` matching Sunspot HF layout, then convert DCP via `torchtitan` DCP converter to `.../step-0/.metadata` — but rsync of already-converted Sunspot HF is simpler and canonical (job `12484888` verified 9/9).
    - Then submit: `MDS154391_SFT_BASE=/lus/flare/projects/AuroraGPT/foremans/artifacts/agpt-2b-cpt-fwe-step136800-hf MDS154391_SFT_DCP=/lus/flare/projects/AuroraGPT/foremans/artifacts/agpt-2b-cpt-fwe-step136800-dcp qsub torchtitan/experiments/ezpz/scripts/sft_mcq_probe_smoke_aurora.sh` from `/lus/flare/.../torchtitan`. Script will pass `_have_base=1` and run the 20-step Grain SFT.
 3. **On success (either machine):** Scale to full SFT (1N 900 steps same 40/30/20/10 mix) then re-eval CoT + MMLU MCF; gate RL GRPO only after `format >= 0.90` (`13-sft-mcq-smoke.md:60-64`, `09-gate-rl-probe.md` G1-G4).
+
+## Outcomes (2026-11-18, read from the PBS output files)
+
+Both Aurora `capacity` smokes ran and stopped before training (`Exit_status=1`).
+
+| Job | Script | Verdict | Cause |
+|---|---|---|---|
+| `9101507` | `grain_cpt_anneal_smoke_aurora.sh` | `import_failed` | The probe imported `_agpt_2b_grain_cpt_anneal`; the registry defines `agpt_2b_grain_cpt_anneal`. Fixed in the probe. |
+| `9101512` | `sft_mcq_probe_smoke_aurora.sh` | `import_failed` | `MDS154391 HF checkpoint missing at /lus/tegu/...step154391-hf`. Aurora has no Tegu mount and no staged base. |
+
+The Grain anneal configs are also Sunspot-only as written: `_FINEWEB_EDU_DIR` points at `/lus/tegu/projects/datasets/datasets/fineweb-edu-100BT/sample/100BT` with no override, so the Aurora smoke cannot pass until those 16 shards are staged on flare or the smoke runs on Sunspot. With stub base checkpoints and 16 stub shards, `agpt_2b_grain_cpt_anneal`, `agpt_2b_grain_cpt_anneal_at` and `agpt_2b_mds_sft_mcq_template_probe_streaming` all parse through `ConfigManager` on a laptop.
