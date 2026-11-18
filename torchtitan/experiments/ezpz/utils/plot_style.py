@@ -1,8 +1,14 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Shared chart styling for ezpz plots.
 
-Applies the ``ambivalent`` matplotlib stylesheet and registers Iosevka
-(downloaded to ``~/.local/share/fonts/Iosevka/``) so every chart uses
-the same monospace face.
+Applies the ``ambivalent`` matplotlib stylesheet and registers Iosevka25
+(preferred) with Iosevka fallback, so every chart uses the house
+monospace face.
 
 Import side-effect: calling ``apply_style()`` is idempotent. The
 caller imports this module before creating any figures.
@@ -16,7 +22,6 @@ Reproduce font setup once per machine (login node, with proxy):
 from __future__ import annotations
 
 import importlib.util
-import warnings
 from pathlib import Path
 
 import matplotlib  # noqa: F401
@@ -24,6 +29,7 @@ import matplotlib.font_manager as _fm
 import matplotlib.pyplot as plt
 
 _IOSEVKA_DIR = Path.home() / ".local/share/fonts/Iosevka"
+_HOUSE_FONTS = ("Iosevka25", "Iosevka")
 
 _applied = False
 
@@ -51,30 +57,54 @@ def _ambivalent_stylefile() -> str | None:
     return None
 
 
-def apply_style(font_family: str | list[str] = "Iosevka") -> None:
-    """Apply ambivalent style + Iosevka font (idempotent).
-
-    Import-safe in environments without IPython (e.g. the XPU training
-    .venv): loads the ambivalent stylesheet from its file rather than
-    importing the package. Falls back to matplotlib defaults with a warning
-    if the stylesheet can't be located.
-    """
-    global _applied
-    if _applied:
-        return
+def _register_iosevka() -> None:
     if _IOSEVKA_DIR.is_dir():
         for f in _IOSEVKA_DIR.iterdir():
             if f.suffix.lower() in (".ttf", ".ttc", ".otf"):
                 _fm.fontManager.addfont(str(f))
+
+
+def house_font() -> str:
+    """The first installed house face: Iosevka25, then Iosevka.
+
+    ``font.family`` takes a fallback list, but ``mathtext.*`` take a single
+    family, so scripts that set custom mathtext use this instead of naming
+    Iosevka25 directly (which would drop math labels to DejaVu whenever only
+    Iosevka is installed).
+    """
+    _register_iosevka()
+    installed = {f.name for f in _fm.fontManager.ttflist}
+    for family in _HOUSE_FONTS:
+        if family in installed:
+            return family
+    return "DejaVu Sans Mono"
+
+
+def apply_style(font_family: str | list[str] = "Iosevka25") -> None:
+    """Apply ambivalent style + Iosevka25/Iosevka font (idempotent).
+
+    Import-safe in environments without IPython (e.g. the XPU training
+    .venv): loads the ambivalent stylesheet from its file rather than
+    importing the package.
+
+    Raises:
+        RuntimeError: If the ambivalent stylesheet cannot be located. A
+            silent fallback to matplotlib defaults would publish charts that
+            look nothing like the rest; callers that can live without the
+            style (the in-process LR finder) catch this.
+    """
+    global _applied
+    if _applied:
+        return
+    _register_iosevka()
     stylefile = _ambivalent_stylefile()
-    if stylefile is not None:
-        plt.style.use(stylefile)
-    else:
-        warnings.warn(
-            "ambivalent stylesheet not found; using matplotlib defaults",
-            stacklevel=2,
+    if stylefile is None:
+        raise RuntimeError(
+            "ambivalent stylesheet not found; install it in this environment "
+            "(uv pip install ambivalent)"
         )
+    plt.style.use(stylefile)
     if isinstance(font_family, str):
-        font_family = [font_family, "DejaVu Sans Mono", "monospace"]
+        font_family = [font_family, "Iosevka", "DejaVu Sans Mono", "monospace"]
     plt.rcParams["font.family"] = font_family
     _applied = True

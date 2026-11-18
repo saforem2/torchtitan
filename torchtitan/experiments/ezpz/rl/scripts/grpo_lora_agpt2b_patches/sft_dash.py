@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Live CoT-SFT training dashboard (kitcat inline, ambivalent + Iosevka).
 
 Self-contained: reads the run's TRL log directly (over SSH, or locally with
@@ -14,18 +20,19 @@ Run in a kitty terminal:
 Env: RL_INTERVAL (sec, default 30), RL_LOCAL=1, RL_SSH (default 'sunspot'),
      RL_SOCK (control socket), RL_BACKING (force HiDPI factor).
 """
-import os
-import sys
-import re
-import time
 import glob
+import os
+import re
 import subprocess
+import sys
+import time
 
 import matplotlib
+
 matplotlib.use("module://kitcat")
+import ambivalent
 import matplotlib.pyplot as plt
 from matplotlib import font_manager as fm
-import ambivalent
 
 
 # ---- HiDPI fix: make kitcat render at true device resolution --------------
@@ -33,9 +40,10 @@ import ambivalent
 # renders at logical px on macOS and kitty upscales -> aliasing; we render at
 # device px with an unchanged placeholder grid.)
 def _tty_query(seq, timeout=0.3):
+    import select
     import termios
     import tty as _tty
-    import select
+
     if "TMUX" in os.environ:
         seq = "\033Ptmux;" + seq.replace("\033", "\033\033") + "\033\\"
     try:
@@ -69,6 +77,7 @@ def _backing_and_cells():
     import array
     import fcntl
     import termios
+
     buf = array.array("H", [0, 0, 0, 0])
     try:
         fcntl.ioctl(sys.stdout, termios.TIOCGWINSZ, buf)
@@ -98,26 +107,30 @@ if sys.stdout.isatty():
     try:
         _BACKING, _DEV_CW, _DEV_CH = _backing_and_cells()
         if _BACKING > 1.0:
+            import kitcat.backend as _kb
             import kitcat.terminal_query as _ktq
             import kitcat.utils as _ku
-            import kitcat.backend as _kb
+
             for _m in (_ktq, _ku, _kb):
                 _m.get_dpi_scale = lambda: _BACKING
             _ku.get_char_cell_width = lambda: max(1, int(round(_DEV_CW)))
             _ku.get_char_cell_height = lambda: max(1, int(round(_DEV_CH)))
-            print("kitcat HiDPI: backing=%.2f cell=%dx%d(dev)"
-                  % (_BACKING, round(_DEV_CW), round(_DEV_CH)))
+            print(
+                "kitcat HiDPI: backing=%.2f cell=%dx%d(dev)"
+                % (_BACKING, round(_DEV_CW), round(_DEV_CH))
+            )
     except Exception as _e:
         print("kitcat HiDPI patch skipped:", _e)
 
 
 # ---- config --------------------------------------------------------------
-REPO = ("/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan")
+REPO = "/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan"
 # default: newest CoT-SFT run log; override with --log (accepts MULTIPLE globs to
 # overlay several runs on shared panels, e.g.
 #   sft_dash.py --log 'logs/grpo-...-12471085/run.log' 'logs/grpo-...-fast-*/run.log'
 RUN_LOG_GLOB = os.environ.get(
-    "SFT_LOG_GLOB", "logs/sft-agpt2b-gsm8k-r1cot-8n-*/run.log")
+    "SFT_LOG_GLOB", "logs/sft-agpt2b-gsm8k-r1cot-8n-*/run.log"
+)
 RUN_GLOBS = [RUN_LOG_GLOB]  # overridden from argv in __main__
 # --auto <glob>: expand to EVERY matching run.log each refresh (auto-discovers new
 # runs). Default watches all CoT GRPO runs. Set to "" to disable auto mode.
@@ -140,6 +153,7 @@ FONT_SCALE = float(os.environ.get("RL_FONT_SCALE", "1.35"))
 def fs(base):
     """Scaled font size."""
     return base * FONT_SCALE
+
 
 # Metric panels for each run type. TRL's SFTTrainer and GRPOTrainer both emit
 # dict-log lines in the same shape, but different KEYS -- so we auto-detect
@@ -171,9 +185,14 @@ def pick_metrics(rows):
     present = [m for m in base if m[0] in keys]
     return present or base
 
+
 # ---- style: ambivalent + Iosevka + transparent ---------------------------
-for d in (os.path.expanduser("~/Library/Fonts"), "/Library/Fonts",
-          os.path.expanduser("~/.local/share/fonts"), "/usr/share/fonts"):
+for d in (
+    os.path.expanduser("~/Library/Fonts"),
+    "/Library/Fonts",
+    os.path.expanduser("~/.local/share/fonts"),
+    "/usr/share/fonts",
+):
     for f in glob.glob(os.path.join(d, "**", "Iosevka*.tt*"), recursive=True):
         try:
             fm.fontManager.addfont(f)
@@ -183,7 +202,9 @@ plt.style.use(ambivalent.STYLES["ambivalent"])
 _ios = sorted({f.name for f in fm.fontManager.ttflist if "iosevka" in f.name.lower()})
 if _ios:
     plt.rcParams["font.family"] = next(
-        (n for n in _ios if n.lower() in ("iosevka", "iosevka term")), _ios[0])
+        (n for n in _ios if n.lower() in ("iosevka25", "iosevka", "iosevka term")),
+        _ios[0],
+    )
 # Material Design 500-level palette (well-spread hues, distinct at a glance),
 # installed as the prop_cycle so the C0..CN refs used everywhere resolve to it.
 MATERIAL = [
@@ -199,15 +220,17 @@ MATERIAL = [
     "#607D8B",  # blue-grey
 ]
 from cycler import cycler  # noqa: E402
+
 plt.rcParams["axes.prop_cycle"] = cycler(color=MATERIAL)
-plt.rcParams.update({"savefig.transparent": True, "figure.facecolor": "none",
-                     "axes.facecolor": "none"})
+plt.rcParams.update(
+    {"savefig.transparent": True, "figure.facecolor": "none", "axes.facecolor": "none"}
+)
 
 
 # remote python that resolves the newest matching log and emits its metric rows.
 # Handles both TRL SFTTrainer ('loss'/'train_loss'/'mean_token_accuracy') and
 # GRPOTrainer ('reward'/'reward_std'/'kl'/'completions/mean_length') dict-lines.
-_AGG = r'''
+_AGG = r"""
 import glob, json, os, re, sys
 os.chdir("%s")
 paths = sorted(glob.glob(%r))
@@ -236,7 +259,7 @@ for line in open(log, errors="replace"):
         elif "loss" in d or "reward" in d:
             rows.append(d)
 print(json.dumps({"rows": rows, "final": final, "log": os.path.basename(os.path.dirname(log))}))
-'''  # NOTE: format at call time with the CURRENT glob (see fetch), not here --
+"""  # NOTE: format at call time with the CURRENT glob (see fetch), not here --
 # an early `% (REPO, RUN_LOG_GLOB)` would bake in the module-load glob and make
 # the --log override a no-op.
 
@@ -245,16 +268,22 @@ def fetch(glob_pat=None):
     # Format the remote script HERE (not at module load) so the glob applies.
     agg = _AGG % (REPO, glob_pat if glob_pat is not None else RUN_LOG_GLOB)
     if LOCAL:
-        r = subprocess.run([sys.executable, "-c", agg],
-                           capture_output=True, text=True, timeout=90)
+        r = subprocess.run(
+            [sys.executable, "-c", agg], capture_output=True, text=True, timeout=90
+        )
     else:
         import base64
+
         b64 = base64.b64encode(agg.encode()).decode()
         remote = "echo %s | base64 -d | python3" % b64
         r = subprocess.run(
             ["ssh", "-o", "ControlPath=" + SOCK, SSH_TGT, remote],
-            capture_output=True, text=True, timeout=90)
+            capture_output=True,
+            text=True,
+            timeout=90,
+        )
     import json
+
     for line in r.stdout.splitlines():
         line = line.strip()
         if line.startswith("{"):
@@ -277,16 +306,27 @@ _LIST = (
 def list_runs(glob_pat):
     script = _LIST % (REPO, glob_pat)
     if LOCAL:
-        r = subprocess.run([sys.executable, "-c", script],
-                           capture_output=True, text=True, timeout=60)
+        r = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, text=True, timeout=60
+        )
     else:
         import base64
+
         b64 = base64.b64encode(script.encode()).decode()
         r = subprocess.run(
-            ["ssh", "-o", "ControlPath=" + SOCK, SSH_TGT,
-             "echo %s | base64 -d | python3" % b64],
-            capture_output=True, text=True, timeout=60)
+            [
+                "ssh",
+                "-o",
+                "ControlPath=" + SOCK,
+                SSH_TGT,
+                "echo %s | base64 -d | python3" % b64,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
     import json
+
     for line in r.stdout.splitlines():
         line = line.strip()
         if line.startswith("["):
@@ -317,6 +357,7 @@ def terminal_pixels():
         import fcntl
         import struct
         import termios
+
         buf = fcntl.ioctl(sys.stdout, termios.TIOCGWINSZ, b"\0" * 8)
         _, _, xp, yp = struct.unpack("HHHH", buf)
         if xp and yp:
@@ -333,8 +374,12 @@ def draw(data, wpx, hpx):
     dpi = 100
     n = len(metrics)
     fig, axes = plt.subplots(
-        n, 1, sharex=True, dpi=dpi,
-        figsize=(max(4.0, wpx * 0.92 / dpi), max(3.0, hpx * 0.82 / dpi)))
+        n,
+        1,
+        sharex=True,
+        dpi=dpi,
+        figsize=(max(4.0, wpx * 0.92 / dpi), max(3.0, hpx * 0.82 / dpi)),
+    )
     if n == 1:
         axes = [axes]
     # GRPO logs 'epoch' too, but step is the more natural x for RL.
@@ -344,8 +389,7 @@ def draw(data, wpx, hpx):
         ys = [r.get(key) for r in rows]
         pts = [(x, y) for x, y in zip(xs, ys) if y is not None]
         if pts:
-            ax.plot([p[0] for p in pts], [p[1] for p in pts],
-                    "-", lw=1.8, color=color)
+            ax.plot([p[0] for p in pts], [p[1] for p in pts], "-", lw=1.8, color=color)
             last = pts[-1][1]
             ax.set_ylabel("%s\n(%.4g)" % (label, last), fontsize=fs(8))
         else:
@@ -375,8 +419,12 @@ def draw_overlay(runs, wpx, hpx):
     dpi = 100
     n = len(metrics)
     fig, axes = plt.subplots(
-        n, 1, sharex=True, dpi=dpi,
-        figsize=(max(4.0, wpx * 0.92 / dpi), max(3.0, hpx * 0.82 / dpi)))
+        n,
+        1,
+        sharex=True,
+        dpi=dpi,
+        figsize=(max(4.0, wpx * 0.92 / dpi), max(3.0, hpx * 0.82 / dpi)),
+    )
     if n == 1:
         axes = [axes]
     for ri, run in enumerate(runs):
@@ -384,26 +432,34 @@ def draw_overlay(runs, wpx, hpx):
         if not rows:
             continue
         color = RUN_COLORS[ri % len(RUN_COLORS)]
-        label = (run.get("log") or run.get("glob") or "run%d" % ri)
+        label = run.get("log") or run.get("glob") or "run%d" % ri
         # compact label: drop the common prefix, keep the job id / tail
         label = label.replace("grpo-agpt2b-gsm8k-reason-cot-", "").replace(
-            "sft-agpt2b-gsm8k-r1cot-", "sft-")
+            "sft-agpt2b-gsm8k-r1cot-", "sft-"
+        )
         xkey = "step" if (is_grpo and any("step" in r for r in rows)) else "epoch"
         xs = [r.get(xkey, i) for i, r in enumerate(rows)]
         for ax, met in zip(axes, metrics):
             key = met[0]
             pts = [(x, r.get(key)) for x, r in zip(xs, rows) if r.get(key) is not None]
             if pts:
-                ax.plot([p[0] for p in pts], [p[1] for p in pts],
-                        "-", lw=1.6, color=color,
-                        label=(label if ax is axes[0] else None))
+                ax.plot(
+                    [p[0] for p in pts],
+                    [p[1] for p in pts],
+                    "-",
+                    lw=1.6,
+                    color=color,
+                    label=(label if ax is axes[0] else None),
+                )
     for ax, met in zip(axes, metrics):
         ax.set_ylabel(met[1], fontsize=fs(8))
         ax.tick_params(labelsize=fs(7))
     axes[-1].set_xlabel("step" if is_grpo else "epoch", fontsize=fs(9))
     axes[0].legend(loc="best", fontsize=fs(7), ncol=min(len(runs), 3))
-    axes[0].set_title("agpt-2b %s -- %d runs overlaid" %
-                      ("GRPO" if is_grpo else "SFT", len(runs)), fontsize=fs(9))
+    axes[0].set_title(
+        "agpt-2b %s -- %d runs overlaid" % ("GRPO" if is_grpo else "SFT", len(runs)),
+        fontsize=fs(9),
+    )
     fig.tight_layout()
     plt.show()
     plt.close(fig)
@@ -416,18 +472,22 @@ def _status_line(data):
         s = "reward=%s std=%s" % (tail.get("reward"), tail.get("reward_std"))
     else:
         s = "loss=%s acc=%s" % (tail.get("loss"), tail.get("mean_token_accuracy"))
-    label = (data.get("log") or "(no log yet)")
+    label = data.get("log") or "(no log yet)"
     return "%s | points=%d last: %s" % (label, len(rows), s)
 
 
 def main():
     if AUTO_GLOB:
-        print("Live dashboard (AUTO: %s, auto-discovers new runs). Ctrl-C to stop."
-              % AUTO_GLOB)
+        print(
+            "Live dashboard (AUTO: %s, auto-discovers new runs). Ctrl-C to stop."
+            % AUTO_GLOB
+        )
     else:
         n = len(RUN_GLOBS)
-        print("Live dashboard (%d run%s, kitcat+ambivalent). Ctrl-C to stop."
-              % (n, "s" if n > 1 else ""))
+        print(
+            "Live dashboard (%d run%s, kitcat+ambivalent). Ctrl-C to stop."
+            % (n, "s" if n > 1 else "")
+        )
     while True:
         try:
             runs = fetch_all()

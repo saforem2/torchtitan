@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Charts for the B-series CoT cold-start SFT result.
 
 Two figures, each making one point that the results table alone does not:
@@ -22,14 +28,18 @@ import matplotlib
 
 matplotlib.use("Agg")
 
-import matplotlib.pyplot as plt  # noqa: E402
-
 # ambivalent is required -- a silent fallback would hide style regressions.
 # uv pip install --no-deps "git+https://github.com/saforem2/ambivalent"
-import ambivalent  # noqa: E402
+import sys  # noqa: E402
 
-plt.style.use(ambivalent.STYLES["ambivalent"])
+import matplotlib.pyplot as plt  # noqa: E402
 
+# plot_style.py needs only matplotlib; importing it through the
+# torchtitan package would pull in torch via ezpz/__init__.py.
+sys.path.insert(0, str(Path(__file__).resolve().parents[6] / "utils"))
+from plot_style import apply_style  # noqa: E402
+
+apply_style()
 FIGDIR = Path(__file__).parent / "figures"
 FIGDIR.mkdir(exist_ok=True)
 
@@ -41,8 +51,8 @@ RESULTS = {
     "B4b\nreweight+filter": (0.065, 0.86, 611, 27, False),
 }
 
-WIN = "#2ca02c"     # the two-stage winner
-LOSE = "#d62728"    # single-stage rebuilds
+WIN = "#2ca02c"  # the two-stage winner
+LOSE = "#d62728"  # single-stage rebuilds
 NEUTRAL = "#7f7f7f"
 
 
@@ -104,7 +114,7 @@ def plot_acc_vs_genlen(out: Path) -> None:
         ax.scatter(
             glen,
             acc,
-            s=90 + 6 * unclosed,          # marker grows with unclosed generations
+            s=90 + 6 * unclosed,  # marker grows with unclosed generations
             color=WIN if two else LOSE,
             zorder=3,
             edgecolor="white",
@@ -121,7 +131,7 @@ def plot_acc_vs_genlen(out: Path) -> None:
             fontsize=9,
         )
     ax.axhline(0.205, ls="--", lw=1, color=NEUTRAL)
-    ax.set_xlim(100, 1750)         # room for the B4a annotation at gen_len 1378
+    ax.set_xlim(100, 1750)  # room for the B4a annotation at gen_len 1378
     ax.set_ylim(0, 0.235)
     ax.text(1730, 0.209, "B2 target", fontsize=8, color=NEUTRAL, ha="right")
     ax.set_xlabel("mean generation length  (lower = tighter)")

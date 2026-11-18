@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Charts for the 2B MDS anneal-schedule + data-mix experiment.
 
 Renders two SVGs into ./figures/ (ambivalent style, reads well on light+dark):
@@ -24,13 +30,16 @@ import matplotlib
 
 matplotlib.use("Agg")
 
+import sys  # noqa: E402
+
 import matplotlib.pyplot as plt  # noqa: E402
 
-# ambivalent is required -- silent fallback hides style regressions.
-# uv pip install --no-deps "git+https://github.com/saforem2/ambivalent"
-import ambivalent  # noqa: E402
+# plot_style.py needs only matplotlib; importing it through the
+# torchtitan package would pull in torch via ezpz/__init__.py.
+sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "utils"))
+from plot_style import apply_style  # noqa: E402
 
-plt.style.use(ambivalent.STYLES["ambivalent"])
+apply_style()
 
 FIGDIR = Path(__file__).parent / "figures"
 FIGDIR.mkdir(exist_ok=True)
@@ -64,18 +73,30 @@ def plot_anneal() -> Path:
     # base reference lines
     for i, b in enumerate(bases):
         ax.hlines(
-            ANNEAL[b]["base"], i - 0.5, i + 0.5,
-            color="0.5", linestyle="--", linewidth=1,
+            ANNEAL[b]["base"],
+            i - 0.5,
+            i + 0.5,
+            color="0.5",
+            linestyle="--",
+            linewidth=1,
         )
     ax.text(
-        0.98, 0.02, "dashed = un-annealed base", transform=ax.transAxes,
-        ha="right", va="bottom", fontsize=8, color="0.5",
+        0.98,
+        0.02,
+        "dashed = un-annealed base",
+        transform=ax.transAxes,
+        ha="right",
+        va="bottom",
+        fontsize=8,
+        color="0.5",
     )
     ax.set_xticks(list(x))
     ax.set_xticklabels(bases)
     ax.set_ylabel("held-out FineMath NLL (lower = better)")
-    ax.set_title("Anneal schedule A/B: flat beats WSD on both bases\n"
-                 "(the LR schedule is not the lever at 10B tokens)")
+    ax.set_title(
+        "Anneal schedule A/B: flat beats WSD on both bases\n"
+        "(the LR schedule is not the lever at 10B tokens)"
+    )
     ax.set_ylim(1.78, 1.92)
     ax.legend(frameon=False)
     out = FIGDIR / "anneal_flat_vs_wsd.svg"
@@ -87,25 +108,42 @@ def plot_anneal() -> Path:
 def plot_datamix() -> Path:
     fig, ax = plt.subplots(figsize=(7, 5))
     for name, (fm, wt, measured) in DATAMIX.items():
-        ax.scatter(fm, wt, s=90, zorder=3,
-                   edgecolor="black" if measured else "0.6",
-                   facecolor="C0" if measured else "none",
-                   linewidth=1.2)
+        ax.scatter(
+            fm,
+            wt,
+            s=90,
+            zorder=3,
+            edgecolor="black" if measured else "0.6",
+            facecolor="C0" if measured else "none",
+            linewidth=1.2,
+        )
         label = name if measured else name + "\n(predicted)"
-        ax.annotate(label, (fm, wt), textcoords="offset points",
-                    xytext=(8, 6), fontsize=8)
+        ax.annotate(
+            label, (fm, wt), textcoords="offset points", xytext=(8, 6), fontsize=8
+        )
     # connect the mix ladder in order (owm -> 75/25 -> 50/50 -> edu)
     order = list(DATAMIX)
-    ax.plot([DATAMIX[k][0] for k in order], [DATAMIX[k][1] for k in order],
-            color="0.6", linewidth=1, linestyle=":", zorder=1)
+    ax.plot(
+        [DATAMIX[k][0] for k in order],
+        [DATAMIX[k][1] for k in order],
+        color="0.6",
+        linewidth=1,
+        linestyle=":",
+        zorder=1,
+    )
     ax.set_xlabel("held-out FineMath NLL  (math generalization, lower = better)")
     ax.set_ylabel("held-out wikitext NLL  (general, lower = better)")
-    ax.set_title("Data mix trade-off: 75/25 math/edu keeps math intact\n"
-                 "while capturing ~all of edu's general-domain gain")
+    ax.set_title(
+        "Data mix trade-off: 75/25 math/edu keeps math intact\n"
+        "while capturing ~all of edu's general-domain gain"
+    )
     # annotate the sweet-spot region
     ax.annotate(
         "sweet spot:\nmath intact + general gained",
-        xy=(1.8089, 2.6597), xytext=(1.86, 2.665), fontsize=8, color="C0",
+        xy=(1.8089, 2.6597),
+        xytext=(1.86, 2.665),
+        fontsize=8,
+        color="C0",
         arrowprops=dict(arrowstyle="->", color="C0", lw=1),
     )
     out = FIGDIR / "datamix_tradeoff.svg"

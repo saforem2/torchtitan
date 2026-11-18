@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Plot yeet-env tarball broadcast scaling.
 
 Reads .yeet-env-scaling-results.csv produced by
@@ -20,17 +26,17 @@ from pathlib import Path
 import matplotlib
 
 matplotlib.use("Agg")
+import sys  # noqa: E402
 
-import matplotlib.pyplot as plt
-import matplotlib.ticker as mticker
+import matplotlib.pyplot as plt  # noqa: E402
+import matplotlib.ticker as mticker  # noqa: E402
 
-# ambivalent is required — silent fallback hides style regressions.
-# Install with: uv pip install --no-deps "git+https://github.com/saforem2/ambivalent"
-import ambivalent  # noqa: F401
+# plot_style.py needs only matplotlib; importing it through the
+# torchtitan package would pull in torch via ezpz/__init__.py.
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "utils"))
+from plot_style import apply_style  # noqa: E402
 
-plt.style.use(ambivalent.STYLES["ambivalent"])
-
-plt.rcParams["font.family"] = "monospace"
+apply_style()
 
 DEFAULT_CSV = (
     Path(__file__).resolve().parents[6]  # ezpz/docs/scaling/yeet_env/ -> repo root
@@ -76,8 +82,12 @@ def plot_total(rows: list[dict], out_path: Path) -> None:
     for n, s in zip(nodes, secs):
         ax.annotate(
             f"{s:.0f}s",
-            xy=(n, s), xytext=(0, 8), textcoords="offset points",
-            ha="center", fontsize=9, color="#0c4a6e",
+            xy=(n, s),
+            xytext=(0, 8),
+            textcoords="offset points",
+            ha="center",
+            fontsize=9,
+            color="#0c4a6e",
         )
     # Choose y ticks at meaningful round seconds covering the data range.
     y_min, y_max = min(secs), max(secs)
@@ -86,9 +96,7 @@ def plot_total(rows: list[dict], out_path: Path) -> None:
     _decimal_log_axes(ax, x_ticks=nodes, y_ticks=y_ticks)
     ax.set_xlabel("Number of Nodes")
     ax.set_ylabel("yeet-env wall-clock (seconds)")
-    ax.set_title(
-        "Aurora yeet-env tarball broadcast — total wall-clock vs node count"
-    )
+    ax.set_title("Aurora yeet-env tarball broadcast — total wall-clock vs node count")
     ax.grid(alpha=0.25, which="both")
     fig.tight_layout()
     fig.savefig(out_path, dpi=150)
@@ -104,8 +112,12 @@ def plot_per_node(rows: list[dict], out_path: Path) -> None:
     for n, m in zip(nodes, per_node_ms):
         ax.annotate(
             f"{m:.0f}ms",
-            xy=(n, m), xytext=(0, 8), textcoords="offset points",
-            ha="center", fontsize=9, color="#3b0764",
+            xy=(n, m),
+            xytext=(0, 8),
+            textcoords="offset points",
+            ha="center",
+            fontsize=9,
+            color="#3b0764",
         )
     y_min, y_max = min(per_node_ms), max(per_node_ms)
     y_candidates = [100, 200, 300, 500, 750, 1000, 1500, 2000, 3000, 5000, 7500, 10000]
@@ -113,9 +125,7 @@ def plot_per_node(rows: list[dict], out_path: Path) -> None:
     _decimal_log_axes(ax, x_ticks=nodes, y_ticks=y_ticks)
     ax.set_xlabel("Number of Nodes")
     ax.set_ylabel("Per-node wall-clock (ms)")
-    ax.set_title(
-        "Aurora yeet-env tarball broadcast — per-node amortized cost"
-    )
+    ax.set_title("Aurora yeet-env tarball broadcast — per-node amortized cost")
     ax.grid(alpha=0.25, which="both")
     fig.tight_layout()
     fig.savefig(out_path, dpi=150)

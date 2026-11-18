@@ -37,13 +37,16 @@ from pathlib import Path
 import matplotlib
 
 matplotlib.use("Agg")
+import sys  # noqa: E402
 
-# ambivalent is required — silent fallback hides style regressions.
-# Install with: uv pip install --no-deps "git+https://github.com/saforem2/ambivalent"
-import ambivalent  # noqa: F401
 import matplotlib.pyplot as plt
 
-plt.style.use(ambivalent.STYLES["ambivalent"])
+# plot_style.py needs only matplotlib; importing it through the
+# torchtitan package would pull in torch via ezpz/__init__.py.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "utils"))
+from plot_style import apply_style  # noqa: E402
+
+apply_style()
 
 
 TASK_COLORS = {

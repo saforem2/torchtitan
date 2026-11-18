@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Plot 2B CPT downstream-benchmark curves per data mix vs CPT step.
 
 The decisive CPT screen: does continued-pretraining on olmo x dolmino lift the
@@ -14,14 +20,17 @@ import os
 import matplotlib
 
 matplotlib.use("Agg")
+import sys  # noqa: E402
+from pathlib import Path  # noqa: E402
+
 import matplotlib.pyplot as plt
 
-try:
-    import ambivalent
+# plot_style.py needs only matplotlib; importing it through the
+# torchtitan package would pull in torch via ezpz/__init__.py.
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "utils"))
+from plot_style import apply_style  # noqa: E402
 
-    plt.style.use(ambivalent.STYLES["ambivalent"])
-except Exception:
-    pass
+apply_style()
 
 # (mix label, tsv basename, color)
 MIXES = [
@@ -53,8 +62,13 @@ def read_tsv(path):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--data-dir", default=os.path.join(os.path.dirname(__file__), "figures"))
-    ap.add_argument("--out", default=os.path.join(os.path.dirname(__file__), "figures", "cpt_eval.svg"))
+    ap.add_argument(
+        "--data-dir", default=os.path.join(os.path.dirname(__file__), "figures")
+    )
+    ap.add_argument(
+        "--out",
+        default=os.path.join(os.path.dirname(__file__), "figures", "cpt_eval.svg"),
+    )
     args = ap.parse_args()
 
     data = {}
@@ -65,8 +79,14 @@ def main():
 
     fig, axes = plt.subplots(1, len(TASKS), figsize=(4 * len(TASKS), 4.2), sharex=True)
     for ax, (task_name, col, base_val) in zip(axes, TASKS):
-        ax.axhline(base_val, color="gray", ls="--", lw=1.3,
-                   label=f"olmo-100 base ({base_val})", zorder=1)
+        ax.axhline(
+            base_val,
+            color="gray",
+            ls="--",
+            lw=1.3,
+            label=f"olmo-100 base ({base_val})",
+            zorder=1,
+        )
         for label, base, color in MIXES:
             rows = data.get(label)
             if not rows:
@@ -82,7 +102,8 @@ def main():
     fig.suptitle(
         "2B CPT downstream eval -- olmo x dolmino (LR=2.28e-5 re-warm pilot): "
         "CPT DEGRADES benchmarks vs the base plateau",
-        fontsize=12, fontweight="bold",
+        fontsize=12,
+        fontweight="bold",
     )
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
     fig.tight_layout(rect=(0, 0, 1, 0.94))
