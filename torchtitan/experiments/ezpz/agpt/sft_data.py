@@ -203,6 +203,7 @@ class AgptChatProcessor(SampleProcessor):
                 "gsm8k_r1cot": _gsm8k_r1cot_messages,
                 "openr1": _openr1_messages,
                 "openthoughts": _openthoughts_messages,
+                "mcq": _mcq_messages,
             }[config.source]
         except KeyError as exc:
             raise ValueError(f"unknown AGPT SFT source: {config.source!r}") from exc
@@ -490,3 +491,152 @@ def gsm8k_plus_distill_cot_streaming_dataset(
             )
         )
     )
+
+# ── MCQ / MMLU template helpers ───────────────────────────────────────
+# MMLU is a 4-way MCQ; the response template is the bottleneck pre-SFT.
+# See 12-sft-mcq-template-probe.md S 1 + S 3 for the P(template) *
+# P(knowledge|template) decomposition and the 40/30/20/10 justification.
+
+
+def _mcq_messages(sample: dict[str, Any]) -> list[dict[str, str]]:
+    """Render a Cais/MMLU row as a single-letter MCQ.
+
+    Expected HF schema (cais/mmlu auxiliary_train): ``question`` (str),
+    ``choices`` (list[str] length 4), ``answer`` (int 0-3). Falls back to
+    common alternate keys (``query``/``options``/``gold``) so the same
+    function serves Tulu-derived MCQ subsets that copy the MMLU schema.
+    """
+    question = str(
+        sample.get("question") or sample.get("query") or sample.get("input") or ""
+    ).strip()
+    if not question:
+        return []
+    choices = sample.get("choices") or sample.get("options") or sample.get("A") or []
+    if isinstance(choices, str):
+        choices = [c.strip() for c in choices.split("\n") if c.strip()]
+    if not isinstance(choices, (list, tuple)) or len(choices) < 2:
+        return []
+    # Normalize answer index.
+    ans = sample.get("answer")
+    if ans is None:
+        ans = sample.get("gold")
+    if ans is None:
+        ans = sample.get("label")
+    try:
+        ans_idx = int(ans)  # type: ignore[arg-type]
+    except Exception:
+        # Letter answer like "A"/"B" -> index.
+        letter = str(ans).strip().upper()[:1]
+        if letter in ("A", "B", "C", "D"):
+            ans_idx = ord(letter) - ord("A")
+        else:
+            return []
+    if not 0 <= ans_idx < len(choices):
+        return []
+    # Format choices as "A. ...\nB. ...\nC. ...\nD. ..."
+    letters = ["A", "B", "C", "D", "E", "F"][: len(choices)]
+    choice_block = "\n".join(
+        f"{letters[i]}. {str(c).strip()}" for i, c in enumerate(choices)
+    )
+    answer_letter = letters[ans_idx]
+    return [
+        {
+            "role": "user",
+            "content": f"{question}\n{choice_block}\nAnswer with the letter.",
+        },
+        {"role": "assistant", "content": answer_letter},
+    ]
+
+
+def sft_mcq_template_probe_streaming_dataset(
+    cot_weight: float = 0.40,
+    tulu_weight: float = 0.30,
+    mcq_weight: float = 0.20,
+    math_weight: float = 0.10,
+) -> ConcatThenSplitPackingConfig:
+    """MCQ-aware SFT probe: 40% CoT-distill + 30% tulu + 20% MCQ + 10% math.
+
+    Grain streaming (no pre-tokenize) via EZPZTokenizer at ~4.5k tps/tile.
+    Each bucket is a WeightedDataset of SingleDatasetConfig with
+    AgptChatProcessor (assistant-only IGNORE_INDEX masking, same as CPT).
+    See 12-sft-mcq-template-probe.md S 3 for the per-bucket justification
+    and the P(template) * P(knowledge|template) decomposition for MMLU.
+
+    Weights must sum to 1.0; override for ablations, e.g. w/o MCQ at
+    (0.40, 0.50, 0.0, 0.10) or w/o CoT at (0.0, 0.50, 0.20, 0.30).
+    """
+    total = cot_weight + tulu_weight + mcq_weight + math_weight
+    if abs(total - 1.0) > 1e-6:
+        raise ValueError(
+            f"sft_mcq_template_probe weights must sum to 1.0; got "
+            f"cot={cot_weight} tulu={tulu_weight} mcq={mcq_weight} "
+            f"math={math_weight} (sum={total})"
+        )
+    # CoT-distill bucket: split the 0.40 evenly across OpenThoughts /
+    # OpenR1 so neither dominates the reasoning template signal.
+    datasets: list[WeightedDataset] = []
+    if cot_weight > 0:
+        half = cot_weight / 2.0
+        datasets.append(
+            WeightedDataset(
+                dataset=_cot_source(
+                    path="open-thoughts/OpenThoughts-114k",
+                    split="train",
+                    source="openthoughts",
+                    name="default",
+                ),
+                weight=half,
+            )
+        )
+        datasets.append(
+            WeightedDataset(
+                dataset=_cot_source(
+                    path="open-r1/OpenR1-Math-220k",
+                    split="train",
+                    source="openr1",
+                    name="default",
+                ),
+                weight=half,
+            )
+        )
+    if tulu_weight > 0:
+        datasets.append(
+            WeightedDataset(
+                dataset=_source(
+                    path="allenai/tulu-3-sft-mixture",
+                    split="train",
+                    source="tulu",
+                ),
+                weight=tulu_weight,
+            )
+        )
+    if mcq_weight > 0:
+        datasets.append(
+            WeightedDataset(
+                dataset=SingleDatasetConfig(
+                    source=HuggingFaceStreamingSource.Config(
+                        path="cais/mmlu",
+                        name="auxiliary_train",
+                        split="train",
+                    ),
+                    pre_filters=(
+                        lambda s: bool(s.get("choices") or s.get("options")),
+                    ),
+                    processor=AgptChatProcessor.Config(source="mcq"),
+                    post_filters=(lambda sequence: sequence is not None,),
+                ),
+                weight=mcq_weight,
+            )
+        )
+    if math_weight > 0:
+        datasets.append(
+            WeightedDataset(
+                dataset=_source(
+                    path="nvidia/OpenMathInstruct-2",
+                    split="train",
+                    source="openmath",
+                ),
+                weight=math_weight,
+            )
+        )
+    return ConcatThenSplitPackingConfig(dataset=DatasetMixConfig(datasets=tuple(datasets)))

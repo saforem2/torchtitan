@@ -58,6 +58,7 @@ from .sft_data import (
     distill_cot_mix_streaming_dataset,
     gsm8k_plus_distill_cot_streaming_dataset,
     gsm8k_r1cot_streaming_dataset,
+    sft_mcq_template_probe_streaming_dataset,
     tulu_math_uc_streaming_dataset,
 )
 
@@ -906,9 +907,22 @@ def agpt_debugmodel_distill_cot_streaming() -> FaultTolerantTrainer.Config:
     )
 
 
+def agpt_2b_mds_sft_mcq_template_probe_streaming() -> FaultTolerantTrainer.Config:
+    """MCQ-aware SFT probe: 40% CoT-distill + 30% tulu + 20% MCQ + 10% math.
+
+    Grain streaming (no pre-tokenize) via EZPZTokenizer. See
+    sft_data.py:sft_mcq_template_probe_streaming_dataset() and
+    docs/run-ledger/12-sft-mcq-template-probe.md S 3 for the 40/30/20/10
+    justification and the P(template)*P(knowledge|template) decomposition.
+    """
+    return _cot_sft_config(
+        sft_mcq_template_probe_streaming_dataset,
+        "checkpoints/agpt2b-mds-sft-mcq-template-probe",
+    )
+
+
 # --- data-mix A/B (stage-2 mid-training): flat won the anneal, so DATA is the
 # lever, not the schedule. These arms fork the SAME MDS base at the SAME winning
-# CONSTANT LR 2e-6 and differ ONLY in the training data mix. The MDS base is
 # already math+code-saturated (stage-3), so the highest-value axis is DIVERSITY /
 # anti-forgetting: does swapping math-web for general/edu web forget math or
 # improve general ability? Eval reserves FineMath-4+ + wikitext as FROZEN
@@ -1043,6 +1057,264 @@ def agpt_2b_mds_mix_owm_edu_9010() -> FaultTolerantTrainer.Config:
     return _agpt_2b_mds_mix_blend(0.90, 0.10, "checkpoints/agpt-2b-mds-mix-owm90-edu10")
 
 
+# ---------------------------------------------------------------------------
+# Grain-native CPT curriculum: olmo / fineweb-edu / cosmopedia anneal for
+# MMLU knowledge (replaces static 60/40 BlendCorpusDataLoader).
+# ---------------------------------------------------------------------------
+# PROBLEM: CPT-FWE static 60/40 OWM/FineWeb-Edu (agpt_2b_mds_mix_owm_edu_6040,
+# BlendCorpusDataLoader, GBS=64) reached step 136800 / 190734 = 71.7% of its
+# 100B budget with MMLU ~0.302 -> 0.317 flat at chance (+0.015 over 135k steps)
+# and CoT 0.0 at every raw-CPT probe (1k/10k/100k/111k/125k/136800, format 0.0,
+# 200/200 unclosed, mean_gen_len 1527 via eval_cot_gsm8k.py). Loss 2.068->1.856
+# ->1.93 is healthy but orthogonal to MCQ knowledge. The bottleneck is data
+# *kind*, not more tokens on the same distribution -- see 01-cpt-frontier.md
+# Sec. 2.1 and docs/run-ledger/12-cot-136800-eval.md. This curriculum is the
+# direct fix: inject high-quality textbook/science BEFORE SFT/RL.
+#
+# DESIGN -- two-phase anneal over the SAME 100B / 190734-step budget at GBS=64
+# (64*8192=524288 tok/step) so it is drop-in against the live chain's budget
+# math (cpt_fineweb_edu_4n.sh:72-78). Weights count post-packing 8192-token rows
+# (ConcatThenSplitPackingConfig -> DatasetMixConfig), i.e. token-weighted, same
+# convention as _agpt_2b_mds_mix_blend.
+#
+# Phase 1 Warmup (progress=0.0): 70% olmo-mix-1124 / 20% fineweb-edu / 10%
+#   cosmopedia. Olmo-mix (94.8% DCLM) preserves generic web diversity and
+#   commonsense (HellaSwag/ARC-E/PIQA anchors); 20% FWE injects pedagogical
+#   educational web without repeating the 94.8% DCLM plateau; 10% cosmopedia
+#   (HuggingFaceTB/cosmopedia: synthetic textbooks auto_math_text+khanacademy+
+#   openstax+stanford+wikihow) seeds STEM textbook style that cloze/MMLU STEM
+#   rewards but raw web lacks.
+#
+# Phase 2 Anneal (progress 0.0 -> 1.0 linear over 100B / ~190k steps):
+#   olmo 70->20 (-0.50*p), fineweb-edu 20->50 (+0.30*p), cosmopedia 10->30
+#   (+0.20*p) where p = step / 190734. Linear schedule mirrors MiniCPM/SmolLM2
+#   anneal practice: start close to pretrain distribution to avoid distribution
+#   shock (dolmino ratio-independent HS -7.4pp was LR re-warm shock, not ratio),
+#   then gradually concentrate on high-quality educational + textbook while
+#   retaining a 20% olmo floor so commonsense never fully leaves the mix.
+#
+# Why THESE ratios -- MMLU ablation justification (kind, not degree):
+# | Evidence | Signal | Implication for mix |
+# |----------|--------|----------------------|
+# | FineWeb-Edu paper arXiv:2406.17557 @350B 1.7B: FWE 37.5 vs DCLM 35.5 on MMLU; DCLM 62.3 vs 60.1 on HS -- FWE trades small HS deficit for clear MMLU gain | FWE specifically helps MCQ knowledge | Anchor: FWE must GROW to 50% by anneal end (vs 0% in olmo-mix, 60% static before) |
+# | Same paper @38B: 33.6% MMLU where next-best needs 300B (~8x token eff.) | FWE is token-efficient for MMLU early | Justifies 20->50 ramp, not flat 50 from step 0 (which would shock HS) |
+# | SmolLM2 arXiv:2502.02737 Sec 4.3 stage-1 60% FWE / 40% DCLM: 33.6% MMLU | 60/40 FWE is the validated stage-1 operating point | Our end-state 50% FWE + 30% cosmopedia = 80% educational/textbook, stronger than SmolLM2 for post-pretrain specialization |
+# | OLMo-2 1B on olmo-mix-1124 base, Dolmino mid-training arXiv:2501.00656 Tab 9: MMLU 26.9 -> 44.3 (+17.4) | Distribution shift on THIS base unlocks MMLU at 1B | Our shift is a KIND change (DCLM 94.8% -> textbook/science), not dolmino's degree tweak (89% DCLM, same kind, bled -7.4pp HS / -10.4pp ARC-E) |
+# | Dolmino-100 pilot: loss 2.49 vs 2.80 (won on loss) but HS -7.4pp ARC-E -10.4pp | Loss alone misleads; only downstream eval discriminates | Gate on MMLU max(CF,MCF) + band + commonsense at 150k (G1-G4), not loss |
+# | Cosmopedia synthetic textbooks (auto_math_text, khanacademy, openstax, stanford, wikihow) | Textbook Q&A directly matches MMLU STEM cloze format | 10->30 ramp: small at warmup (noise if too much synthetic early), dominant by end (STEM MMLU needs textbook density) |
+#
+# Tokenization: NO pre-tokenize needed. Grain tokenizes dynamically on-the-fly
+# via EZPZTokenizer (Config backend="hf", vocab 256000, gemma-7b tokenizer) at
+# ~4.5k tokens/sec/tile through TextProcessor. The Grain pipeline is:
+#   HuggingFaceStreamingSource / HuggingFaceRandomAccessSource (raw text)
+#   -> SingleDatasetConfig(processor=TextProcessor) -> ConcatThenSplitPackingConfig
+#   -> DatasetMixConfig(WeightedDataset x3) -> GrainDataLoader
+# This is the same path as _agpt_2b_mds_mix_blend and _use_fineweb_edu; it
+# avoids the BlendCorpusDataLoader pre-tokenized blendcorpus (gemma-tokenized
+# .bin/.idx on /gila, wrong for this vocab/host) and the TRL pretokenize_to
+# step entirely.
+#
+# Available datasets referenced (verified paths on Sunspot/Aurora):
+# - fineweb-edu-100BT: /lus/tegu/projects/datasets/datasets/fineweb-edu-100BT
+#   sample/100BT/*.parquet (140 shards, ~280GB, 726k rows/~1.4B tok each;
+#   _FINEWEB_EDU_DIR verified; 16-shard subset via _fineweb_edu_shards() = ~22B
+#   tokens, byte-identical selection for comparability).
+# - dolmino-mix: via torchtitan/experiments/ezpz/utils/build_cpt_mixes.py
+#   (olmo-mix-1124 blendcorpus lists renormalized; olmo sums to ~2.717 vs
+#   dolmino 1.0 -- scaled_block corrects; writes olmo50-dolmino50.txt etc.).
+#   Legacy blendcorpus path; Grain curriculum does NOT use it.
+# - olmo-mix-1124: production pretrain mix (94.8% DCLM, 2.0% academic peS2o/
+#   arxiv research papers not pedagogy; data-lists/aurora/olmo-mix-1124.txt
+#   on Aurora /flare; AllenAI HF allenai/olmo-mix-1124 streaming fallback;
+#   precached wiki subset at _OLMO_MIX_CACHE on Aurora $HOME).
+# - cosmopedia: HuggingFaceTB/cosmopedia (synthetic textbook corpus; streamed
+#   via HuggingFaceStreamingSource same as OWM; precache via
+#   scripts/precache_hf_dataset.py if 429 at scale).
+#
+# Sampling: Weighted Interleaved via Grain's DatasetMixConfig (grain.Mix with
+# weights). Interleaved = strict weighted sampling without replacement per
+# microbatch; Grain implements as IterDataset.mix(children, weights=weights)
+# with thread prefetch. Weights are token-rows (8192-token blocks) after packing,
+# not documents, so document-length skew does not bias the mix. Post-#4088
+# InterleavedHuggingFaceTextDataLoader is gone; this is its Grain replacement.
+#
+# Launch: --module ezpz.agpt --config agpt_2b_grain_cpt_anneal (warmup) or
+# agpt_2b_grain_cpt_anneal_at --progress 0.5 etc. for resumed anneal slices.
+# Resumption uses FaultTolerantTrainer DCP (checkpointer.folder) same as CPT
+# pilot; only dataloader weights change across phases.
+
+_GRAIN_CPT_ANNEAL_STEPS = 190734  # 100B / 524288 (GBS 64 * 8192), matches 60/40 FWE budget
+_GRAIN_CPT_WARMUP_FRACTIONS = (0.70, 0.20, 0.10)  # olmo / fwe / cosmo at p=0
+_GRAIN_CPT_END_FRACTIONS = (0.20, 0.50, 0.30)  # olmo / fwe / cosmo at p=1
+
+
+def _grain_anneal_weights(progress: float) -> tuple[float, float, float]:
+    """Linear anneal fractions at ``progress`` in [0, 1] (clamped).
+
+    olmo  0.70 -> 0.20  (-0.50*p)
+    fwe   0.20 -> 0.50  (+0.30*p)
+    cosmo 0.10 -> 0.30  (+0.20*p)
+    Sum is 1.0 at every p. p = step / 190734 for the 100B budget at GBS=64.
+
+    Checkpoints for table:
+      p=0.00: 70.0 / 20.0 / 10.0 (warmup -- matches Phase 1 spec)
+      p=0.25: 57.5 / 27.5 / 15.0
+      p=0.50: 45.0 / 35.0 / 20.0
+      p=0.75: 32.5 / 42.5 / 25.0
+      p=1.00: 20.0 / 50.0 / 30.0 (anneal end -- matches Phase 2 spec)
+    """
+    p = max(0.0, min(1.0, float(progress)))
+    w_olmo = 0.70 + (0.20 - 0.70) * p
+    w_fwe = 0.20 + (0.50 - 0.20) * p
+    w_cosmo = 0.10 + (0.30 - 0.10) * p
+    return (w_olmo, w_fwe, w_cosmo)
+
+
+def _grain_cpt_packed_olmo() -> ConcatThenSplitPackingConfig:
+    """Packed olmo-mix-1124 source for Grain anneal (streaming, HF text)."""
+    return ConcatThenSplitPackingConfig(
+        dataset=SingleDatasetConfig(
+            source=HuggingFaceStreamingSource.Config(
+                path="allenai/olmo-mix-1124",
+                split="train",
+            ),
+            processor=TextProcessor.Config(),
+            post_filters=(lambda sample: sample is not None,),
+        )
+    )
+
+
+def _grain_cpt_packed_fwe() -> ConcatThenSplitPackingConfig:
+    """Packed fineweb-edu source for Grain anneal (local parquet, 16 shards).
+
+    Reuses _fineweb_edu_shards() (sorted, sliced, never sampled) so every arm
+    reads byte-identical input and the corpus (16 shards = ~22B tokens) exceeds
+    the 10B-per-phase budget without repeating -- same invariant as
+    _agpt_2b_mds_mix_blend. Verified TEGU path:
+    /lus/tegu/projects/datasets/datasets/fineweb-edu-100BT/sample/100BT.
+    """
+    return ConcatThenSplitPackingConfig(
+        dataset=SingleDatasetConfig(
+            source=HuggingFaceRandomAccessSource.Config(
+                path="parquet",
+                split="train",
+                load_dataset_kwargs={"data_files": _fineweb_edu_shards()},
+            ),
+            processor=TextProcessor.Config(),
+            post_filters=(lambda sample: sample is not None,),
+        )
+    )
+
+
+def _grain_cpt_packed_cosmo() -> ConcatThenSplitPackingConfig:
+    """Packed cosmopedia source for Grain anneal (synthetic textbook, streaming).
+
+    HuggingFaceTB/cosmopedia is the textbook corpus (auto_math_text, khanacademy,
+    openstax, stanford, wikihow). Streamed via HuggingFaceStreamingSource so no
+    pre-tokenized corpus is needed; precache via scripts/precache_hf_dataset.py
+    if 429 at scale (same 429 caution as olmo-mix at 384 ranks, datasets.py:65).
+    """
+    return ConcatThenSplitPackingConfig(
+        dataset=SingleDatasetConfig(
+            source=HuggingFaceStreamingSource.Config(
+                path="HuggingFaceTB/cosmopedia",
+                split="train",
+            ),
+            processor=TextProcessor.Config(),
+            post_filters=(lambda sample: sample is not None,),
+        )
+    )
+
+
+def _agpt_2b_grain_cpt_anneal_base(
+    progress: float = 0.0,
+    folder: str = "checkpoints/agpt-2b-grain-cpt-anneal",
+) -> FaultTolerantTrainer.Config:
+    """Shared builder for Grain-native CPT anneal at ``progress`` in [0, 1].
+
+    Forks the MDS base (same as _agpt_2b_mds_mix_base) at the gentle constant
+    LR 2e-6 (proven winner; avoids dolmino re-warm shock at 2.28e-5). Dataloader
+    is GrainDataLoader(DatasetMixConfig(WeightedDataset x3)) with token-weighted
+    8192-token rows after ConcatThenSplitPacking. Weights from
+    _grain_anneal_weights(progress). No pre-tokenization: EZPZTokenizer
+    (backend="hf", ~4.5k tps/tile) tokenizes raw text on-the-fly via
+    TextProcessor inside each SingleDatasetConfig.
+    """
+    cfg = _agpt_2b_mds_mix_base()
+    cfg.training.steps = _GRAIN_CPT_ANNEAL_STEPS
+    from torchtitan.components.data import DatasetMixConfig, WeightedDataset
+
+    w_olmo, w_fwe, w_cosmo = _grain_anneal_weights(progress)
+    cfg.dataloader = GrainDataLoader.Config(
+        dataset=DatasetMixConfig(
+            datasets=(
+                WeightedDataset(dataset=_grain_cpt_packed_olmo(), weight=w_olmo),
+                WeightedDataset(dataset=_grain_cpt_packed_fwe(), weight=w_fwe),
+                WeightedDataset(dataset=_grain_cpt_packed_cosmo(), weight=w_cosmo),
+            ),
+        )
+    )
+    cfg.checkpointer.folder = folder
+    return cfg
+
+
+def agpt_2b_grain_cpt_anneal() -> FaultTolerantTrainer.Config:
+    """Grain-native CPT curriculum -- Phase 1 Warmup: 70% olmo / 20% FWE / 10% cosmopedia.
+
+    Forks the MDS 2B base (global_step138650, DCP at _MDS_ANNEAL_BASE) at gentle
+    constant LR 2e-6, warmup 20, same as the 60/40 FWE winner it replaces. Data
+    is 3-way Grain mix via GrainDataLoader + DatasetMixConfig + WeightedDataset
+    + ConcatThenSplitPackingConfig, each source through EZPZTokenizer (backend
+    "hf", ~4.5k tps/tile) -- NO pre-tokenize step, NO blendcorpus .bin/.idx.
+
+    Sampling: Interleaved Weighted via Grain (IterDataset.mix with weights).
+    Weights count 8192-token packed rows (token-weighted). This is the post-#4088
+    replacement for InterleavedHuggingFaceTextDataLoader.
+
+    Anneal schedule (linear over 100B tokens / ~190k steps at GBS=64):
+      Phase 1 Warmup (this config, p=0.0): 70/20/10 olmo/fwe/cosmo -- preserves
+        web diversity (olmo 94.8% DCLM) while seeding textbook (10% cosmo).
+      Phase 2 Anneal (p=0.0->1.0): 70->20 olmo, 20->50 fwe, 10->30 cosmo via
+        _grain_anneal_weights(p) where p = step / 190734. Resume at p>0 via
+        agpt_2b_grain_cpt_anneal_at(progress=p).
+
+    MMLU rationale: fineweb-edu 37.5 vs DCLM 35.5 @350B 1.7B (arXiv:2406.17557)
+    and 33.6% at 38B vs 300B next-best (~8x eff.); SmolLM2 60/40 FWE validated;
+    OLMo-2 Dolmino +17.4 MMLU on THIS olmo-mix base proves kind-shift works;
+    cosmopedia textbooks target STEM MMLU where raw web is weakest. See module
+    header above for full ablation table. End-state 50% FWE + 30% cosmopedia
+    = 80% educational/textbook vs 0% in olmo-mix base.
+
+    Datasets: fineweb-edu-100BT at /lus/tegu/projects/datasets/datasets/
+    fineweb-edu-100BT (verified), olmo-mix-1124 streaming (allenai/olmo-mix-1124;
+    Aurora precache at _OLMO_MIX_CACHE or data-lists/aurora/olmo-mix-1124.txt),
+    cosmopedia streaming (HuggingFaceTB/cosmopedia; precache if 429).
+    Dolmino blend via build_cpt_mixes.py is legacy -- not used here.
+
+    Launch:
+      python -m torchtitan.experiments.ezpz.train --module ezpz.agpt \\
+        --config agpt_2b_grain_cpt_anneal          # warmup
+      # mid-anneal resume (e.g. p=0.5 = 45/35/20):
+      # python -m torchtitan.experiments.ezpz.train --module ezpz.agpt \\
+      #   --config agpt_2b_grain_cpt_anneal_at --progress 0.5
+    """
+    return _agpt_2b_grain_cpt_anneal_base(
+        progress=0.0, folder="checkpoints/agpt-2b-grain-cpt-anneal"
+    )
+
+
+def agpt_2b_grain_cpt_anneal_at(progress: float = 0.5) -> FaultTolerantTrainer.Config:
+    """Grain CPT anneal at explicit ``progress`` in [0, 1] (mid-anneal resume).
+
+    Same as agpt_2b_grain_cpt_anneal but at _grain_anneal_weights(progress).
+    Use to resume or to launch phase-2 slices in parallel. Folder encodes
+    progress to avoid checkpoint collision.
+    """
+    p = max(0.0, min(1.0, float(progress)))
+    folder = f"checkpoints/agpt-2b-grain-cpt-anneal-p{int(round(p * 100)):03d}"
+    return _agpt_2b_grain_cpt_anneal_base(progress=p, folder=folder)
+
+
 def agpt_2b_mds_mix_owm_edu_6040() -> FaultTolerantTrainer.Config:
     """60/40 FineWeb-Edu kind-shift (SmolLM2 stage-1 recipe).
 
@@ -1055,7 +1327,6 @@ def agpt_2b_mds_mix_owm_edu_6040() -> FaultTolerantTrainer.Config:
     the ceiling is data-distribution, not more tokens on the same 7.4k.
     """
     return _agpt_2b_mds_mix_blend(0.40, 0.60, "checkpoints/agpt-2b-mds-mix-owm60-edu40")
-
 
 # --- Wave 3: SCIENCE-corpus 25% blends. The 75/25 owm/edu winner showed the
 # 25% slot is the lever; these swap generic edu for SCIENCE-dense corpora (the
