@@ -7,7 +7,7 @@
 #PBS -q workq
 #PBS -j oe
 # Grain CPT anneal 200-step smoke on Sunspot XPU 2N (24 ranks, 12/tile FLAT).
-# Validates 3-way anneal mix loads (olmo/fwe/cosmo) via on-the-fly Grain tokenization.
+# Validates 3-way anneal mix loads (olmo/fineweb-edu/cosmo) via on-the-fly Grain tokenization.
 # NO pre-tokenize / save_to_disk: Grain tokenizes dynamically via EZPZTokenizer ~4.5k tps/tile.
 set -o pipefail
 export ZE_FLAT_DEVICE_HIERARCHY=FLAT

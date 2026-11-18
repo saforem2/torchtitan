@@ -191,7 +191,7 @@ Commonsense held flat (no dolmino-style -7pp bleed) — consistent with gentle L
 
 ## Next steps (CPT -> SFT -> RL pipeline)
 
-1. **Grain CPT curriculum** — Replace static 60/40 `BlendCorpusDataLoader` with Annealing schedule via `torchtitan.components.data.{GrainDataLoader, SingleDatasetConfig, HuggingFaceStreamingSource, ConcatThenSplitPackingConfig}` + `EZPZTokenizer` (~4.5k tps/tile on-the-fly, no pre-tokenize). Configs: `agpt_2b_grain_cpt_anneal` (70/20/10 olmo/fwe/cosmo) -> `agpt_2b_grain_cpt_anneal_at(p)` linear to 20/50/30 over 190734 steps at `config_registry.py:1151-1315`. Lifts MMLU from 0.270 toward chance ceiling before SFT — see [12-cpt-grain-curriculum.md](12-cpt-grain-curriculum.md).
+1. **Grain CPT curriculum** — Replace static 60/40 `BlendCorpusDataLoader` with Annealing schedule via `torchtitan.components.data.{GrainDataLoader, SingleDatasetConfig, HuggingFaceStreamingSource, ConcatThenSplitPackingConfig}` + `EZPZTokenizer` (~4.5k tps/tile on-the-fly, no pre-tokenize). Configs: `agpt_2b_grain_cpt_anneal` (70/20/10 olmo/fineweb-edu/cosmo) -> `agpt_2b_grain_cpt_anneal_at(p)` linear to 20/50/30 over 190734 steps at `config_registry.py:1151-1315`. Lifts MMLU from 0.270 toward chance ceiling before SFT — see [12-cpt-grain-curriculum.md](12-cpt-grain-curriculum.md).
 
 2. **SFT MCQ template probe** — `agpt_2b_mds_sft_mcq_template_probe_streaming` (40/30/20/10 distill/tulu/mcq/math via `sft_data.py` + `AgptChatProcessor`, no pre-tokenize) on CPT-136800 HF or new Grain-anneal base. Gates: `format>=0.95 n_unclosed<=10 mean_gen_len<=550` before reading `cot_accuracy>=0.15` and `MMLU MCF>CF` — see [12-sft-mcq-template-probe.md](12-sft-mcq-template-probe.md).
 

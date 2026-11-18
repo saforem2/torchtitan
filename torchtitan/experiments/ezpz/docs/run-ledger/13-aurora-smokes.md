@@ -31,7 +31,7 @@
 ## Results
 
 - **Script:** Created on Aurora, `bash -n` `SYNTAX_OK`, VENV path verified present on target filesystem.
-- **Submit:** Header default is `q=debug-scaling`, which hit `would exceed queue generic's per-user limit of jobs in 'Q' state` — it shares the per-user `Q` cap with `small`. The five `small` jobs `9091877 9091888 9092662 9093715 9101108` are the **production per-chain continuations (released today) — do NOT qdel, hold, or modify**. `capacity` is the correct bypass for smokes. Resubmitted as `qsub -q capacity ...` — jobs `9101507` (Grain 200-step anneal, 70/20/10 -> 20/50/30 olmo/fwe/cosmo Grain streaming ~4.5k tps/tile, no pre-tokenize) and `9101512` (SFT 20-step MCQ 40/30/20/10) on `capacity`.
+- **Submit:** Header default is `q=debug-scaling`, which hit `would exceed queue generic's per-user limit of jobs in 'Q' state` — it shares the per-user `Q` cap with `small`. The five `small` jobs `9091877 9091888 9092662 9093715 9101108` are the **production per-chain continuations (released today) — do NOT qdel, hold, or modify**. `capacity` is the correct bypass for smokes. Resubmitted as `qsub -q capacity ...` — jobs `9101507` (Grain 200-step anneal, 70/20/10 -> 20/50/30 olmo/fineweb-edu/cosmo Grain streaming ~4.5k tps/tile, no pre-tokenize) and `9101512` (SFT 20-step MCQ 40/30/20/10) on `capacity`.
 - **Babysit:** See follow-up `13-aurora-smokes` entries / `logs/grain-cpt-anneal-smoke-aurora-<JOBID>/run.log` — expect `IMPORT_OK`, loss `~2.3-2.5`, `VERDICT: ok`.
 
 ## Next

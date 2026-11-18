@@ -1,7 +1,7 @@
 # 12 — Grain-Native CPT Curriculum (olmo / FineWeb-Edu / Cosmopedia Anneal)
 
 > **Branch:** `ezpz-cpt111k-eval-sft` — covers `torchtitan/experiments/ezpz/` only.
-> **One-line status:** New `agpt_2b_grain_cpt_anneal` (Warmup 70/20/10 olmo/fwe/cosmo -> anneal to 20/50/30 over 100B / 190734 steps, GBS=64) replaces static 60/40 `BlendCorpusDataLoader` to lift MMLU from **0.302->0.317 flat** (+0.015/135k, chance band); textbook/science injection is the only MMLU lever that has moved this base; `11-eval-matrix.md` + `12-cot-136800-eval.md` are the baselines.
+> **One-line status:** New `agpt_2b_grain_cpt_anneal` (Warmup 70/20/10 olmo/fineweb-edu/cosmo -> anneal to 20/50/30 over 100B / 190734 steps, GBS=64) replaces static 60/40 `BlendCorpusDataLoader` to lift MMLU from **0.302->0.317 flat** (+0.015/135k, chance band); textbook/science injection is the only MMLU lever that has moved this base; `11-eval-matrix.md` + `12-cot-136800-eval.md` are the baselines.
 > Every claim cites its source; inferences labeled `[INFERENCE]`.
 > **No pre-tokenization required** — Grain tokenizes dynamically on-the-fly via `EZPZTokenizer` (~4.5k tps/tile).
 
@@ -28,7 +28,7 @@
 | Slot | Dataset | Corpus | Grain source | How tokenized | Where / verified |
 |---|---|---|---|---|---|
 | olmo | `allenai/olmo-mix-1124` | Production pretrain (94.8% DCLM, `thread-a` Sec 2.1) | `HuggingFaceStreamingSource(path="allenai/olmo-mix-1124", split="train")` streaming raw text | `TextProcessor` + `EZPZTokenizer` inline | Aurora `data-lists/aurora/olmo-mix-1124.txt` on `/flare`; precache via `scripts/precache_hf_dataset.py` at `_OLMO_MIX_CACHE`; do NOT use gemma-tokenized `.bin/.idx` on `/gila` (wrong vocab/host). See `agpt/config_registry.py:1645-1672` for precache pattern. |
-| fwe | `fineweb-edu-100BT` | Filtered educational web (pedagogical textbooks, explanations, Q&A) | `HuggingFaceRandomAccessSource(path="parquet", load_dataset_kwargs={"data_files": _fineweb_edu_shards()})` — 16 local parquet shards | Same `TextProcessor` path | **`/lus/tegu/projects/datasets/datasets/fineweb-edu-100BT`** `sample/100BT/*.parquet` — 140 shards, ~280GB, 726k rows/~1.4B tok each; 16-shard subset `_FINEWEB_EDU_DIR` / `_fineweb_edu_shards()` = ~22B tokens sorted+sliced byte-identical. Source `agpt/config_registry.py:1489-1520`. |
+| fineweb-edu | `fineweb-edu-100BT` | Filtered educational web (pedagogical textbooks, explanations, Q&A) | `HuggingFaceRandomAccessSource(path="parquet", load_dataset_kwargs={"data_files": _fineweb_edu_shards()})` — 16 local parquet shards | Same `TextProcessor` path | **`/lus/tegu/projects/datasets/datasets/fineweb-edu-100BT`** `sample/100BT/*.parquet` — 140 shards, ~280GB, 726k rows/~1.4B tok each; 16-shard subset `_FINEWEB_EDU_DIR` / `_fineweb_edu_shards()` = ~22B tokens sorted+sliced byte-identical. Source `agpt/config_registry.py:1489-1520`. |
 | cosmo | `HuggingFaceTB/cosmopedia` | Synthetic textbooks (`auto_math_text+khanacademy+openstax+stanford+wikihow`) | `HuggingFaceStreamingSource(path="HuggingFaceTB/cosmopedia", split="train")` streaming raw text | Same | HF `HuggingFaceTB/cosmopedia`; precache via `precache_hf_dataset.py` if 429 at scale (same 429 caution as olmo at 384 ranks, `datasets.py:65`). Gated-science corpora (`nvidia/Nemotron-CC-Math-v1` `4plus`) remain gated; this run does not need them. |
 | (legacy) dolmino | — | DCLM redistrib `+6.88pp peS2o +1.97pp FLAN +1.36pp math` (`mmlu-letter-prior-at-chance.md`) | Blendcorpus data-lists via `build_cpt_mixes.py` (`olmo_src` ~2.717 weight sum → renormalized `scaled_block` to target fraction; writes `dolmino-mix-1124.txt`, `olmo50-dolmino50.txt`, `olmo25-dolmino75.txt`) | Old blendcorpus tokenizer (gemma `.bin/.idx`) | `torchtitan/experiments/ezpz/utils/build_cpt_mixes.py`. **Not used** by this Grain curriculum; documented as available + why rejected (degree tweak, 89% DCLM, same kind). Pilot bled -7.4pp HS / -10.4pp ARC-E at step-5960. |
 
@@ -40,7 +40,7 @@ Linear interpolation `w(p) = w0 + (w1 - w0) * p` where `p = step / 190734` in `[
 |---|---|---:|---:|---:|---|
 | **1 Warmup** | **0.00** | **0.70** | **0.20** | **0.10** | Preserve web diversity (94.8% DCLM commonsense anchors HS/ARC-E/PIQA); seed textbook Q&A (FWE pedagogical) + STEM textbooks (cosmo) without distribution shock. |
 | mid | 0.25 | 0.575 | 0.275 | 0.15 | Gradual shift past dolmino shock horizon (P0 1000) while still majority olmo. |
-| mid | 0.50 | 0.45 | 0.35 | 0.20 | Cross the live chain's terminal mix (40 OWM / 60 FWE) on aggregate educational fraction (fwe+cosmo = 0.55 vs 0.60 before, but now split textbook vs generic edu). |
+| mid | 0.50 | 0.45 | 0.35 | 0.20 | Cross the live chain's terminal mix (40 OWM / 60 FWE) on aggregate educational fraction (fineweb-edu+cosmo = 0.55 vs 0.60 before, but now split textbook vs generic edu). |
 | mid | 0.75 | 0.325 | 0.425 | 0.25 | Majority educational (FWE+cosmo 0.675); olmo floor still protects HS better than dolmino-100's -7.4pp case. |
 | **2 Anneal end** | **1.00** | **0.20** | **0.50** | **0.30** | **80% educational+textbook** (0.50+0.30) — stronger than SmolLM2 60/40 FWE and FineWeb-Edu 37.5 MMLU operating point; 20% olmo floor so commonsense never fully leaves (dolmino precedent: pure shift forgets ARC-E monotonically `0.619 -> 0.547`). |
 
@@ -127,7 +127,7 @@ PBS note: production CPT on Sunspot is `select=4 walltime=12:00:00 filesystems=t
 
 | Artifact | Path |
 |---|---|
-| Config fns | `torchtitan/experiments/ezpz/agpt/config_registry.py` — constants `_GRAIN_CPT_ANNEAL_STEPS=190734`, `_GRAIN_CPT_WARMUP_FRACTIONS=(0.70,0.20,0.10)`, `_GRAIN_CPT_END_FRACTIONS=(0.20,0.50,0.30)`, helpers `_grain_anneal_weights(p)` + `_grain_cpt_packed_{olmo,fwe,cosmo}()` + `_agpt_2b_grain_cpt_anneal_base(progress)` at `config_registry.py:1060-1315` |
+| Config fns | `torchtitan/experiments/ezpz/agpt/config_registry.py` — constants `_GRAIN_CPT_ANNEAL_STEPS=190734`, `_GRAIN_CPT_WARMUP_FRACTIONS=(0.70,0.20,0.10)`, `_GRAIN_CPT_END_FRACTIONS=(0.20,0.50,0.30)`, helpers `_grain_anneal_weights(p)` + `_grain_cpt_packed_{olmo,fineweb-edu,cosmo}()` + `_agpt_2b_grain_cpt_anneal_base(progress)` at `config_registry.py:1060-1315` |
 | Base it forks | `global_step138650` DCP at `_MDS_ANNEAL_BASE` (`config_registry.py:552-558`, env `MDS_ANNEAL_BASE` override); olmo-mix-1124 256N chain at `_OLMO_ANNEAL_BASE` (`config_registry.py:1113-1119`) for olmo anneal A/B comparison |
 | Data patterns | `config_registry.py:970-1021` (_agpt_2b_mds_mix_blend), `config_registry.py:1489-1625` (_fineweb_edu_shards, _use_fineweb_edu, _use_hf_streaming) |
 | Dataset mixes (legacy) | `torchtitan/experiments/ezpz/utils/build_cpt_mixes.py` — olmo x dolmino blendcorpus builder (renormalizes olmo ~2.717 vs dolmino 1.0 sums; writes `dolmino-mix-1124.txt`, `olmo50-dolmino50.txt`, `olmo25-dolmino75.txt`) |

@@ -178,6 +178,7 @@ def _has_usable_assistant_turn(sample: dict[str, Any], *, source: str) -> bool:
         for message in messages
     )
 
+
 class AgptChatProcessor(SampleProcessor):
     """Tokenize AGPT chat rows lazily and supervise assistant content only.
 
@@ -492,6 +493,7 @@ def gsm8k_plus_distill_cot_streaming_dataset(
         )
     )
 
+
 # ── MCQ / MMLU template helpers ───────────────────────────────────────
 # MMLU is a 4-way MCQ; the response template is the bottleneck pre-SFT.
 # See 12-sft-mcq-template-probe.md S 1 + S 3 for the P(template) *
@@ -517,16 +519,16 @@ def _mcq_messages(sample: dict[str, Any]) -> list[dict[str, str]]:
     if not isinstance(choices, (list, tuple)) or len(choices) < 2:
         return []
     # Normalize answer index.
-    ans = sample.get("answer")
-    if ans is None:
-        ans = sample.get("gold")
-    if ans is None:
-        ans = sample.get("label")
+    raw_answer = sample.get("answer")
+    if raw_answer is None:
+        raw_answer = sample.get("gold")
+    if raw_answer is None:
+        raw_answer = sample.get("label")
     try:
-        ans_idx = int(ans)  # type: ignore[arg-type]
+        ans_idx = int(raw_answer)  # type: ignore[arg-type]
     except Exception:
         # Letter answer like "A"/"B" -> index.
-        letter = str(ans).strip().upper()[:1]
+        letter = str(raw_answer).strip().upper()[:1]
         if letter in ("A", "B", "C", "D"):
             ans_idx = ord(letter) - ord("A")
         else:
@@ -619,9 +621,7 @@ def sft_mcq_template_probe_streaming_dataset(
                         name="auxiliary_train",
                         split="train",
                     ),
-                    pre_filters=(
-                        lambda s: bool(s.get("choices") or s.get("options")),
-                    ),
+                    pre_filters=(lambda s: bool(s.get("choices") or s.get("options")),),
                     processor=AgptChatProcessor.Config(source="mcq"),
                     post_filters=(lambda sequence: sequence is not None,),
                 ),
@@ -639,4 +639,6 @@ def sft_mcq_template_probe_streaming_dataset(
                 weight=math_weight,
             )
         )
-    return ConcatThenSplitPackingConfig(dataset=DatasetMixConfig(datasets=tuple(datasets)))
+    return ConcatThenSplitPackingConfig(
+        dataset=DatasetMixConfig(datasets=tuple(datasets))
+    )

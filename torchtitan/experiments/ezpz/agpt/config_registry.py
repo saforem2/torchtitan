@@ -1094,14 +1094,27 @@ def agpt_2b_mds_mix_owm_edu_9010() -> FaultTolerantTrainer.Config:
 #   retaining a 20% olmo floor so commonsense never fully leaves the mix.
 #
 # Why THESE ratios -- MMLU ablation justification (kind, not degree):
-# | Evidence | Signal | Implication for mix |
-# |----------|--------|----------------------|
-# | FineWeb-Edu paper arXiv:2406.17557 @350B 1.7B: FWE 37.5 vs DCLM 35.5 on MMLU; DCLM 62.3 vs 60.1 on HS -- FWE trades small HS deficit for clear MMLU gain | FWE specifically helps MCQ knowledge | Anchor: FWE must GROW to 50% by anneal end (vs 0% in olmo-mix, 60% static before) |
-# | Same paper @38B: 33.6% MMLU where next-best needs 300B (~8x token eff.) | FWE is token-efficient for MMLU early | Justifies 20->50 ramp, not flat 50 from step 0 (which would shock HS) |
-# | SmolLM2 arXiv:2502.02737 Sec 4.3 stage-1 60% FWE / 40% DCLM: 33.6% MMLU | 60/40 FWE is the validated stage-1 operating point | Our end-state 50% FWE + 30% cosmopedia = 80% educational/textbook, stronger than SmolLM2 for post-pretrain specialization |
-# | OLMo-2 1B on olmo-mix-1124 base, Dolmino mid-training arXiv:2501.00656 Tab 9: MMLU 26.9 -> 44.3 (+17.4) | Distribution shift on THIS base unlocks MMLU at 1B | Our shift is a KIND change (DCLM 94.8% -> textbook/science), not dolmino's degree tweak (89% DCLM, same kind, bled -7.4pp HS / -10.4pp ARC-E) |
-# | Dolmino-100 pilot: loss 2.49 vs 2.80 (won on loss) but HS -7.4pp ARC-E -10.4pp | Loss alone misleads; only downstream eval discriminates | Gate on MMLU max(CF,MCF) + band + commonsense at 150k (G1-G4), not loss |
-# | Cosmopedia synthetic textbooks (auto_math_text, khanacademy, openstax, stanford, wikihow) | Textbook Q&A directly matches MMLU STEM cloze format | 10->30 ramp: small at warmup (noise if too much synthetic early), dominant by end (STEM MMLU needs textbook density) |
+# Evidence -> signal -> implication for the mix:
+# - FineWeb-Edu paper arXiv:2406.17557 @350B 1.7B: FWE 37.5 vs DCLM 35.5 on MMLU; DCLM 62.3 vs
+#   60.1 on HS -- FWE trades small HS deficit for clear MMLU gain -> FWE specifically helps MCQ
+#   knowledge -> Anchor: FWE must GROW to 50% by anneal end (vs 0% in olmo-mix, 60% static
+#   before)
+# - Same paper @38B: 33.6% MMLU where next-best needs 300B (~8x token eff.) -> FWE is token-
+#   efficient for MMLU early -> Justifies 20->50 ramp, not flat 50 from step 0 (which would
+#   shock HS)
+# - SmolLM2 arXiv:2502.02737 Sec 4.3 stage-1 60% FWE / 40% DCLM: 33.6% MMLU -> 60/40 FWE is the
+#   validated stage-1 operating point -> Our end-state 50% FWE + 30% cosmopedia = 80%
+#   educational/textbook, stronger than SmolLM2 for post-pretrain specialization
+# - OLMo-2 1B on olmo-mix-1124 base, Dolmino mid-training arXiv:2501.00656 Tab 9: MMLU 26.9 ->
+#   44.3 (+17.4) -> Distribution shift on THIS base unlocks MMLU at 1B -> Our shift is a KIND
+#   change (DCLM 94.8% -> textbook/science), not dolmino's degree tweak (89% DCLM, same kind,
+#   bled -7.4pp HS / -10.4pp ARC-E)
+# - Dolmino-100 pilot: loss 2.49 vs 2.80 (won on loss) but HS -7.4pp ARC-E -10.4pp -> Loss alone
+#   misleads; only downstream eval discriminates -> Gate on MMLU max(CF,MCF) + band +
+#   commonsense at 150k (G1-G4), not loss
+# - Cosmopedia synthetic textbooks (auto_math_text, khanacademy, openstax, stanford, wikihow) ->
+#   Textbook Q&A directly matches MMLU STEM cloze format -> 10->30 ramp: small at warmup (noise
+#   if too much synthetic early), dominant by end (STEM MMLU needs textbook density)
 #
 # Tokenization: NO pre-tokenize needed. Grain tokenizes dynamically on-the-fly
 # via EZPZTokenizer (Config backend="hf", vocab 256000, gemma-7b tokenizer) at
@@ -1143,16 +1156,18 @@ def agpt_2b_mds_mix_owm_edu_9010() -> FaultTolerantTrainer.Config:
 # Resumption uses FaultTolerantTrainer DCP (checkpointer.folder) same as CPT
 # pilot; only dataloader weights change across phases.
 
-_GRAIN_CPT_ANNEAL_STEPS = 190734  # 100B / 524288 (GBS 64 * 8192), matches 60/40 FWE budget
-_GRAIN_CPT_WARMUP_FRACTIONS = (0.70, 0.20, 0.10)  # olmo / fwe / cosmo at p=0
-_GRAIN_CPT_END_FRACTIONS = (0.20, 0.50, 0.30)  # olmo / fwe / cosmo at p=1
+_GRAIN_CPT_ANNEAL_STEPS = (
+    190734  # 100B / 524288 (GBS 64 * 8192), matches 60/40 FWE budget
+)
+_GRAIN_CPT_WARMUP_FRACTIONS = (0.70, 0.20, 0.10)  # olmo / fineweb-edu / cosmo at p=0
+_GRAIN_CPT_END_FRACTIONS = (0.20, 0.50, 0.30)  # olmo / fineweb-edu / cosmo at p=1
 
 
 def _grain_anneal_weights(progress: float) -> tuple[float, float, float]:
     """Linear anneal fractions at ``progress`` in [0, 1] (clamped).
 
     olmo  0.70 -> 0.20  (-0.50*p)
-    fwe   0.20 -> 0.50  (+0.30*p)
+    fineweb-edu   0.20 -> 0.50  (+0.30*p)
     cosmo 0.10 -> 0.30  (+0.20*p)
     Sum is 1.0 at every p. p = step / 190734 for the 100B budget at GBS=64.
 
@@ -1272,9 +1287,9 @@ def agpt_2b_grain_cpt_anneal() -> FaultTolerantTrainer.Config:
     replacement for InterleavedHuggingFaceTextDataLoader.
 
     Anneal schedule (linear over 100B tokens / ~190k steps at GBS=64):
-      Phase 1 Warmup (this config, p=0.0): 70/20/10 olmo/fwe/cosmo -- preserves
+      Phase 1 Warmup (this config, p=0.0): 70/20/10 olmo/fineweb-edu/cosmo -- preserves
         web diversity (olmo 94.8% DCLM) while seeding textbook (10% cosmo).
-      Phase 2 Anneal (p=0.0->1.0): 70->20 olmo, 20->50 fwe, 10->30 cosmo via
+      Phase 2 Anneal (p=0.0->1.0): 70->20 olmo, 20->50 fineweb-edu, 10->30 cosmo via
         _grain_anneal_weights(p) where p = step / 190734. Resume at p>0 via
         agpt_2b_grain_cpt_anneal_at(progress=p).
 
@@ -1327,6 +1342,7 @@ def agpt_2b_mds_mix_owm_edu_6040() -> FaultTolerantTrainer.Config:
     the ceiling is data-distribution, not more tokens on the same 7.4k.
     """
     return _agpt_2b_mds_mix_blend(0.40, 0.60, "checkpoints/agpt-2b-mds-mix-owm60-edu40")
+
 
 # --- Wave 3: SCIENCE-corpus 25% blends. The 75/25 owm/edu winner showed the
 # 25% slot is the lever; these swap generic edu for SCIENCE-dense corpora (the

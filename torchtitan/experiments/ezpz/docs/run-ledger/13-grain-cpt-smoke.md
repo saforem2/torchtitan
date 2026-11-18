@@ -10,7 +10,7 @@
 - Submit: `qsub torchtitan/experiments/ezpz/scripts/grain_cpt_anneal_smoke_2n.sh` from `/home/foremans/torchtitan`
 
 ## Why
-Validate Grain 3-way mix loads before committing 4N 100B anneal. Prior CPT on static 60/40 flatlined MMLU 0.302 -> 0.317 (+0.015/135k), proving textbook/domain inject is needed — the anneal schedule (olmo 70->20, fwe 20->50, cosmo 10->30) addresses this.
+Validate Grain 3-way mix loads before committing 4N 100B anneal. Prior CPT on static 60/40 flatlined MMLU 0.302 -> 0.317 (+0.015/135k), proving textbook/domain inject is needed — the anneal schedule (olmo 70->20, fineweb-edu 20->50, cosmo 10->30) addresses this.
 
 ## Expected results
 - Loss ~2.3-2.5 (continuing from 2.4 at 38k)
