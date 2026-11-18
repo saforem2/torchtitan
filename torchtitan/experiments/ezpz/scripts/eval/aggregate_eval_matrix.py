@@ -140,21 +140,27 @@ def read_mmlu(path: Path):
         return "", ""
 
 
-def read_commonsense(path: Path):
-    """[HS acc_norm, ARC-E acc, PIQA acc_norm, ARC-C acc_norm] (schema columns)."""
-    if not path or not path.exists():
-        return [""] * 4
-    try:
-        data = json.loads(path.read_text())
-        res = data.get("results", data)
-        return [
-            _metric(res.get("hellaswag"), "acc_norm"),
-            _metric(res.get("arc_easy"), "acc"),
-            _metric(res.get("piqa"), "acc_norm"),
-            _metric(res.get("arc_challenge"), "acc_norm"),
-        ]
-    except Exception:
-        return [""] * 4
+def read_commonsense(paths):
+    """[HS acc_norm, ARC-E acc, PIQA acc_norm, ARC-C acc_norm] (schema columns).
+
+    Merges every given lm-eval results JSON: the commonsense sweep writes
+    HS/ARC-E/PIQA to results_0shot.json and ARC-C to results_25shot.json.
+    """
+    res = {}
+    for path in paths or []:
+        if not path.exists():
+            continue
+        try:
+            data = json.loads(path.read_text())
+        except Exception:
+            continue
+        res.update(data.get("results", data))
+    return [
+        _metric(res.get("hellaswag"), "acc_norm"),
+        _metric(res.get("arc_easy"), "acc"),
+        _metric(res.get("piqa"), "acc_norm"),
+        _metric(res.get("arc_challenge"), "acc_norm"),
+    ]
 
 
 def read_cot(path: Path):
@@ -200,7 +206,12 @@ def main():
     )
     ap.add_argument("--mmlu-json", default=None)
     ap.add_argument("--mmlu-per-subject", default=None)
-    ap.add_argument("--commonsense-json", default=None)
+    ap.add_argument(
+        "--commonsense-json",
+        nargs="+",
+        default=None,
+        help="lm-eval results JSONs to merge (e.g. results_0shot.json results_25shot.json)",
+    )
     ap.add_argument("--cot-jsonl", default=None)
     ap.add_argument(
         "--checkpoint",
@@ -302,9 +313,7 @@ def main():
 
     # Prepare optional artifact reads
     mmlu_mcf, mmlu_cf = read_mmlu(Path(args.mmlu_json) if args.mmlu_json else None)
-    cs_vals = read_commonsense(
-        Path(args.commonsense_json) if args.commonsense_json else None
-    )
+    cs_vals = read_commonsense([Path(p) for p in args.commonsense_json or []])
     cot_vals = read_cot(Path(args.cot_jsonl) if args.cot_jsonl else None)
 
     # Also probe known CoT output files (best-effort, do not fail)
