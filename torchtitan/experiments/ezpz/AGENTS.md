@@ -131,6 +131,28 @@
 
 ### Job Submission
 
+- **Submit from mbph/mbpr with `ezpz submit`, not `ssh aurora qsub ...`.**
+  For an existing PBS script (script mode), from the directory holding a
+  local copy of the script:
+
+  ```bash
+  uvx --from "git+https://github.com/saforem2/ezpz" ezpz submit <job>.pbs \
+    --remote aurora --backend ssh \
+    --workdir /lus/flare/projects/AuroraGPT/foremans/projects/saforem2/torchtitan-ezpz
+  ```
+
+  Script mode over SSH pipes the LOCAL file to `~/.ezpz-remote-job.sh` on
+  the host and runs a bare `qsub` there: `-N/-t/-q/-A` are dropped, and
+  there is no `-o` or `-v`. Every qsub option (`select`, walltime, queue,
+  account, filesystems, `-o`) must be a `#PBS` directive, and every knob
+  needs an in-script default. Pass `--backend ssh`: the default `auto`
+  tries IRI first on Aurora, and IRI submits with the CLI's node count
+  and walltime instead of the script's directives. Check with `--dry-run`
+  first. `ezpz` is not installed on mbph; use `uvx` as above. Watch with
+  `ezpz status aurora --backend ssh` (over SSH it lists every user's jobs;
+  `--owner` is documented for the IRI list only) and
+  `ezpz fetch <jobid> --remote aurora --lines 40`. Reference script:
+  `submit/aurora/seat-2b-20261118.pbs` (on the Aurora checkout).
 - **Current production path (native auto-retry):** Use
   `scripts/submit_agpt_{2b,20b,80b}_autoretry.sh`, which use
   `ezpz launch --auto-retry` (ezpz >= 0.17.1, PR #170) -- ezpz owns the
