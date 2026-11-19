@@ -1,5 +1,57 @@
 # Upstream Sync Log
 
+## 2026-11-18: upstream `fb1d2ba4`, 18 commits
+
+Merge of `pytorch/torchtitan` `main` at `fb1d2ba4` into `ezpz` `7ebad1d6`. Merge base
+`4122eafc`. No textual conflicts. Nothing under `models/llama3/` or
+`models/deepseek_v3/` changed, so nothing to replay onto `agpt/` or `moe/`. No upstream
+commit touches a core file `ezpz` has modified.
+
+### What the 18 commits change for us
+
+| Upstream (PR) | Effect on ezpz |
+|---|---|
+| `validate_model_training_config` checks that every sharding layout names each active mesh axis (#5995) | Broke every MoE config with `expert_parallel_degree > 1` at parse time: ezpz flavors are templates, and `FaultTolerantTrainer.__init__` applied the final sharding only after `Trainer.Config.__post_init__` had validated. Fixed in `d6785184`: `update_from_config` now runs in `FaultTolerantTrainer.Config.__post_init__`, before the parent |
+| `Module` raises when a parameter-owning module has no `sharding_config` under TP/EP (#5995) | Runtime only. agpt TP=2 passes (Sunspot `12484892`) |
+| Per-block remat overrides; `ActivationRematConfig.apply(model)` -> `apply(module, *, module_fqn=...)` (#6104) | `agpt/parallelize.py` and `moe/parallelize.py` pass the module positionally; unchanged |
+| `AcceleratorGraphWrapper` drops the `empty_cache()` before capture (#6131) | ezpz keeps XPU out of upstream graph capture; no effect on XPU |
+| XPU runtime env plumbing for CI (#6126) | `run_train.sh` and the integration-test runner only |
+| datasets >= 5.2.0 in CI docker requirements (#6095) | CI only; the venvs are unchanged |
+| graph_trainer fusion_finder / autokernel skills, SGLang generator, RL transport default, test infra | Not used by ezpz |
+
+### Pre-existing: MoE EP on XPU
+
+`moe_debugmodel_ep` failed at parse time on Sunspot before this sync too
+(`origin/ezpz` `7ebad1d6`): the accelerator-graph check in `validate_model_training_config`
+rejects the all-to-all dispatcher, and ezpz's XPU opt-out
+(`maybe_disable_accelerator_graphs`) ran only in `_initialize_forward_backward`. Fixed in
+`bd20b261` by running it in `Config.__post_init__`.
+`tests/test_config_validation_order.py` parses MoE EP configs with graphs reported
+supported on XPU; it fails on `7ebad1d6` and passes after both fixes.
+
+### Integration smokes
+
+Branch `ezpz-integration-20261118` (this sync plus #97-#102, tree `4103a65a1d`). Each
+run: 10 seeded steps, checkpoint at 5, resume, compare steps 6-10.
+
+| Config | Aurora | Polaris (A100 40 GB) |
+|---|---|---|
+| `agpt_2b_real` | ok `9101302` | ok `7860343` |
+| `agpt_v2_4b_4k_olmo_mix` | ok `9101343` | ok `7860397` |
+| `agpt_v2_10b_4k_olmo_mix` | ok `9101671` | ok `7860453` |
+| `agpt_20b_real` | ok `9101414` | ok `7861136` (8N) |
+| `agpt_debugmodel` TP=2 | ok `9101585` | -- |
+| `moe_debugmodel_ep` EP=2 | fails `9101603` | -- |
+
+Resume matched the uninterrupted run on every passing arm. The first Aurora 10B
+(`9101375`) trained to step 10 and the resume rank was killed (rc `137`); the rerun
+`9101671` passed. Sunspot and Sirius were down for maintenance.
+
+Known issue: MoE EP=2 on Aurora fails at FSDP setup with `ValueError: Parameter
+'weight' has spmd_types annotation on axis default_pg, which is neither a non-FSDP
+storage-mesh axis nor contained in the FSDP DP mesh.` Parsing now succeeds (the
+`bd20b261` fix); this is the next failure in the same config. Not fixed here.
+
 ## 2026-11-16: upstream `4122eafc`, 1 commit; `631d544b` sync landed
 
 PR #90 (the `631d544b` sync below) merged into `ezpz` as `a4de9f29a6`, then PR #92 (docs) as `e4d84f795b`. The #90 head `919e2eeb3c` branched before #89, #91 and #93; the merge is clean. Two files changed on both sides and auto-merged: `train.py` (ezpz side: `getattr(torchtitan, "__version__", ...)`) and `scripts/sync_smoke_alcf.sh` (#91's rewrite plus the sync's empty `KNOWN_FAILURES`). The sync hunk carries over byte for byte.

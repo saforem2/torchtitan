@@ -338,7 +338,8 @@ class EzpzTrainingEngine(TorchFTTrainingEngine):
         states[MODEL] = ModelWrapper(unwrapped_parts)
 
     def _initialize_forward_backward(self) -> None:
-        maybe_disable_accelerator_graphs(self.config)
+        # Accelerator graphs were already disabled where needed, in
+        # Config.__post_init__ (maybe_disable_accelerator_graphs).
         super()._initialize_forward_backward()
         if not self.parallelism_context.pp_enabled:
             self._run_forward_backward = maybe_wrap_with_xpu_graph(
@@ -764,6 +765,19 @@ class FaultTolerantTrainer(TorchFTTrainer):
             self._apply_legacy_training_fields()
             apply_legacy_metrics_fields(self.metrics)
             self._sync_model_context_length()
+            # ezpz flavors are prebuilt templates whose sharding assumes the
+            # default parallelism; the CLI fixes parallelism afterwards. Apply
+            # it before the parent validates the model's declared mesh axes
+            # (validate_model_training_config), or EP/SP layouts are checked
+            # against the template and rejected. Idempotent: __post_init__
+            # runs again after tyro parses the CLI.
+            update_from_config = getattr(self.model, "update_from_config", None)
+            if update_from_config is not None:
+                update_from_config(config=self)
+            # Same ordering problem: the parent's validator rejects graph
+            # capture with an all-to-all EP dispatcher, so ezpz's opt-out
+            # (XPU, native DDP, non-grouped_mm experts) must run first.
+            maybe_disable_accelerator_graphs(self)
             # ``@dataclass(slots=True)`` returns a replacement class object;
             # call the parent explicitly so Python 3.12 does not use the stale
             # class captured by zero-argument ``super()``.
@@ -781,16 +795,11 @@ class FaultTolerantTrainer(TorchFTTrainer):
         self.config = config
         config.model = copy.deepcopy(config.model)
         model_config = config.model
-        # Sharding is baked into upstream model configs at construction time,
-        # but ezpz flavors are prebuilt templates and the CLI fixes
-        # parallelism afterwards, so the model config re-applies its sharding
-        # (and the legacy ``compile`` mapping) here.
+        # The legacy ``compile`` mapping; the model's sharding for the final
+        # parallelism is re-applied by ``config.__post_init__()`` below.
         model_config.local_compile = LocalCompileConfig(
             regions=local_compile_regions(config.compile)
         )
-        update_from_config = getattr(model_config, "update_from_config", None)
-        if update_from_config is not None:
-            update_from_config(config=config)
         if config.override.imports:
             apply_overrides(config.override, config)
         config.__post_init__()
