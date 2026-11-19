@@ -43,7 +43,7 @@ from torch.distributed.checkpoint.storage import StorageReader
 from torch.distributed.tensor import DTensor, Replicate
 
 from torchtitan.components.checkpointer import CheckpointManager
-from torchtitan.components.checkpointer.base import MODEL
+from torchtitan.components.checkpointer.base import EMA, MODEL
 from torchtitan.experiments.ezpz.logging import logger
 from torchtitan.tools import filesystem
 
@@ -189,3 +189,7 @@ class ReplicaAwareCheckpointManager(CheckpointManager):
             state_dict = finish_load(state_dict)
         if MODEL in states:
             states[MODEL].load_state_dict(state_dict)
+        # Same as core: reseed EMA from the loaded weights when EMA itself was
+        # not restored (excluded, or a model-only load).
+        if MODEL in states and EMA in self.states and EMA not in states:
+            self.states[EMA].load_state_dict({})

@@ -13,7 +13,6 @@ from typing import Any, Literal
 import ezpz
 import ezpz.distributed
 
-from torchtitan.components.checkpointer import CheckpointManager
 from torchtitan.components.data import (
     ConcatThenSplitPackingConfig,
     GrainDataLoader,
@@ -44,6 +43,8 @@ from torchtitan.experiments.ezpz.optimizer.containers import (
     default_muon,
     default_sophiag,
 )
+
+from torchtitan.experiments.ezpz.replica_aware_load import ReplicaAwareCheckpointManager
 from torchtitan.experiments.ezpz.trainer import FaultTolerantTrainer
 from torchtitan.experiments.ezpz.validator import EzpzValidator
 from torchtitan.experiments.torchft.config.job_config import FaultTolerance
@@ -382,7 +383,7 @@ def _base_config(flavor: str) -> FaultTolerantTrainer.Config:
         ),
         dataloader=BlendCorpusDataLoader.Config(dataset="c4_test"),
         metrics=MetricsProcessor.Config(log_freq=10),
-        checkpointer=CheckpointManager.Config(
+        checkpointer=ReplicaAwareCheckpointManager.Config(
             interval=500,
             last_save_model_only=False,
         ),
@@ -709,8 +710,13 @@ def agpt_2b_mds154391_tulu_math_uc_streaming() -> FaultTolerantTrainer.Config:
 
 
 def _cot_sft_config(
-    dataset_fn, folder: str, *, lr: float = 2e-5, steps: int = 900,
-    seq_len: int = 1024, flavor: str = "2b-mds",
+    dataset_fn,
+    folder: str,
+    *,
+    lr: float = 2e-5,
+    steps: int = 900,
+    seq_len: int = 1024,
+    flavor: str = "2b-mds",
     local_batch_size: int = 2,
 ):
     """Shared builder for Grain-native CoT SFT (same trainer as CPT).
@@ -728,15 +734,22 @@ def _cot_sft_config(
     else:
         raise ValueError(f"unknown flavor {flavor!r}")
 
-    cfg = agpt(flavor, local_batch_size=local_batch_size,
-               activation_checkpoint_mode="none",
-               seq_len=seq_len, dtype="float32", compile=True,
-               checkpoint_interval=300, hf_assets_path=hfa)
+    cfg = agpt(
+        flavor,
+        local_batch_size=local_batch_size,
+        activation_checkpoint_mode="none",
+        seq_len=seq_len,
+        dtype="float32",
+        compile=True,
+        checkpoint_interval=300,
+        hf_assets_path=hfa,
+    )
 
     # debugmodel smoke: train from scratch (no DCP to load).
     if flavor == "debugmodel":
-        cfg.checkpointer = CheckpointManager.Config(
-            interval=300, last_save_model_only=False)
+        cfg.checkpointer = ReplicaAwareCheckpointManager.Config(
+            interval=300, last_save_model_only=False
+        )
         cfg.checkpointer.folder = folder
     else:
         if not (base / "model-00001-of-00001.safetensors").is_file():
@@ -747,7 +760,8 @@ def _cot_sft_config(
         prior = cfg.checkpointer
         assert prior is not None
         cfg.checkpointer = GrainStreamingCheckpointManager.Config(
-            **{field.name: getattr(prior, field.name) for field in fields(prior)})
+            **{field.name: getattr(prior, field.name) for field in fields(prior)}
+        )
         cfg.checkpointer.initial_load_path = str(dcp_base)
         cfg.checkpointer.initial_load_in_hf = False
         cfg.checkpointer.initial_load_model_only = True
@@ -757,8 +771,13 @@ def _cot_sft_config(
     cfg.checkpoint = cfg.checkpointer
 
     cfg.dataloader = GrainDataLoader.Config(
-        dataset=dataset_fn(), seed=42, shuffle=True, repeat=True,
-        streaming_shuffle_buffer_size=10_000, num_prefetch_microbatches=2)
+        dataset=dataset_fn(),
+        seed=42,
+        shuffle=True,
+        repeat=True,
+        streaming_shuffle_buffer_size=10_000,
+        num_prefetch_microbatches=2,
+    )
     cfg.optim.optimizer = default_adamw(lr=lr)
     cfg.optim.lr_scheduler.warmup_steps = 0
     cfg.optim.lr_scheduler.decay_ratio = 0.0
@@ -774,38 +793,52 @@ def _cot_sft_config(
 
 def agpt_2b_mds_gsm8k_r1cot_streaming() -> FaultTolerantTrainer.Config:
     """GSM8K alone via Grain streaming -- Stage-2 warm-up, no TRL."""
-    return _cot_sft_config(gsm8k_r1cot_streaming_dataset,
-                           "checkpoints/agpt2b-mds-gsm8k-r1cot-streaming")
+    return _cot_sft_config(
+        gsm8k_r1cot_streaming_dataset, "checkpoints/agpt2b-mds-gsm8k-r1cot-streaming"
+    )
 
 
 def agpt_2b_mds_distill_cot_streaming() -> FaultTolerantTrainer.Config:
     """50/50 OpenThoughts + OpenR1 CoT via Grain -- replaces --pretokenize_to."""
-    return _cot_sft_config(distill_cot_mix_streaming_dataset,
-                           "checkpoints/agpt2b-mds-distill-cot-streaming")
+    return _cot_sft_config(
+        distill_cot_mix_streaming_dataset,
+        "checkpoints/agpt2b-mds-distill-cot-streaming",
+    )
 
 
 def agpt_2b_mds_gsm8k_plus_distill_streaming() -> FaultTolerantTrainer.Config:
     """GSM8K + distill breadth via Grain (all 3 CoT sources)."""
-    return _cot_sft_config(gsm8k_plus_distill_cot_streaming_dataset,
-                           "checkpoints/agpt2b-mds-gsm8k-plus-distill-streaming")
+    return _cot_sft_config(
+        gsm8k_plus_distill_cot_streaming_dataset,
+        "checkpoints/agpt2b-mds-gsm8k-plus-distill-streaming",
+    )
 
 
 # ── Sunspot-divisible smokes (debugmodel, hd=768 % 12 == 0) ──────────
 # These prove the Grain CoT pipeline on Sunspot's PPN=12 mesh. The dataset
 # code is flavor-agnostic; Polaris keeps the 2b-mds production shape.
 
+
 def agpt_debugmodel_gsm8k_r1cot_streaming() -> FaultTolerantTrainer.Config:
     """GSM8K CoT smoke on debugmodel -- Sunspot PPN=12 safe."""
-    return _cot_sft_config(gsm8k_r1cot_streaming_dataset,
-                           "checkpoints/agpt-debug-gsm8k-r1cot-streaming",
-                           flavor="debugmodel", local_batch_size=8, seq_len=1024)
+    return _cot_sft_config(
+        gsm8k_r1cot_streaming_dataset,
+        "checkpoints/agpt-debug-gsm8k-r1cot-streaming",
+        flavor="debugmodel",
+        local_batch_size=8,
+        seq_len=1024,
+    )
 
 
 def agpt_debugmodel_distill_cot_streaming() -> FaultTolerantTrainer.Config:
     """OpenThoughts+OpenR1 smoke on debugmodel -- Sunspot PPN=12 safe."""
-    return _cot_sft_config(distill_cot_mix_streaming_dataset,
-                           "checkpoints/agpt-debug-distill-cot-streaming",
-                           flavor="debugmodel", local_batch_size=8, seq_len=1024)
+    return _cot_sft_config(
+        distill_cot_mix_streaming_dataset,
+        "checkpoints/agpt-debug-distill-cot-streaming",
+        flavor="debugmodel",
+        local_batch_size=8,
+        seq_len=1024,
+    )
 
 
 # --- data-mix A/B (stage-2 mid-training): flat won the anneal, so DATA is the
@@ -1637,6 +1670,7 @@ def _agpt_v2_4k(
         load_dataset_kwargs={"data_dir": _olmo_mix_subset_dir("wiki")},
     )
 
+
 def agpt_v2_4b_4k() -> FaultTolerantTrainer.Config:
     """4.64B (5B_olmo2tok geometry) at 4K seqlen, OLMo-3 tokenizer, streaming.
 
@@ -1677,9 +1711,7 @@ def _olmo_mix_raw_files() -> list[str]:
     """
     manifest = os.environ.get("AGPT_V2_DATA_MANIFEST", "")
     if not manifest:
-        raise ValueError(
-            "AGPT_V2_DATA_MANIFEST must name a raw olmo-mix file manifest"
-        )
+        raise ValueError("AGPT_V2_DATA_MANIFEST must name a raw olmo-mix file manifest")
     files = [line.strip() for line in Path(manifest).read_text().splitlines()]
     files = [f for f in files if f]
     if not files:
@@ -1755,8 +1787,6 @@ def agpt_v2_10b_4k_olmo_mix() -> FaultTolerantTrainer.Config:
     """9.48B at 4K seqlen on the full raw olmo-mix-1124 (umbrella seat)."""
 
     return _agpt_v2_4k_olmo_mix("10b_olmo2tok_dp12")
-
-
 
 
 # Optimizer-comparison arms for the OLMo-2 ladder.
@@ -2513,7 +2543,9 @@ def ezpz_agpt_80b_deep_from_json() -> FaultTolerantTrainer.Config:
 # for this vocab. OLMo-2-1124-7B tokenizer.json is byte-identical to OLMo-3.
 
 
-def _polaris_dolma_grain(cfg: FaultTolerantTrainer.Config) -> FaultTolerantTrainer.Config:
+def _polaris_dolma_grain(
+    cfg: FaultTolerantTrainer.Config,
+) -> FaultTolerantTrainer.Config:
     """Wire olmo-mix-1124 via Grain + HF streaming (precached local parquet).
 
     Uses the Polaris HF cache (/home/foremans/.cache/huggingface/hub) where
