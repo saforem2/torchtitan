@@ -135,12 +135,15 @@ cfg=agpt_2b_mds_sft_mcq_template_probe_streaming()
 print('IMPORT_OK', cfg.training.steps, cfg.checkpointer.folder, cfg.dataloader.dataset.dataset.datasets[0].weight)
 " 2>&1 | tee -a "${LOG}"
 if ! grep -q "IMPORT_OK" "${LOG}"; then echo "VERDICT: import_failed" | tee -a "${LOG}"; exit 1; fi
+# The config's production batch is 6144 sequences/step: 128 microbatches per
+# rank at 24 ranks, ~20 min/step. One 2048-token microbatch per rank instead.
 echo "--- 20-step SFT MCQ template probe (Grain 40/30/20/10, no pre-tokenize) ---" | tee -a "${LOG}"
 "${VENV}/bin/python" -c 'from ezpz.cli import main; main()' launch \
     --nproc 24 --nproc_per_node 12 -- \
     "${VENV}/bin/python" -m torchtitan.experiments.ezpz.train \
     --module ezpz.agpt --config agpt_2b_mds_sft_mcq_template_probe_streaming \
     --training.steps=20 \
+    --training.num-tokens-per-train-step=49152 \
     --checkpoint.no-enable --compile.no-enable \
     2>&1 | tee -a "${LOG_DIR}/train.log" | tee -a "${LOG}"
 rc=${PIPESTATUS[0]}
