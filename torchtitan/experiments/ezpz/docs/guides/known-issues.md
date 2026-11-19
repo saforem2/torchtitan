@@ -2,6 +2,11 @@
 
 Troubleshooting reference for running ezpz experiments across ALCF machines.
 
+> **Open production blockers (2026-11-19):**
+> [4B/10B v2 512N DCP load stall](known-bugs/dcp-load-stall-6144-ranks.md) and
+> [20B 512N DCP save-plan segfault](known-bugs/dcp-save-scatter-segfault-6144-ranks.md).
+> Handoff checklist: [handoff-2026-11-19.md](../handoff-2026-11-19.md).
+
 ## `--checkpoint.async-mode=async` kills the cluster at 20B 512N+
 
 **Symptoms:** 20B 512N runs reach a `step-N00` boundary, the async
