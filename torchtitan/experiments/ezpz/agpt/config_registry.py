@@ -1160,9 +1160,11 @@ def agpt_2b_mds_mix_owm_edu_9010() -> FaultTolerantTrainer.Config:
 # Resumption uses FaultTolerantTrainer DCP (checkpointer.folder) same as CPT
 # pilot; only dataloader weights change across phases.
 
-_GRAIN_CPT_ANNEAL_STEPS = (
-    190734  # 100B / 524288 (GBS 64 * 8192), matches 60/40 FWE budget
-)
+# 100B tokens = 190734 steps x 524288 tokens (64 x 8192), the 60/40 FWE budget.
+# The step size is pinned so the budget does not scale with the DP degree; a
+# DP degree whose 8192-token microbatches do not divide it fails at trainer init.
+_GRAIN_CPT_ANNEAL_TOKENS_PER_STEP = 64 * 8192
+_GRAIN_CPT_ANNEAL_STEPS = 190734
 _GRAIN_CPT_WARMUP_FRACTIONS = (0.70, 0.20, 0.10)  # olmo / fineweb-edu / cosmo at p=0
 _GRAIN_CPT_END_FRACTIONS = (0.20, 0.50, 0.30)  # olmo / fineweb-edu / cosmo at p=1
 
@@ -1262,6 +1264,7 @@ def _agpt_2b_grain_cpt_anneal_base(
     """
     cfg = _agpt_2b_mds_mix_base()
     cfg.training.steps = _GRAIN_CPT_ANNEAL_STEPS
+    cfg.training.num_tokens_per_train_step = _GRAIN_CPT_ANNEAL_TOKENS_PER_STEP
     from torchtitan.components.data import DatasetMixConfig, WeightedDataset
 
     w_olmo, w_fwe, w_cosmo = _grain_anneal_weights(progress)
@@ -1316,21 +1319,28 @@ def agpt_2b_grain_cpt_anneal() -> FaultTolerantTrainer.Config:
         --config agpt_2b_grain_cpt_anneal          # warmup
       # mid-anneal resume (e.g. p=0.5 = 45/35/20):
       # python -m torchtitan.experiments.ezpz.train --module ezpz.agpt \\
-      #   --config agpt_2b_grain_cpt_anneal_at --progress 0.5
+      # GRAIN_CPT_ANNEAL_PROGRESS=0.5 \\
+      #   python -m torchtitan.experiments.ezpz.train --module ezpz.agpt \\
+      #   --config agpt_2b_grain_cpt_anneal_at
     """
     return _agpt_2b_grain_cpt_anneal_base(
         progress=0.0, folder="checkpoints/agpt-2b-grain-cpt-anneal"
     )
 
 
-def agpt_2b_grain_cpt_anneal_at(progress: float = 0.5) -> FaultTolerantTrainer.Config:
-    """Grain CPT anneal at explicit ``progress`` in [0, 1] (mid-anneal resume).
+def agpt_2b_grain_cpt_anneal_at() -> FaultTolerantTrainer.Config:
+    """Grain CPT anneal at progress ``GRAIN_CPT_ANNEAL_PROGRESS`` in [0, 1].
 
     Same as agpt_2b_grain_cpt_anneal but at _grain_anneal_weights(progress).
-    Use to resume or to launch phase-2 slices in parallel. Folder encodes
-    progress to avoid checkpoint collision.
+    Use to resume or to launch phase-2 slices in parallel. ``ConfigManager``
+    calls config factories without arguments, so progress comes from the
+    environment (default 0.5). Folder encodes progress to avoid checkpoint
+    collision.
     """
-    p = max(0.0, min(1.0, float(progress)))
+    progress = float(os.environ.get("GRAIN_CPT_ANNEAL_PROGRESS", "0.5"))
+    if not 0.0 <= progress <= 1.0:
+        raise ValueError(f"GRAIN_CPT_ANNEAL_PROGRESS must be in [0, 1]; got {progress}")
+    p = progress
     folder = f"checkpoints/agpt-2b-grain-cpt-anneal-p{int(round(p * 100)):03d}"
     return _agpt_2b_grain_cpt_anneal_base(progress=p, folder=folder)
 

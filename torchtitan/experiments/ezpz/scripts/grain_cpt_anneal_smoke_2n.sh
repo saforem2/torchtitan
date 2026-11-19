@@ -67,6 +67,7 @@ echo "--- 200-step Grain anneal smoke (70/20/10 warmup, agpt_2b_grain_cpt_anneal
     "${VENV}/bin/python" -m torchtitan.experiments.ezpz.train \
     --module ezpz.agpt --config agpt_2b_grain_cpt_anneal \
     --training.steps=200 \
+    --training.num-tokens-per-train-step=196608 \
     --checkpoint.no-enable --compile.no-enable --validator.no-enable \
     2>&1 | tee -a "${LOG_DIR}/train.log" | tee -a "${LOG}"
 rc=${PIPESTATUS[0]}

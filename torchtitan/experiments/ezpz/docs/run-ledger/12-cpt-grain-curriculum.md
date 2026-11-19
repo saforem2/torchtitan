@@ -65,7 +65,7 @@ Token budget illustration (100B total, token-weighted rows):
 
 Exact per-step fractions via `_grain_anneal_weights(p)` — not quantized to phase buckets above.
 
-**How progress advances:** `agpt_2b_grain_cpt_anneal()` is Phase 1 Warmup at `p=0.0`. Resumption at anneal slices uses `agpt_2b_grain_cpt_anneal_at(progress=p)` with `p` from resume step / 190734; folder encodes `p` (`checkpoints/agpt-2b-grain-cpt-anneal-p{100*p:03d}`) to avoid collision. The trainer itself is stateless re: data weights — only `cfg.dataloader` changes across phases (same mechanism as the 60/40 FWE fork from `checkpointer.initial_load_path`). See `config_registry.py:1140-1315` + `09-gate-rl-probe.md` for `initial_load_path` fork semantics.
+**How progress advances:** `agpt_2b_grain_cpt_anneal()` is Phase 1 Warmup at `p=0.0`. Resumption at anneal slices uses `agpt_2b_grain_cpt_anneal_at` with `GRAIN_CPT_ANNEAL_PROGRESS=p`, `p` = resume step / 190734. Each step is pinned at 524,288 tokens (64 x 8192), so 190,734 steps are 100B tokens at any DP degree that divides it (1, 2, 4, ..., 64 ranks); folder encodes `p` (`checkpoints/agpt-2b-grain-cpt-anneal-p{100*p:03d}`) to avoid collision. The trainer itself is stateless re: data weights — only `cfg.dataloader` changes across phases (same mechanism as the 60/40 FWE fork from `checkpointer.initial_load_path`). See `config_registry.py:1140-1315` + `09-gate-rl-probe.md` for `initial_load_path` fork semantics.
 
 ### 1.3 Commands
 
@@ -75,8 +75,8 @@ python -m torchtitan.experiments.ezpz.train --module ezpz.agpt \
   --config agpt_2b_grain_cpt_anneal
 
 # Mid-anneal resume / parallel anneal slice (e.g. p=0.5 == 45/35/20)
-python -m torchtitan.experiments.ezpz.train --module ezpz.agpt \
-  --config agpt_2b_grain_cpt_anneal_at --progress 0.5
+GRAIN_CPT_ANNEAL_PROGRESS=0.5 python -m torchtitan.experiments.ezpz.train \
+  --module ezpz.agpt --config agpt_2b_grain_cpt_anneal_at
 
 # Verify imports without launching training (required by acceptance)
 python -c "from torchtitan.experiments.ezpz.agpt.config_registry import agpt_2b_grain_cpt_anneal; print(agpt_2b_grain_cpt_anneal)"
