@@ -39,6 +39,10 @@ from torchtitan.experiments.ezpz.blendcorpus.build_tokenizer import EZPZTokenize
 from torchtitan.experiments.ezpz.compile import CompileConfig
 from torchtitan.experiments.ezpz.config import EzpzMetricsConfig, EzpzTrainingConfig
 from torchtitan.experiments.ezpz.grain_checkpoint import GrainStreamingCheckpointManager
+from torchtitan.experiments.ezpz.hf_manifest import (
+    HuggingFaceManifestStreamingSource,
+    MANIFEST_DIR,
+)
 from torchtitan.experiments.ezpz.optimizer.containers import (
     default_adamw,
     default_mano,
@@ -1138,11 +1142,11 @@ def agpt_2b_mds_mix_owm_edu_9010() -> FaultTolerantTrainer.Config:
 #   Legacy blendcorpus path; Grain curriculum does NOT use it.
 # - olmo-mix-1124: production pretrain mix (94.8% DCLM, 2.0% academic peS2o/
 #   arxiv research papers not pedagogy; data-lists/aurora/olmo-mix-1124.txt
-#   on Aurora /flare; AllenAI HF allenai/olmo-mix-1124 streaming fallback;
-#   precached wiki subset at _OLMO_MIX_CACHE on Aurora $HOME).
-# - cosmopedia: HuggingFaceTB/cosmopedia (synthetic textbook corpus; streamed
-#   via HuggingFaceStreamingSource same as OWM; precache via
-#   scripts/precache_hf_dataset.py if 429 at scale).
+#   on Aurora /flare; precached wiki subset at _OLMO_MIX_CACHE on Aurora
+#   $HOME). The Grain anneal streams allenai/olmo-mix-1124 from a frozen
+#   manifest (data-lists/hf-manifests/, hf_manifest.py).
+# - cosmopedia: HuggingFaceTB/cosmopedia textbook subsets (synthetic textbook
+#   corpus), streamed from a frozen manifest like olmo-mix.
 #
 # Sampling: Weighted Interleaved via Grain's DatasetMixConfig (grain.Mix with
 # weights). Interleaved = strict weighted sampling without replacement per
@@ -1186,12 +1190,15 @@ def _grain_anneal_weights(progress: float) -> tuple[float, float, float]:
 
 
 def _grain_cpt_packed_olmo() -> ConcatThenSplitPackingConfig:
-    """Packed olmo-mix-1124 source for Grain anneal (streaming, HF text)."""
+    """Packed olmo-mix-1124 source for Grain anneal (streaming, HF text).
+
+    Streams the frozen manifest (all 28,878 ``data/*`` files) so ranks make no
+    Hub API calls; see ``hf_manifest.py``.
+    """
     return ConcatThenSplitPackingConfig(
         dataset=SingleDatasetConfig(
-            source=HuggingFaceStreamingSource.Config(
-                path="allenai/olmo-mix-1124",
-                split="train",
+            source=HuggingFaceManifestStreamingSource.Config(
+                path=str(MANIFEST_DIR / "allenai--olmo-mix-1124.json.gz"),
             ),
             processor=TextProcessor.Config(),
             post_filters=(lambda sample: sample is not None,),
@@ -1221,38 +1228,17 @@ def _grain_cpt_packed_fwe() -> ConcatThenSplitPackingConfig:
     )
 
 
-_COSMOPEDIA_TEXTBOOK_SUBSETS = (
-    "auto_math_text",
-    "khanacademy",
-    "openstax",
-    "stanford",
-    "wikihow",
-)
-
-
 def _grain_cpt_packed_cosmo() -> ConcatThenSplitPackingConfig:
     """Packed cosmopedia source for Grain anneal (synthetic textbook, streaming).
 
     HuggingFaceTB/cosmopedia is the textbook corpus (auto_math_text, khanacademy,
-    openstax, stanford, wikihow). Streamed via HuggingFaceStreamingSource so no
-    pre-tokenized corpus is needed; precache via scripts/precache_hf_dataset.py
-    if 429 at scale (same 429 caution as olmo-mix at 384 ranks, datasets.py:65).
+    openstax, stanford, wikihow). Streamed from a frozen manifest so no
+    pre-tokenized corpus is needed and ranks make no Hub API calls.
     """
     return ConcatThenSplitPackingConfig(
         dataset=SingleDatasetConfig(
-            source=HuggingFaceStreamingSource.Config(
-                path="HuggingFaceTB/cosmopedia",
-                split="train",
-                # The repo has one config per subset and no default; select the
-                # five textbook subsets by file instead of a single config name.
-                load_dataset_kwargs={
-                    "data_files": {
-                        "train": [
-                            f"data/{subset}/*.parquet"
-                            for subset in _COSMOPEDIA_TEXTBOOK_SUBSETS
-                        ]
-                    }
-                },
+            source=HuggingFaceManifestStreamingSource.Config(
+                path=str(MANIFEST_DIR / "cosmopedia-textbooks.json.gz"),
             ),
             processor=TextProcessor.Config(),
             post_filters=(lambda sample: sample is not None,),
