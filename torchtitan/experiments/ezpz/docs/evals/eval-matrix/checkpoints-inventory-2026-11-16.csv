@@ -1,0 +1,28 @@
+group,checkpoint,dcp_path,hf_path,dcp_exists,hf_exists,tokens,stage_note
+CPT-FWE-P0,step-1000,/home/foremans/torchtitan/outputs/checkpoints/agpt-2b-cpt-fineweb-edu-n4-gbs64/step-1000,,yes,no,0.52B,P0 (shock horizon)
+CPT-FWE-P0,step-5000,/home/foremans/torchtitan/outputs/checkpoints/agpt-2b-cpt-fineweb-edu-n4-gbs64/step-5000,,yes,no,2.62B,P0 (shock horizon)
+CPT-FWE-P0,step-10000,/home/foremans/torchtitan/outputs/checkpoints/agpt-2b-cpt-fineweb-edu-n4-gbs64/step-10000,,yes,no,5.24B,P0 (shock horizon)
+CPT-FWE-P1,step-25000,/home/foremans/torchtitan/outputs/checkpoints/agpt-2b-cpt-fineweb-edu-n4-gbs64/step-25000,,yes,no,13.11B,P1 (early plateau)
+CPT-FWE-P1,step-50000,/home/foremans/torchtitan/outputs/checkpoints/agpt-2b-cpt-fineweb-edu-n4-gbs64/step-50000,,yes,no,26.21B,P1 (early plateau)
+CPT-FWE-P1,step-75000,/home/foremans/torchtitan/outputs/checkpoints/agpt-2b-cpt-fineweb-edu-n4-gbs64/step-75000,,yes,no,39.32B,P1 (early plateau)
+CPT-FWE-P2,step-100000,/home/foremans/torchtitan/outputs/checkpoints/agpt-2b-cpt-fineweb-edu-n4-gbs64/step-100000,,yes,no,52.43B,P2 (frontier)
+CPT-FWE-P2,step-111200,/home/foremans/torchtitan/outputs/checkpoints/agpt-2b-cpt-fineweb-edu-n4-gbs64/step-111200,,yes,no,58.30B,P2 (frontier)
+CPT-FWE-P2,step-125000,/home/foremans/torchtitan/outputs/checkpoints/agpt-2b-cpt-fineweb-edu-n4-gbs64/step-125000,,yes,no,65.54B,P2 (frontier)
+CPT-FWE-P2,step-136800,/home/foremans/torchtitan/outputs/checkpoints/agpt-2b-cpt-fineweb-edu-n4-gbs64/step-136800,,yes,no,71.72B,P2 (frontier)
+CPT-FWE-P2,step-143400,/home/foremans/torchtitan/outputs/checkpoints/agpt-2b-cpt-fineweb-edu-n4-gbs64/step-143400,,yes,no,75.18B,P2 (frontier; live 12484188 R)
+CPT-FWE-P3,step-150000,/home/foremans/torchtitan/outputs/checkpoints/agpt-2b-cpt-fineweb-edu-n4-gbs64/step-150000,,no,no,78.64B,P3 (deferred until DCP)
+CPT-FWE-P3,step-160000,/home/foremans/torchtitan/outputs/checkpoints/agpt-2b-cpt-fineweb-edu-n4-gbs64/step-160000,,no,no,83.89B,P3 (deferred)
+CPT-FWE-P3,step-175000,/home/foremans/torchtitan/outputs/checkpoints/agpt-2b-cpt-fineweb-edu-n4-gbs64/step-175000,,no,no,91.75B,P3 (deferred)
+CPT-FWE-P3,step-190734,/home/foremans/torchtitan/outputs/checkpoints/agpt-2b-cpt-fineweb-edu-n4-gbs64/step-190734,,no,no,100.00B,P3 (terminal)
+CPT-FWE-dense,step-11600,/home/foremans/torchtitan/outputs/checkpoints/agpt-2b-cpt-fineweb-edu-n4-gbs64/step-*,/home/foremans/torchtitan/outputs/evals/cpt-fwe/step-11600/hf,yes,yes,,HOME HF 9 total 11600/13000/17000/34800/67400/72800/73000/74000/74200
+CPT-FWE-dense,step-74400-88000 dense,/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan/outputs/checkpoints/agpt-2b-cpt-fineweb-edu-n4-gbs64/step-*,/lus/tegu/.../outputs/evals/cpt-fwe/step-*/hf,partial,yes,,Tegu HF 70 dense 74400..88000 every 200
+MDS-stage,global_step138650,/home/foremans/global_step138650,,yes,no,7.06T,MDS stage base (pre-FWE fork) gs138650
+MDS-stage,global_step137650,/home/foremans/global_step137650,,yes,no,~7.0T,MDS prior checkpoint
+MDS-stage,stage3-mix-154391,/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan/outputs/checkpoints/agpt-2b-mds-gs138650/step-0,,yes,no,7.771T,MDS 7.771T step 154391 not yet stage-wise scored
+TT-256N,step-92859,/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan/outputs/checkpoints/agpt-2b-sophiag-olmo-mix-1124-n256-gbs6144/step-92859,,yes,no,4.67T,TT 256N COMPLETE scored once job 8747067 MMLU 0.2437 HS 0.561
+TT-512N,step-46429,UNKNOWN pending Aurora verify,,unknown,no,~2.43T,TT 512N UNKNOWN path pending Aurora verify
+SFT-post,checkpoint-900-hf,/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan/outputs/sft/agpt-2b-gs138650-tulu-math-uc-mix-8n-gbs6144/checkpoint-900-hf,,yes,yes,,SFT stage-1 IFEval 0.253 base for B2
+SFT-post,checkpoint-93-hf,/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan/outputs/sft/agpt2b-gsm8k-r1cot-2n/checkpoint-93-hf,,yes,yes,,SFT-only deliverable 0.205/0.985/282
+SFT-post,B2v2-ep3-final,/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan/outputs/sft/agpt2b-b2v2-distill-cot-2n-ep3/final,,yes,yes,,B2 retry 0.09 format 0.86
+SFT-post,B2v2-ep6-final,/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan/outputs/sft/agpt2b-b2v2-distill-cot-2n-ep6/final,,yes,yes,,B2 retry 0.105 format 0.91
+RL-post,RL-GRPO-12479177,/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan/outputs/rl/multihost_grpo_e2e.pbs,,yes,no,,40/40 Exit0 gs4 flat 0.205->0.215

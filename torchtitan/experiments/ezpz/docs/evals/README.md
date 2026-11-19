@@ -103,3 +103,7 @@ see the [AGPT MoE HF export guide](../guides/agpt-moe-hf-eval.md).
 - **Device:** `--device xpu`
 - **Do NOT** use `ezpz_setup_env` — the user venv has transformers 5.6.2
   which breaks lm-eval's HF backend
+
+## Eval matrix (2026-11-16)
+
+[`eval-matrix/eval-matrix-2026-11-16.md`](eval-matrix/eval-matrix-2026-11-16.md): checkpoint inventory, results schema, and the plan for MMLU/commonsense/CoT across the CPT and SFT ladders. `scripts/eval/aggregate_eval_matrix.py` reads and writes the CSVs in that folder.
