@@ -47,7 +47,7 @@ class AgptModel(Llama3Model):
             config,
             **kwargs,
         ) -> None:
-            """Re-apply sequence-parallel sharding for the final parallelism.
+            """Re-apply SP sharding and CP attention for the final parallelism.
 
             Upstream bakes sharding into the model config at construction
             time (``build_model_config(parallelism=...)``); ezpz flavors are
@@ -62,3 +62,13 @@ class AgptModel(Llama3Model):
                 self,
                 enable_sp=config.parallelism.enable_sequence_parallel,
             )
+            # Same template problem for context parallelism: the CLI sets
+            # context_parallel_degree after the flavor is built, and the
+            # parent validator requires CP inner attention when it is > 1.
+            if config.parallelism.context_parallel_degree > 1:
+                from torchtitan.config.transform import ContextParallelTransform
+                from torchtitan.experiments.ezpz.agpt import AGPT_CP_INNER_ATTENTION
+
+                ContextParallelTransform(
+                    inner_attention_map=AGPT_CP_INNER_ATTENTION
+                ).transform(self)

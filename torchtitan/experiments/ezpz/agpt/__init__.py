@@ -45,6 +45,7 @@ from torchtitan.models.common import (
     VocabParallelEmbedding,
 )
 from torchtitan.models.common.attention import InnerAttention
+from torchtitan.models.common.attention.cp_attention import UlyssesInnerAttention
 from torchtitan.models.common.config_utils import (
     fused_gate_up_param_init,
     get_attention_config,
@@ -310,6 +311,44 @@ from torchtitan.models.common.config_utils import make_ffn_config, make_gqa_conf
 # ---------------------------------------------------------------------------
 # Architecture tweaks for competition
 # ---------------------------------------------------------------------------
+
+
+class UlyssesEzpzScaledDotProductAttention(
+    UlyssesInnerAttention[None], EzpzScaledDotProductAttention
+):
+    """EzpzScaledDotProductAttention under Ulysses context parallelism.
+
+    Ulysses all-to-alls (T/cp, H, K) -> (T, H/cp, K) before the inner SDPA
+    and back after, so each rank attends over the whole packed sequence for
+    its heads and plain causal SDPA stays exact. T is again a whole number of
+    max_context_length rows, which the SDPA fold requires.
+    """
+
+    @dataclass(kw_only=True, slots=True)
+    class Config(UlyssesInnerAttention.Config, EzpzScaledDotProductAttention.Config):
+        pass
+
+
+class UlyssesXPUScaledDotProductAttention(
+    UlyssesInnerAttention[None], XPUScaledDotProductAttention
+):
+    """XPUScaledDotProductAttention under Ulysses context parallelism."""
+
+    @dataclass(kw_only=True, slots=True)
+    class Config(UlyssesInnerAttention.Config, XPUScaledDotProductAttention.Config):
+        pass
+
+
+# ContextParallelTransform map for agpt. The Ulysses entries map to themselves so
+# re-applying the transform (Config.__post_init__ runs again after the CLI) is
+# a no-op. SoftcappedFlexAttention has no XPU-capable CP variant and is left
+# out, so CP on it raises at config time.
+AGPT_CP_INNER_ATTENTION: dict[type[InnerAttention], type[InnerAttention]] = {
+    EzpzScaledDotProductAttention: UlyssesEzpzScaledDotProductAttention,
+    XPUScaledDotProductAttention: UlyssesXPUScaledDotProductAttention,
+    UlyssesEzpzScaledDotProductAttention: UlyssesEzpzScaledDotProductAttention,
+    UlyssesXPUScaledDotProductAttention: UlyssesXPUScaledDotProductAttention,
+}
 
 
 class SoftcappedFlexAttention(InnerAttention):
