@@ -141,7 +141,7 @@ echo "--- 20-step SFT MCQ template probe (Grain 40/30/20/10, no pre-tokenize) --
     "${VENV}/bin/python" -m torchtitan.experiments.ezpz.train \
     --module ezpz.agpt --config agpt_2b_mds_sft_mcq_template_probe_streaming \
     --training.steps=20 \
-    --checkpoint.no-enable --compile.no-enable --validator.no-enable \
+    --checkpoint.no-enable --compile.no-enable \
     2>&1 | tee -a "${LOG_DIR}/train.log" | tee -a "${LOG}"
 rc=${PIPESTATUS[0]}
 echo "train rc=${rc}" | tee -a "${LOG}"

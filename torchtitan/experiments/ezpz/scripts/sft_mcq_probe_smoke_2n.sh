@@ -21,14 +21,10 @@ export http_proxy="${http_proxy:-http://proxy.alcf.anl.gov:3128}"
 export https_proxy="${https_proxy:-http://proxy.alcf.anl.gov:3128}"
 export ftp_proxy="${ftp_proxy:-http://proxy.alcf.anl.gov:3128}"
 
-# Base: CPT-FWE step-136800 HF (3.7G 9/9, job 12484888) — just converted DCP->HF.
-# Override via env so the next Grain-CPT checkpoint can swap in without editing
-# the script. Tegu routing: both /lus/tegu/projects/datasets/datasets/outputs
-# and /lus/tegu/projects/datascience/foremans/outputs hit the same Lustre
-# (172.22.8.115:/tegu/su/) per 12-sft-mcq-template-probe.md S 4. Fallback to
-# the TTE path that eval ladder uses.
-export MDS154391_SFT_BASE="${MDS154391_SFT_BASE:-/lus/tegu/projects/datasets/datasets/outputs/evals/cpt-fwe/step-136800/hf}"
-export MDS154391_SFT_DCP="${MDS154391_SFT_DCP:-/home/foremans/torchtitan/outputs/checkpoints/agpt-2b-cpt-fineweb-edu-n4-gbs64/step-136800}"
+# Base: MDS stage-3 step-154391 (HF + DCP under foremans/artifacts on Tegu),
+# the config defaults. Override via env to probe another base.
+export MDS154391_SFT_BASE="${MDS154391_SFT_BASE:-/lus/tegu/projects/datascience/foremans/artifacts/agpt-2b-mds-stage3-mix-step154391-hf}"
+export MDS154391_SFT_DCP="${MDS154391_SFT_DCP:-/lus/tegu/projects/datascience/foremans/artifacts/agpt-2b-mds-stage3-mix-step154391-dcp/step-0}"
 
 VENV="/lus/tegu/projects/datascience/foremans/venvs/xpu-torch216-sync-5a7a622f16"
 VENV="$(readlink -f "${VENV}")"
@@ -81,7 +77,7 @@ echo "--- 20-step SFT MCQ template probe (Grain 40/30/20/10, no pre-tokenize) --
     "${VENV}/bin/python" -m torchtitan.experiments.ezpz.train \
     --module ezpz.agpt --config agpt_2b_mds_sft_mcq_template_probe_streaming \
     --training.steps=20 \
-    --checkpoint.no-enable --compile.no-enable --validator.no-enable \
+    --checkpoint.no-enable --compile.no-enable \
     2>&1 | tee -a "${LOG_DIR}/train.log" | tee -a "${LOG}"
 rc=${PIPESTATUS[0]}
 echo "train rc=${rc}" | tee -a "${LOG}"

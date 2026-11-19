@@ -18,6 +18,9 @@ export PALS_RPC_TIMEOUT="${PALS_RPC_TIMEOUT:-600}"
 export http_proxy="${http_proxy:-http://proxy.alcf.anl.gov:3128}"
 export https_proxy="${https_proxy:-http://proxy.alcf.anl.gov:3128}"
 export ftp_proxy="${ftp_proxy:-http://proxy.alcf.anl.gov:3128}"
+# The config default for the MDS base is relative to the checkout; a pinned
+# smoke checkout has no outputs/, so point at the main Tegu checkout.
+export MDS_ANNEAL_BASE="${MDS_ANNEAL_BASE:-/lus/tegu/projects/datascience/foremans/projects/saforem2/torchtitan/outputs/checkpoints/agpt-2b-mds-gs138650/step-0}"
 VENV="/lus/tegu/projects/datascience/foremans/venvs/xpu-torch216-sync-5a7a622f16"
 VENV="$(readlink -f "${VENV}")"
 SUBMIT_DIR="${PBS_O_WORKDIR:-$(pwd)}"
