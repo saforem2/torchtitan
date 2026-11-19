@@ -1221,6 +1221,15 @@ def _grain_cpt_packed_fwe() -> ConcatThenSplitPackingConfig:
     )
 
 
+_COSMOPEDIA_TEXTBOOK_SUBSETS = (
+    "auto_math_text",
+    "khanacademy",
+    "openstax",
+    "stanford",
+    "wikihow",
+)
+
+
 def _grain_cpt_packed_cosmo() -> ConcatThenSplitPackingConfig:
     """Packed cosmopedia source for Grain anneal (synthetic textbook, streaming).
 
@@ -1234,6 +1243,16 @@ def _grain_cpt_packed_cosmo() -> ConcatThenSplitPackingConfig:
             source=HuggingFaceStreamingSource.Config(
                 path="HuggingFaceTB/cosmopedia",
                 split="train",
+                # The repo has one config per subset and no default; select the
+                # five textbook subsets by file instead of a single config name.
+                load_dataset_kwargs={
+                    "data_files": {
+                        "train": [
+                            f"data/{subset}/*.parquet"
+                            for subset in _COSMOPEDIA_TEXTBOOK_SUBSETS
+                        ]
+                    }
+                },
             ),
             processor=TextProcessor.Config(),
             post_filters=(lambda sample: sample is not None,),
