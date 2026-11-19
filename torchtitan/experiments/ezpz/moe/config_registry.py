@@ -12,7 +12,6 @@ from typing import Any, Literal
 import ezpz
 import ezpz.distributed
 
-from torchtitan.components.checkpointer import CheckpointManager
 from torchtitan.components.loss import CrossEntropyLoss
 
 from torchtitan.components.optim import LRSchedulersContainer, Optim
@@ -29,6 +28,8 @@ from torchtitan.experiments.ezpz.compile import CompileConfig
 from torchtitan.experiments.ezpz.config import EzpzMetricsConfig, EzpzTrainingConfig
 from torchtitan.experiments.ezpz.logging import logger
 from torchtitan.experiments.ezpz.optimizer.containers import default_adamw
+
+from torchtitan.experiments.ezpz.replica_aware_load import ReplicaAwareCheckpointManager
 from torchtitan.experiments.ezpz.trainer import (
     FaultTolerantTrainer,
     set_max_context_length,
@@ -69,7 +70,9 @@ def _apply_config_overrides(
         checkpoint = overrides.pop("checkpoint", None)
         if checkpoint is not None:
             enabled = checkpoint.pop("enable", True)
-            target.checkpointer = CheckpointManager.Config() if enabled else None
+            target.checkpointer = (
+                ReplicaAwareCheckpointManager.Config() if enabled else None
+            )
             if enabled:
                 overrides["checkpointer"] = checkpoint
 
@@ -189,7 +192,7 @@ def _base_config(flavor: str) -> FaultTolerantTrainer.Config:
         ),
         dataloader=BlendCorpusDataLoader.Config(dataset="c4_test"),
         metrics=EzpzMetricsConfig(log_freq=10),
-        checkpointer=CheckpointManager.Config(
+        checkpointer=ReplicaAwareCheckpointManager.Config(
             interval=500,
             last_save_model_only=False,
         ),

@@ -127,12 +127,14 @@ class ConfigManager:
     @staticmethod
     def _migrate_legacy_args(config: Any, args: list[str]) -> list[str]:
         """Map frozen flags onto the current optional config fields."""
-        from torchtitan.components.checkpointer import CheckpointManager
         from torchtitan.distributed.activation_remat import (
             DefaultActivationRematConfig,
             FullActivationRematConfig,
         )
         from torchtitan.experiments.ezpz.compile import CompileConfig
+        from torchtitan.experiments.ezpz.replica_aware_load import (
+            ReplicaAwareCheckpointManager,
+        )
 
         migrated: list[str] = []
         for arg in args:
@@ -154,7 +156,7 @@ class ConfigManager:
                 continue
             if arg in ("--checkpoint.enable", "--checkpoint-enable"):
                 if getattr(config, "checkpointer", None) is None:
-                    config.checkpointer = CheckpointManager.Config()
+                    config.checkpointer = ReplicaAwareCheckpointManager.Config()
                 continue
             if arg in (
                 "--checkpoint.no-enable",
@@ -166,7 +168,7 @@ class ConfigManager:
             if arg == "--checkpoint.create-seed-checkpoint":
                 config.create_seed_checkpoint = True
                 if getattr(config, "checkpointer", None) is None:
-                    config.checkpointer = CheckpointManager.Config()
+                    config.checkpointer = ReplicaAwareCheckpointManager.Config()
                 continue
             if arg in (
                 "--checkpoint.no-create-seed-checkpoint",
