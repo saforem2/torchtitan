@@ -500,6 +500,12 @@ def gsm8k_plus_distill_cot_streaming_dataset(
 # P(knowledge|template) decomposition and the 40/30/20/10 justification.
 
 
+def _unwrap_mmlu_row(sample: dict[str, Any]) -> dict[str, Any]:
+    """cais/mmlu ``auxiliary_train`` nests each row under a ``train`` key."""
+    inner = sample.get("train")
+    return inner if isinstance(inner, dict) else sample
+
+
 def _mcq_messages(sample: dict[str, Any]) -> list[dict[str, str]]:
     """Render a Cais/MMLU row as a single-letter MCQ.
 
@@ -508,6 +514,7 @@ def _mcq_messages(sample: dict[str, Any]) -> list[dict[str, str]]:
     common alternate keys (``query``/``options``/``gold``) so the same
     function serves Tulu-derived MCQ subsets that copy the MMLU schema.
     """
+    sample = _unwrap_mmlu_row(sample)
     question = str(
         sample.get("question") or sample.get("query") or sample.get("input") or ""
     ).strip()
@@ -621,7 +628,12 @@ def sft_mcq_template_probe_streaming_dataset(
                         name="auxiliary_train",
                         split="train",
                     ),
-                    pre_filters=(lambda s: bool(s.get("choices") or s.get("options")),),
+                    pre_filters=(
+                        lambda s: bool(
+                            _unwrap_mmlu_row(s).get("choices")
+                            or _unwrap_mmlu_row(s).get("options")
+                        ),
+                    ),
                     processor=AgptChatProcessor.Config(source="mcq"),
                     post_filters=(lambda sequence: sequence is not None,),
                 ),
