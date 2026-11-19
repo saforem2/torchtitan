@@ -116,7 +116,10 @@ def _read_row_group(url: str, row_group: int) -> Iterator[dict[str, Any]]:
 
     # The signed CDN URL is re-resolved per row group, so it cannot expire
     # mid-run.
-    with fsspec.filesystem("http").open(_cdn_url(url), "rb") as f:
+    # trust_env: aiohttp ignores HTTP(S)_PROXY otherwise, and ALCF compute nodes
+    # reach the internet only through the proxy (direct connects time out).
+    http = fsspec.filesystem("http", client_kwargs={"trust_env": True})
+    with http.open(_cdn_url(url), "rb") as f:
         yield from pq.ParquetFile(f).read_row_group(row_group).to_pylist()
 
 
