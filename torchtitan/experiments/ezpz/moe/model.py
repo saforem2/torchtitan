@@ -279,6 +279,18 @@ class moeModel(Decoder):  # noqa: N801
             # declarations for the default parallelism (no SP, no EP) so a
             # config used without a trainer (tests, conversion) is complete.
             # ``update_from_config`` re-applies them for the final parallelism.
+            #
+            # Only when unset: ``Configurable.build`` constructs the model from
+            # ``dataclasses.replace(self)``, which re-runs ``__post_init__`` on
+            # a shallow copy sharing these layer configs. Re-applying the
+            # template there reset EP experts to the dense placement after
+            # ``update_from_config``, and FSDP then rejected them (Aurora
+            # ``9101603``: annotation on axis ``default_pg``).
+            if (
+                self.layers
+                and self.layers[0].attention_norm.sharding_config is not None
+            ):
+                return
             from torchtitan.experiments.ezpz.moe.sharding import set_moe_sharding_config
 
             set_moe_sharding_config(self, enable_sp=False, enable_ep=False)
