@@ -31,6 +31,10 @@ from torchtitan.components.data import (
 from torchtitan.components.data.sources import HuggingFaceStreamingSource
 from torchtitan.components.data.types import DatasetBuildContext
 from torchtitan.components.loss import IGNORE_INDEX
+from torchtitan.experiments.ezpz.hf_manifest import (
+    HuggingFaceManifestStreamingSource,
+    MANIFEST_DIR,
+)
 
 
 _START_OF_TURN = "<start_of_turn>"
@@ -282,6 +286,27 @@ class AgptChatProcessor(SampleProcessor):
         )
 
 
+def _streaming_source(
+    *, path: str, split: str, name: str | None = None
+) -> HuggingFaceStreamingSource.Config:
+    """Prefer a frozen manifest for ``path`` over Hub streaming.
+
+    ``data-lists/hf-manifests/<org>--<repo>[--<name>][--<split>].json.gz``
+    (``name`` omitted when unset or ``default``, ``split`` when ``train``)
+    streams without Hub API calls and splits parquet row groups across DP
+    ranks; see ``hf_manifest.py``. Without one, stream from the Hub.
+    """
+    key = path.replace("/", "--")
+    if name and name != "default":
+        key += f"--{name}"
+    if split != "train":
+        key += f"--{split}"
+    manifest = MANIFEST_DIR / f"{key}.json.gz"
+    if manifest.is_file():
+        return HuggingFaceManifestStreamingSource.Config(path=str(manifest))
+    return HuggingFaceStreamingSource.Config(path=path, name=name, split=split)
+
+
 def _source(
     *,
     path: str,
@@ -290,11 +315,7 @@ def _source(
     name: str | None = None,
 ) -> SingleDatasetConfig:
     return SingleDatasetConfig(
-        source=HuggingFaceStreamingSource.Config(
-            path=path,
-            name=name,
-            split=split,
-        ),
+        source=_streaming_source(path=path, name=name, split=split),
         pre_filters=(
             lambda sample, source=source: _has_usable_assistant_turn(
                 sample, source=source
@@ -392,7 +413,7 @@ def _cot_source(
         return True
 
     return SingleDatasetConfig(
-        source=HuggingFaceStreamingSource.Config(path=path, name=name, split=split),
+        source=_streaming_source(path=path, name=name, split=split),
         pre_filters=(
             lambda s, source=source: _has_usable_assistant_turn(s, source=source),
             _cot_ok,
@@ -623,10 +644,8 @@ def sft_mcq_template_probe_streaming_dataset(
         datasets.append(
             WeightedDataset(
                 dataset=SingleDatasetConfig(
-                    source=HuggingFaceStreamingSource.Config(
-                        path="cais/mmlu",
-                        name="auxiliary_train",
-                        split="train",
+                    source=_streaming_source(
+                        path="cais/mmlu", name="auxiliary_train", split="train"
                     ),
                     pre_filters=(
                         lambda s: bool(
