@@ -29,6 +29,29 @@ rejects the all-to-all dispatcher, and ezpz's XPU opt-out
 `tests/test_config_validation_order.py` parses MoE EP configs with graphs reported
 supported on XPU; it fails on `7ebad1d6` and passes after both fixes.
 
+### Integration smokes
+
+Branch `ezpz-integration-20261118` (this sync plus #97-#102, tree `4103a65a1d`). Each
+run: 10 seeded steps, checkpoint at 5, resume, compare steps 6-10.
+
+| Config | Aurora | Polaris (A100 40 GB) |
+|---|---|---|
+| `agpt_2b_real` | ok `9101302` | ok `7860343` |
+| `agpt_v2_4b_4k_olmo_mix` | ok `9101343` | ok `7860397` |
+| `agpt_v2_10b_4k_olmo_mix` | ok `9101671` | ok `7860453` |
+| `agpt_20b_real` | ok `9101414` | ok `7861136` (8N) |
+| `agpt_debugmodel` TP=2 | ok `9101585` | -- |
+| `moe_debugmodel_ep` EP=2 | fails `9101603` | -- |
+
+Resume matched the uninterrupted run on every passing arm. The first Aurora 10B
+(`9101375`) trained to step 10 and the resume rank was killed (rc `137`); the rerun
+`9101671` passed. Sunspot and Sirius were down for maintenance.
+
+Known issue: MoE EP=2 on Aurora fails at FSDP setup with `ValueError: Parameter
+'weight' has spmd_types annotation on axis default_pg, which is neither a non-FSDP
+storage-mesh axis nor contained in the FSDP DP mesh.` Parsing now succeeds (the
+`bd20b261` fix); this is the next failure in the same config. Not fixed here.
+
 ## 2026-11-16: upstream `4122eafc`, 1 commit; `631d544b` sync landed
 
 PR #90 (the `631d544b` sync below) merged into `ezpz` as `a4de9f29a6`, then PR #92 (docs) as `e4d84f795b`. The #90 head `919e2eeb3c` branched before #89, #91 and #93; the merge is clean. Two files changed on both sides and auto-merged: `train.py` (ezpz side: `getattr(torchtitan, "__version__", ...)`) and `scripts/sync_smoke_alcf.sh` (#91's rewrite plus the sync's empty `KNOWN_FAILURES`). The sync hunk carries over byte for byte.
