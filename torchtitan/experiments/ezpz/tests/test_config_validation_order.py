@@ -15,11 +15,15 @@ and ezpz's accelerator-graph opt-out first. Before that, every MoE config
 with ``expert_parallel_degree > 1`` was rejected at parse time.
 """
 
+import dataclasses
+
 import pytest
 
 from torchtitan.distributed import accelerator_graph
+from torchtitan.distributed.parallelism_context import MeshAxisName
 from torchtitan.experiments.ezpz import train, trainer as ezpz_trainer
 from torchtitan.experiments.ezpz.config_manager import ConfigManager
+from torchtitan.models.common.moe import MoE
 
 
 def _parse(argv):
@@ -53,3 +57,12 @@ def test_moe_ep_config_parses(xpu_with_graphs, argv):
     cfg = _parse(argv)
     assert cfg.parallelism.expert_parallel_degree == 2
     assert cfg.training.disable_accelerator_graphs is True
+    # Configurable.build constructs the model from dataclasses.replace(config),
+    # which re-runs moeModel.Config.__post_init__. The EP expert placement must
+    # survive that copy; resetting it to the dense template made FSDP reject
+    # the experts at init (Aurora 9101603, "annotation on axis default_pg").
+    for model_cfg in (cfg.model, dataclasses.replace(cfg.model)):
+        for _, moe, _, _ in model_cfg.traverse(MoE.Config):
+            for linear in (moe.routed_experts.w13, moe.routed_experts.w2):
+                weight = linear.sharding_config.state_shardings["weight"]
+                assert MeshAxisName.EP in weight.local_type
