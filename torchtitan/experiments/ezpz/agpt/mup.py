@@ -241,6 +241,9 @@ from torchtitan.experiments.ezpz.agpt import (  # noqa: E402
     EzpzScaledDotProductAttention,
     XPUScaledDotProductAttention,
 )
+from torchtitan.models.common.attention.cp_attention import (  # noqa: E402
+    UlyssesInnerAttention,
+)
 
 
 class MupScaledDotProductAttention(EzpzScaledDotProductAttention):
@@ -322,6 +325,35 @@ class MupXPUScaledDotProductAttention(XPUScaledDotProductAttention):
             is_causal=is_causal,
             **kwargs,
         )
+
+
+class UlyssesMupScaledDotProductAttention(
+    UlyssesInnerAttention[None], MupScaledDotProductAttention
+):
+    """MupScaledDotProductAttention under Ulysses context parallelism."""
+
+    @dataclass(kw_only=True, slots=True)
+    class Config(UlyssesInnerAttention.Config, MupScaledDotProductAttention.Config):
+        pass
+
+
+class UlyssesMupXPUScaledDotProductAttention(
+    UlyssesInnerAttention[None], MupXPUScaledDotProductAttention
+):
+    """MupXPUScaledDotProductAttention under Ulysses context parallelism."""
+
+    @dataclass(kw_only=True, slots=True)
+    class Config(UlyssesInnerAttention.Config, MupXPUScaledDotProductAttention.Config):
+        pass
+
+
+# muP entries for agpt.AGPT_CP_INNER_ATTENTION; same self-mapping convention.
+MUP_CP_INNER_ATTENTION = {
+    MupScaledDotProductAttention: UlyssesMupScaledDotProductAttention,
+    MupXPUScaledDotProductAttention: UlyssesMupXPUScaledDotProductAttention,
+    UlyssesMupScaledDotProductAttention: UlyssesMupScaledDotProductAttention,
+    UlyssesMupXPUScaledDotProductAttention: UlyssesMupXPUScaledDotProductAttention,
+}
 
 
 def _mup_inner_attention_config(
