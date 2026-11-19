@@ -24,7 +24,13 @@ Manifest format (gzip JSON)::
 
     {"repo": "allenai/olmo-mix-1124",
      "revision": "<40-hex commit>",
-     "files": ["data/wiki/wiki-0000.json.gz", ...]}
+     "files": ["data/wiki/wiki-0000.json.gz", ...],
+     "row_groups": [19, 19, ...]}   # optional, parquet only
+
+Without ``row_groups`` the unit of DP sharding is a file. With it (freeze with
+``--row-groups``) the unit is one parquet row group, read with HTTP range
+requests, so a repo with fewer files than DP ranks still splits evenly instead
+of every rank reading every row (``split_dataset_by_node``'s fallback).
 """
 
 from __future__ import annotations
@@ -59,6 +65,9 @@ def load_manifest(path: str | Path) -> dict[str, Any]:
         raise ValueError(f"manifest {path} must pin a full commit sha")
     if not manifest.get("files"):
         raise ValueError(f"manifest {path} lists no files")
+    row_groups = manifest.get("row_groups")
+    if row_groups is not None and len(row_groups) != len(manifest["files"]):
+        raise ValueError(f"manifest {path}: row_groups and files differ in length")
     return manifest
 
 
@@ -84,6 +93,31 @@ def _get(url: str) -> requests.Response:
         resp.raise_for_status()
         return resp
     raise AssertionError("unreachable")
+
+
+def _cdn_url(url: str) -> str:
+    """Follow the ``resolve`` redirect once so range reads go to the CDN."""
+    from urllib.parse import urljoin
+
+    from huggingface_hub import get_token
+
+    token = get_token()
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    resp = requests.head(url, headers=headers, allow_redirects=False, timeout=60)
+    if resp.is_redirect:
+        return urljoin(url, resp.headers["Location"])
+    resp.raise_for_status()
+    return url
+
+
+def _read_row_group(url: str, row_group: int) -> Iterator[dict[str, Any]]:
+    import fsspec
+    import pyarrow.parquet as pq
+
+    # The signed CDN URL is re-resolved per row group, so it cannot expire
+    # mid-run.
+    with fsspec.filesystem("http").open(_cdn_url(url), "rb") as f:
+        yield from pq.ParquetFile(f).read_row_group(row_group).to_pylist()
 
 
 def _read_rows(url: str) -> Iterator[dict[str, Any]]:
@@ -113,17 +147,23 @@ def _read_rows(url: str) -> Iterator[dict[str, Any]]:
                 yield json.loads(line)
 
 
-def _generate(urls: list[str]) -> Iterator[dict[str, Any]]:
-    for url in urls:
-        yield from _read_rows(url)
+def _generate(units: list[tuple[str, int]]) -> Iterator[dict[str, Any]]:
+    """Yield rows for each ``(url, row_group)`` unit; ``-1`` means the whole file."""
+    for url, row_group in units:
+        if row_group < 0:
+            yield from _read_rows(url)
+        else:
+            yield from _read_row_group(url, row_group)
 
 
 class HuggingFaceManifestStreamingSource(HuggingFaceStreamingSource):
     """``HuggingFaceStreamingSource`` that reads a frozen manifest, not the Hub API.
 
     ``path`` is the manifest file; ``split`` is unused and kept only to
-    satisfy the parent config. Each DP rank owns ``files[dp_rank::dp_world_size]``,
-    so the manifest must list at least ``dp_world_size`` files.
+    satisfy the parent config. Each DP rank owns
+    ``units[dp_rank::dp_world_size]``, where a unit is a file or, for a manifest
+    with ``row_groups``, one parquet row group. There must be at least
+    ``dp_world_size`` units.
     """
 
     @dataclass(kw_only=True, slots=True)
@@ -137,25 +177,31 @@ class HuggingFaceManifestStreamingSource(HuggingFaceStreamingSource):
                 "name, revision and load_dataset_kwargs must be unset"
             )
         manifest = load_manifest(config.path)
-        self._urls = [
+        urls = [
             resolve_url(manifest["repo"], manifest["revision"], f)
             for f in manifest["files"]
         ]
+        row_groups = manifest.get("row_groups")
+        if row_groups is None:
+            self._units = [(url, -1) for url in urls]
+        else:
+            self._units = [
+                (url, rg) for url, n in zip(urls, row_groups) for rg in range(n)
+            ]
 
     def build_iter_dataset(
         self, *, dataset_iteration_policy: DatasetIterationPolicy
     ) -> grain.IterDataset:
         rank = dataset_iteration_policy.dp_rank
         world = dataset_iteration_policy.dp_world_size
-        if len(self._urls) < world:
+        if len(self._units) < world:
             raise ValueError(
-                f"manifest lists {len(self._urls)} files for {world} DP ranks"
+                f"manifest has {len(self._units)} units for {world} DP ranks"
             )
-        urls = self._urls[rank::world]
-        # One generator shard per file, so the cursor checkpoints as
-        # (file index, row offset) and resumes without re-listing anything.
+        # One generator shard per unit, so the cursor checkpoints as
+        # (unit index, row offset) and resumes without re-listing anything.
         self._dataset = datasets.IterableDataset.from_generator(
-            _generate, gen_kwargs={"urls": urls}
+            _generate, gen_kwargs={"units": self._units[rank::world]}
         )
         # This rank's files are already selected; the parent's DP split is
         # the identity at world size 1.

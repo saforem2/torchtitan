@@ -18,6 +18,10 @@ once, so training ranks stream from the manifest without Hub API calls. See
         HuggingFaceTB/cosmopedia --include 'data/auto_math_text/*' \
         --include 'data/khanacademy/*' --name cosmopedia-textbooks
 
+Pass ``--row-groups`` for parquet repos with fewer files than DP ranks; it
+records each file's row-group count (one footer read per file) so ranks split
+row groups instead of files.
+
 Writes ``data-lists/hf-manifests/<name>.json.gz`` (``<name>`` defaults to
 ``<org>--<repo>``). Re-freeze to move to a newer commit.
 """
@@ -48,6 +52,11 @@ def main() -> None:
     )
     parser.add_argument("--revision", default=None)
     parser.add_argument("--name", default=None)
+    parser.add_argument(
+        "--row-groups",
+        action="store_true",
+        help="record parquet row-group counts so ranks shard by row group",
+    )
     args = parser.parse_args()
 
     api = HfApi()
@@ -68,10 +77,22 @@ def main() -> None:
     out = _OUT_DIR / f"{name}.json.gz"
     out.parent.mkdir(parents=True, exist_ok=True)
     payload = {"repo": args.repo, "revision": revision, "files": files}
+    if args.row_groups:
+        import pyarrow.parquet as pq
+        from huggingface_hub import HfFileSystem
+
+        if not all(f.endswith(".parquet") for f in files):
+            raise SystemExit("--row-groups needs parquet files only")
+        fs = HfFileSystem()
+        payload["row_groups"] = []
+        for f in files:
+            with fs.open(f"datasets/{args.repo}@{revision}/{f}", "rb") as fh:
+                payload["row_groups"].append(pq.ParquetFile(fh).metadata.num_row_groups)
     # mtime=0 keeps the gzip bytes identical across re-freezes of one commit.
     with gzip.GzipFile(out, "wb", mtime=0) as f:
         f.write(json.dumps(payload, indent=0).encode())
-    print(f"{out}: {args.repo}@{revision[:12]} {len(files)} files")
+    units = sum(payload.get("row_groups", [])) or len(files)
+    print(f"{out}: {args.repo}@{revision[:12]} {len(files)} files, {units} units")
 
 
 if __name__ == "__main__":
