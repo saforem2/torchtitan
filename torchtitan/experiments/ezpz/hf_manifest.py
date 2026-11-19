@@ -66,8 +66,11 @@ def load_manifest(path: str | Path) -> dict[str, Any]:
     if not manifest.get("files"):
         raise ValueError(f"manifest {path} lists no files")
     row_groups = manifest.get("row_groups")
-    if row_groups is not None and len(row_groups) != len(manifest["files"]):
-        raise ValueError(f"manifest {path}: row_groups and files differ in length")
+    if row_groups is not None:
+        if len(row_groups) != len(manifest["files"]):
+            raise ValueError(f"manifest {path}: row_groups and files differ in length")
+        if not all(isinstance(n, int) and n > 0 for n in row_groups):
+            raise ValueError(f"manifest {path}: row_groups must be positive integers")
     return manifest
 
 
@@ -95,32 +98,45 @@ def _get(url: str) -> requests.Response:
     raise AssertionError("unreachable")
 
 
-def _cdn_url(url: str) -> str:
-    """Follow the ``resolve`` redirect once so range reads go to the CDN."""
+def _read_row_group(url: str, row_group: int) -> list[dict[str, Any]]:
+    """Read one parquet row group, retrying transient network failures.
+
+    The whole row group is materialized before any row is yielded, so a retry
+    never repeats rows. The ``resolve`` redirect is followed per row group, so
+    the signed CDN URL cannot expire mid-run.
+    """
     from urllib.parse import urljoin
 
+    import aiohttp
+    import fsspec
+    import pyarrow.parquet as pq
     from huggingface_hub import get_token
 
     token = get_token()
     headers = {"Authorization": f"Bearer {token}"} if token else {}
-    resp = requests.head(url, headers=headers, allow_redirects=False, timeout=60)
-    if resp.is_redirect:
-        return urljoin(url, resp.headers["Location"])
-    resp.raise_for_status()
-    return url
-
-
-def _read_row_group(url: str, row_group: int) -> Iterator[dict[str, Any]]:
-    import fsspec
-    import pyarrow.parquet as pq
-
-    # The signed CDN URL is re-resolved per row group, so it cannot expire
-    # mid-run.
     # trust_env: aiohttp ignores HTTP(S)_PROXY otherwise, and ALCF compute nodes
     # reach the internet only through the proxy (direct connects time out).
     http = fsspec.filesystem("http", client_kwargs={"trust_env": True})
-    with http.open(_cdn_url(url), "rb") as f:
-        yield from pq.ParquetFile(f).read_row_group(row_group).to_pylist()
+    for attempt in range(_MAX_ATTEMPTS):
+        try:
+            resp = requests.head(
+                url, headers=headers, allow_redirects=False, timeout=60
+            )
+            if resp.status_code == 429 or resp.status_code >= 500:
+                raise requests.HTTPError(f"{resp.status_code} resolving {url}")
+            if resp.is_redirect:
+                cdn_url = urljoin(url, resp.headers["Location"])
+            else:
+                resp.raise_for_status()
+                cdn_url = url
+            with http.open(cdn_url, "rb") as f:
+                return pq.ParquetFile(f).read_row_group(row_group).to_pylist()
+        except (requests.RequestException, aiohttp.ClientError, OSError):
+            # fsspec reports any failed HEAD as FileNotFoundError (an OSError).
+            if attempt == _MAX_ATTEMPTS - 1:
+                raise
+            time.sleep(2 ** (attempt + 2))
+    raise AssertionError("unreachable")
 
 
 def _read_rows(url: str) -> Iterator[dict[str, Any]]:

@@ -89,10 +89,13 @@ def main() -> None:
             with fs.open(f"datasets/{args.repo}@{revision}/{f}", "rb") as fh:
                 payload["row_groups"].append(pq.ParquetFile(fh).metadata.num_row_groups)
     # mtime=0 keeps the gzip bytes identical across re-freezes of one commit.
-    with gzip.GzipFile(out, "wb", mtime=0) as f:
+    # Write beside the target and rename, so a reader never sees a partial file.
+    tmp = out.with_suffix(out.suffix + ".tmp")
+    with gzip.GzipFile(tmp, "wb", mtime=0) as f:
         f.write(json.dumps(payload, indent=0).encode())
-    units = sum(payload.get("row_groups", [])) or len(files)
-    print(f"{out}: {args.repo}@{revision[:12]} {len(files)} files, {units} units")
+    tmp.replace(out)
+    num_units = sum(payload.get("row_groups", [])) or len(files)
+    print(f"{out}: {args.repo}@{revision[:12]} {len(files)} files, {num_units} units")
 
 
 if __name__ == "__main__":
