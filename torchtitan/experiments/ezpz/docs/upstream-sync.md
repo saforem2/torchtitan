@@ -1,5 +1,122 @@
 # Upstream Sync Log
 
+## 2026-11-19 (draft, not merged): upstream `cc020983`, 12 commits
+
+Trial merge of `pytorch/torchtitan` `main` at `cc020983a4` into `ezpz` `9904597a`
+(#113), on branch `sync/upstream-cc020983a-trial`. Merge base `fb1d2ba4`: the head of
+the last sync (#103), so nothing upstream had been merged since. Upstream is linear over
+the range (12 commits, 0 merges), not the ~50 expected.
+
+No textual conflicts. Two files changed on both sides and auto-merged:
+
+- `components/checkpointer/dcp.py`: ezpz's `_native_storage_reader` and the
+  `legacy_native_dcp` load path (both in `load`) vs upstream moving `async_mode` from
+  `CheckpointManager.Config` to `BaseCheckpointManager.Config` (#6196). Disjoint hunks.
+- `models/common/attention/cp_linear_attention.py`: ezpz's EOF alias
+  `prepare_linear_attention_cp_metadata = prepare_cp_linear_attention_metadata` vs
+  upstream's fixed-capacity CP routing in the function body (#5680). The alias still
+  resolves for ezpz's `cp_gdn`/`cp_kda` importers.
+
+One commit needs a replay onto both `agpt/` and `moe/`: #5721 changes `RoPE.Config.scaling`
+from a string to a typed config. As merged, every agpt and MoE config fails.
+
+### What the 12 commits change for us
+
+| Upstream (PR) | Effect on ezpz |
+|---|---|
+| `RoPE.Config.scaling: str` -> `RoPEScalingConfig \| None` (`Llama3ScalingConfig`, `YaRNScalingConfig`); flat `rope_factor`/`beta_fast`/`beta_slow`/`original_seq_len`/`scaling_factor` removed; `softmax_scale` uses `rope.attention_factor(mscale=)`; vision RoPE per attention layer (#5721) | **Breaks every agpt and MoE config.** Touches `models/llama3/flavors.py` and `models/deepseek_v3/{flavors,attention}.py`. Replay below |
+| `Decoder._parallelize` re-ties `tok_embeddings.weight` to `lm_head.weight`; `Decoder.Config.__post_init__` requires both to declare the same weight sharding when tied (#6144) | `agpt/parallelize.py` calls `model._parallelize`, so tied agpt models now stay tied through FSDP; the ezpz tied branch already puts `tok_embeddings`+`norm`+`lm_head` in one `fully_shard` group. Only `agpt_2b_tied` (arch experiment, not production) sets `enable_weight_tying`; it builds and stays tied. No production config is tied |
+| `async_mode` moves to `BaseCheckpointManager.Config`; `TorchCheckpointingManager` default flips from always-async to sync (#6196) | Same values, default and validation for the DCP manager. `GrainStreamingCheckpointManager` subclasses `TorchFTCheckpointManager` (DCP) and has no `Config.__post_init__` override. `competition/configs.py` sets `async_mode` on the DCP manager. No behavior change for ezpz |
+| Quantized FSDP wrappers survive async checkpoint staging (#6187) | ezpz does not use quantized FSDP |
+| `GrainDataLoader.Config.per_sample_pad_multiple` (default `1`), new `Config.__post_init__`; `DatasetBuildContext.per_sample_pad_multiple` (#6059) | Default is a no-op; the Grain anneal and SFT configs parse. ezpz reads `DatasetBuildContext` but never constructs one |
+| Linear-attention CP metadata registered with pytree, fixed-shape CP routing; `PTRRFlexAttentionCPLoadBalancer` rejected for linear attention (#5680) | agpt Ulysses CP uses softmax attention; ezpz configures no PTRR balancer. CP2 parses |
+| `apply_overrides` groups equivalent startup log lines (#6180) | Log format only; the return value `trainer.py` ignores is unchanged |
+| LoRA `expert_adapter_layout="shared_outer"` for routed experts (#5738) | New field with a default; `rl/model_configs.py` and `rl/xpu_trial/alphabet_sort.py` kwargs (`rank`, `alpha`, `target_modules`) unchanged |
+| deepseek_v4 sparse-attention geometry built once (#6181) | ezpz MoE derives from deepseek_v3, not v4 |
+| RL allocator env aliases (#5662), RL README (#6016), graph_trainer fusion_finder (#6171) | Not used by ezpz |
+
+### Required replay (#5721)
+
+Four sites, all inside `experiments/ezpz/`. The full diff (15 insertions, 57 deletions)
+was applied as a scratch patch and reverted; it is not on this branch.
+
+| File | Change |
+|---|---|
+| `agpt/__init__.py` `_build_agpt_config` | `scaling: Literal["none", "llama", "yarn"] = "none"` -> `scaling: RoPEScalingConfig \| None = None`. No caller passes a value, so every agpt flavor was `"none"` and is now `None` |
+| `moe/__init__.py`, 11 flavors | `scaling="yarn", rope_factor=40.0, beta_fast=32.0, beta_slow=1.0, original_seq_len=4096` -> `scaling=YaRNScalingConfig(factor=40.0)`, as upstream did to `deepseek_v3/flavors.py` |
+| `moe/__init__.py` `_agpt_2b_50k_moe_sdpa_aurora_full_sonic` | `scaling="none"` -> `scaling=None` |
+| `eval/hf_agpt_moe/assets.py` `_validate_semantics` | `attention.rope.scaling != "none"` -> `is not None`. Unchanged, the HF export would reject every config once scaling is `None` |
+
+The MoE `Attention` subclasses `DeepSeekMLAAttention.Config` and inherits its
+`softmax_scale`, so the `attention_factor` change needs no ezpz edit. The two
+rope-backend flippers (`_set_rope_backend`, the `CosSinRoPE` swap in `agpt/__init__.py`)
+copy fields generically and carry the typed value over.
+
+With the patch, `softmax_scale` and the SHA-1 of the built RoPE cache match `origin/ezpz`
+for all 15 entries in the MoE model registry (`0.11425195291833387` for the `mscale=0.70`
+flavors, `0.1352337788608801` for 236B/671B). The replay is numerics-neutral at config
+level.
+
+### Laptop checks
+
+`mbph`, CPU, meta-device model builds only. Venv: Python 3.12, torch `2.15.0`,
+`spmd_types` `0.3.1`, repo `requirements.txt`, `tyro`, local `ezpz`. Artifact gates were
+pointed at stub files (`MDS_ANNEAL_BASE`, `MDS154391_SFT_BASE`, `MDS154391_SFT_DCP`,
+`AGPT_V2_DATA_MANIFEST`, a patched `_FINEWEB_EDU_DIR`), so these checks test config
+parsing and model construction, not data.
+
+Each config was parsed with `ConfigManager` the way `train.py` does, then `cfg.model.build()`
+on meta:
+
+| Config | `origin/ezpz` | trial merge | trial + replay |
+|---|---|---|---|
+| `agpt_debugmodel`, `agpt_2b_real`, `agpt_20b_real` | ok | `'str' object has no attribute 'inv_freq'` | ok |
+| `agpt_v2_4b_4k_olmo_mix`, `agpt_v2_10b_4k_olmo_mix` | ok | same | ok |
+| `agpt_debugmodel` TP=2, CP=2 | ok | same | ok |
+| `agpt_2b_grain_cpt_anneal`, `agpt_2b_grain_cpt_anneal_at` | ok | same | ok |
+| `agpt_2b_mds_sft_mcq_template_probe_streaming` | ok | same | ok |
+| `moe_debugmodel`, `moe_debugmodel_ep` | ok | `unexpected keyword argument 'rope_factor'` | ok |
+
+The agpt configs parse on the trial merge and fail only at build, because nothing
+type-checks `scaling` at config time. A parse-only smoke would miss this.
+
+Tests (`test_config_validation_order.py`, `test_moe_spmd_sharding.py`,
+`test_moe_mla_flat_layout.py`, `test_agpt_model_contract.py`,
+`test_trainer_init_parity.py`, `agpt/test_mup.py`):
+
+| Tree | Result |
+|---|---|
+| `origin/ezpz` | 43 passed, 1 failed |
+| trial merge | 30 passed, 14 failed |
+| trial + replay | 43 passed, 1 failed |
+
+The one failure on every tree,
+`test_model_owns_adapter_pipeline_fragment_and_xpu_parallelization`, predates this sync.
+Also predating it: `tests/moe/test_agpt_moe_hf_*.py` and `eval/hf_agpt_moe` fail to import
+`RouterGateLinear` from `models/common/linear`, so the `assets.py` edit is untested, and
+`test_ckpt_key_compat.py` needs an Aurora path.
+
+### Smoke plan for the sync PR
+
+Same harness as the `fb1d2ba4` entry: 10 seeded deterministic steps, checkpoint at 5,
+resume, compare steps 6-10 against the pre-sync tree in the same allocation.
+
+| Config | Aurora | Polaris |
+|---|---|---|
+| `agpt_2b_real` | yes | yes |
+| `agpt_v2_4b_4k_olmo_mix` | yes | yes |
+| `agpt_v2_10b_4k_olmo_mix` | yes | yes |
+| `agpt_20b_real` | yes | yes (8N) |
+| `agpt_debugmodel` TP=2 | yes | -- |
+| `agpt_debugmodel` CP=2 | yes | -- |
+| `moe_debugmodel` | yes | -- |
+| `moe_debugmodel_ep` EP=2 | yes | -- |
+
+Expected: loss and grad_norm bitwise equal to pre-sync on every agpt and MoE arm (the
+replay changes no numerics; #6144 only affects tied models). Resume must match the
+uninterrupted run. `moe_debugmodel_ep` on Aurora failed at FSDP setup in the last sync;
+#110 targeted that failure, so this run also checks #110.
+
 ## 2026-11-18: upstream `fb1d2ba4`, 18 commits
 
 Merge of `pytorch/torchtitan` `main` at `fb1d2ba4` into `ezpz` `7ebad1d6`. Merge base
