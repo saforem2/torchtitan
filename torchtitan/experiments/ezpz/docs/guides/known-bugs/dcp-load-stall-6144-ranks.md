@@ -1,6 +1,8 @@
 # 4B/10B v2 512N cannot resume: 6144-rank DCP load stalls past the idle watchdog
 
-> Status: open (2026-11-19). Handoff write-up; issues are disabled on this repo.
+> Status: root cause found (2026-11-19), fix in testing. Tracked in #114.
+>
+> **Root cause: HSDP read amplification, not the plan exchange.** The 4B/10B chains use HSDP (`dp_shard=12`, `dp_replicate=512`); every model/optimizer tensor in the checkpoint has 12 chunks, and `dcp.load` has each of the 512 replicas read its own copy: ~29 TB per 4B load (56.85 GB x 512), ~59 TB per 10B load. The 2B (FSDP over the world) reads each byte once and loads fine. The plan-exchange steps in the original write-up below are superseded. Fix: replica-aware load (only `dp_replicate=0` reads, then broadcasts), on branches `ezpz-dcp-gloo-planning` and `ezpz-replica-aware-load-6ad208b`; see the 2026-11-19 journal entry.
 
 ## Problem
 
