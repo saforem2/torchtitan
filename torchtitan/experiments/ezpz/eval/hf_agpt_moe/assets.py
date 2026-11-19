@@ -59,7 +59,7 @@ def _validate_semantics(layer):
     dispatcher = moe.routed_experts.token_dispatcher
     if not isinstance(attention.rope, ComplexRoPE.Config):
         raise ValueError("AGPT MoE HF export supports ComplexRoPE only")
-    if attention.rope.scaling != "none" or attention.qk_norm is not None:
+    if attention.rope.scaling is not None or attention.qk_norm is not None:
         raise ValueError("Unsupported AGPT attention configuration")
     if not isinstance(router.score_func, Softmax.Config):
         raise ValueError("AGPT MoE HF export supports softmax routing only")

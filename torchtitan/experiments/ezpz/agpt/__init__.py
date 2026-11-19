@@ -50,6 +50,7 @@ from torchtitan.models.common.config_utils import (
     fused_gate_up_param_init,
     get_attention_config,
 )
+from torchtitan.models.common.rope import RoPEScalingConfig
 
 
 class ScaledDotProductInnerAttention(InnerAttention):
@@ -623,7 +624,7 @@ def _build_agpt_config(
     hidden_dim: int,
     attn_backend: str = "sdpa",
     rope_backend: Literal["complex", "cos_sin"] = "complex",
-    scaling: Literal["none", "llama", "yarn"] = "none",
+    scaling: RoPEScalingConfig | None = None,
     max_context_length: int = 131072,
     qk_norm: bool = False,
     logit_softcap: float | None = None,

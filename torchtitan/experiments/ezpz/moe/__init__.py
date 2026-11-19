@@ -17,7 +17,6 @@ from torch.nn.attention import sdpa_kernel, SDPBackend
 from torchtitan.experiments.ezpz.agpt import ScaledDotProductInnerAttention
 
 from torchtitan.models.base.module import Module
-
 from torchtitan.models.common import (
     ComplexRoPE,
     Linear,
@@ -48,6 +47,8 @@ from torchtitan.models.common.moe.sharding import (
 )
 
 from torchtitan.models.common.param_init import depth_scaled_std
+
+from torchtitan.models.common.rope import YaRNScalingConfig
 from torchtitan.models.deepseek_v3.flavors import make_mla_attention_config
 from torchtitan.models.deepseek_v3.moe import DeepSeekV3Router
 
@@ -692,11 +693,7 @@ def _debugmodel() -> moeModel.Config:
             dim=rope_dim,
             max_context_length=4096 * 4,
             theta=10000.0,
-            scaling="yarn",
-            rope_factor=40.0,
-            beta_fast=32.0,
-            beta_slow=1.0,
-            original_seq_len=4096,
+            scaling=YaRNScalingConfig(factor=40.0),
         ),
     )
     return moeModel.Config(
@@ -751,11 +748,7 @@ def _debugmodel_flex_attn() -> moeModel.Config:
             dim=rope_dim,
             max_context_length=4096 * 4,
             theta=10000.0,
-            scaling="yarn",
-            rope_factor=40.0,
-            beta_fast=32.0,
-            beta_slow=1.0,
-            original_seq_len=4096,
+            scaling=YaRNScalingConfig(factor=40.0),
         ),
     )
     return moeModel.Config(
@@ -812,11 +805,7 @@ def _small() -> moeModel.Config:
             dim=rope_dim,
             max_context_length=256128,
             theta=50000.0,
-            scaling="yarn",
-            rope_factor=40.0,
-            beta_fast=32.0,
-            beta_slow=1.0,
-            original_seq_len=4096,
+            scaling=YaRNScalingConfig(factor=40.0),
         ),
     )
     return moeModel.Config(
@@ -871,11 +860,7 @@ def _16b() -> moeModel.Config:
             dim=rope_dim,
             max_context_length=4096 * 4,
             theta=10000.0,
-            scaling="yarn",
-            rope_factor=40.0,
-            beta_fast=32.0,
-            beta_slow=1.0,
-            original_seq_len=4096,
+            scaling=YaRNScalingConfig(factor=40.0),
         ),
     )
     return moeModel.Config(
@@ -934,11 +919,7 @@ def _236b() -> moeModel.Config:
             dim=rope_dim,
             max_context_length=4096 * 4,
             theta=10000.0,
-            scaling="yarn",
-            rope_factor=40.0,
-            beta_fast=32.0,
-            beta_slow=1.0,
-            original_seq_len=4096,
+            scaling=YaRNScalingConfig(factor=40.0),
         ),
     )
     return moeModel.Config(
@@ -998,11 +979,7 @@ def _671b() -> moeModel.Config:
             dim=rope_dim,
             max_context_length=4096 * 4,
             theta=10000.0,
-            scaling="yarn",
-            rope_factor=40.0,
-            beta_fast=32.0,
-            beta_slow=1.0,
-            original_seq_len=4096,
+            scaling=YaRNScalingConfig(factor=40.0),
         ),
     )
     return moeModel.Config(
@@ -1057,11 +1034,7 @@ def _500m() -> moeModel.Config:
             dim=rope_dim,
             max_context_length=4096 * 4,
             theta=10000.0,
-            scaling="yarn",
-            rope_factor=40.0,
-            beta_fast=32.0,
-            beta_slow=1.0,
-            original_seq_len=4096,
+            scaling=YaRNScalingConfig(factor=40.0),
         ),
     )
     return moeModel.Config(
@@ -1116,11 +1089,7 @@ def _2b() -> moeModel.Config:
             dim=rope_dim,
             max_context_length=4096 * 4,
             theta=10000.0,
-            scaling="yarn",
-            rope_factor=40.0,
-            beta_fast=32.0,
-            beta_slow=1.0,
-            original_seq_len=4096,
+            scaling=YaRNScalingConfig(factor=40.0),
         ),
     )
     return moeModel.Config(
@@ -1178,11 +1147,7 @@ def _4b() -> moeModel.Config:
             dim=rope_dim,
             max_context_length=4096 * 4,
             theta=10000.0,
-            scaling="yarn",
-            rope_factor=40.0,
-            beta_fast=32.0,
-            beta_slow=1.0,
-            original_seq_len=4096,
+            scaling=YaRNScalingConfig(factor=40.0),
         ),
     )
     return moeModel.Config(
@@ -1241,11 +1206,7 @@ def _7b() -> moeModel.Config:
             dim=rope_dim,
             max_context_length=4096 * 4,
             theta=10000.0,
-            scaling="yarn",
-            rope_factor=40.0,
-            beta_fast=32.0,
-            beta_slow=1.0,
-            original_seq_len=4096,
+            scaling=YaRNScalingConfig(factor=40.0),
         ),
     )
     return moeModel.Config(
@@ -1300,11 +1261,7 @@ def _10b_2b() -> moeModel.Config:
             dim=rope_dim,
             max_context_length=4096 * 4,
             theta=10000.0,
-            scaling="yarn",
-            rope_factor=40.0,
-            beta_fast=32.0,
-            beta_slow=1.0,
-            original_seq_len=4096,
+            scaling=YaRNScalingConfig(factor=40.0),
         ),
     )
     return moeModel.Config(
@@ -1354,7 +1311,7 @@ def _agpt_2b_50k_moe_sdpa_aurora_full_sonic() -> moeModel.Config:
         dim=dim // n_heads,
         max_context_length=131072,
         theta=50000,
-        scaling="none",
+        scaling=None,
     )
     layers = []
     for layer_id in range(24):
