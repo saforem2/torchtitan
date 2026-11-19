@@ -151,11 +151,11 @@
 | `9094039` seat 1 | 2026-11-16- | 24h (umbrella) | 21,701 -> 22,100+ | -> 2.422 | -- | 4-18% | **Running.** 18% MFU when the 4B/10B reloads are idle, ~4% while they load. Persisted 21,800 / 21,900 / 22,000 as of 2026-11-17 03:40 UTC ([write-up](../../../2026-11-16-umbrella-9094039.md)). |
 | `9092662` (per-chain) | 2026-11-18/19 | 12h | 22,701 -> 22,863 | -- | -- | -- | Walltime. Attempt 1 idle-watchdog `rc=124` after 22,723; attempt 2 saved `step-22800`. |
 
-**Latest checkpoint:** step-22,000 in the fixedpos fork (disk-audited on Aurora 2026-11-17 03:40 UTC).
+**Latest checkpoint:** step-22,800 in the fixedpos fork (disk-audited on Aurora 2026-11-19; saved by `9092662`).
 
-**Cumulative persisted steps:** 22,000 (disk-confirmed)
+**Cumulative persisted steps:** 22,800 (disk-confirmed)
 
-**Tokens consumed:** 22,000 x 6,144 x 8,192 = **1,107.3B tokens** (23.7% of 4.67T target)
+**Tokens consumed:** 22,800 x 6,144 x 8,192 = **1,147.6B tokens** (24.6% of 4.67T target)
 
 **Loss:** 2.4219, the last value W&B holds for the umbrella `9094039` run (`l8rbmuhl`, at
 step 22,099, 2026-11-17 ~03:45 UTC). A single-step value.
