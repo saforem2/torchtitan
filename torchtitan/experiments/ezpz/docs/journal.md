@@ -39,7 +39,7 @@ Frozen manifests (`hf_manifest.py`, `scripts/freeze_hf_manifest.py`) pin a commi
 
 At the ~8.6 GB/s aggregate seen in `9094039`, 29 TB is ~56 min, past the watchdog. The 2B loads fine at the same rank count (`9101108` resumed from `step-42200` and trains at ~42.8k). The `.metadata` sizes (4B/10B 17 MB vs 2B 147 MB) rule out the plan-exchange theory.
 
-Fix: `torchtitan/experiments/ezpz/replica_aware_load.py` (`ReplicaAwareLoadPlanner` + `replica_aware_dcp_load` + `ReplicaAwareCheckpointManager`). Only `dp_replicate=0` ranks read DTensors replicated over `dp_replicate`; the rest get them by broadcast before Stateful `load_state_dict`. Branches `ezpz-dcp-gloo-planning` (current `ezpz`) and `ezpz-replica-aware-load-6ad208b` (`e106d3aac`, backport to the 4B/10B production pin, +209/-15, keeps that pin's EMA reseed).
+Fix (not on `ezpz` yet; on the branches below): `torchtitan/experiments/ezpz/replica_aware_load.py` (`ReplicaAwareLoadPlanner` + `replica_aware_dcp_load` + `ReplicaAwareCheckpointManager`). Only `dp_replicate=0` ranks read DTensors replicated over `dp_replicate`; the rest get them by broadcast before Stateful `load_state_dict`. Branches `ezpz-dcp-gloo-planning` (current `ezpz`) and `ezpz-replica-aware-load-6ad208b` (`e106d3aac`, backport to the 4B/10B production pin, +209/-15, keeps that pin's EMA reseed).
 
 - Laptop, 4 CPU ranks, 2x2 mesh: replica-1 ranks skip all 4 replicated reads; every rank restores exactly (including a Stateful and a scalar). Same on the backport.
 - Aurora `9105587` (2N HSDP 12x2): resume through the new path (117 tensors broadcast), steps 4-10 exact.
