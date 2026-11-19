@@ -117,4 +117,4 @@ The Grain anneal configs are also Sunspot-only as written: `_FINEWEB_EDU_DIR` po
 | `12484922` | `grain_cpt_anneal_smoke_2n.sh` | `eb9a47299` | **ok** | 200 steps, loss `12.94` -> `10.18`, 3,295 tps, 12.4% MFU, 11 min; olmo-mix and cosmopedia stream from frozen manifests |
 | `12484923` | `sft_mcq_probe_smoke_2n.sh` | `64e4dda7d` | **ok** | 20 steps at one microbatch/rank, loss `12.95` -> `8.42` |
 
-Open: the SFT mix is data-bound at 2-38 tps. Its five streaming sources have fewer files than 24 ranks, so `split_dataset_by_node` falls back to every rank reading every row and keeping 1/24.
+Open: the SFT mix is data-bound at 2-38 tps. Leading suspect (unverified): a streaming source with a file count that is not a multiple of 24 (OpenR1-Math has 10) makes `split_dataset_by_node` fall back to every rank reading every row and keeping 1/24.
