@@ -103,3 +103,18 @@ Both Aurora `capacity` smokes ran and stopped before training (`Exit_status=1`).
 | `9101512` | `sft_mcq_probe_smoke_aurora.sh` | `import_failed` | `MDS154391 HF checkpoint missing at /lus/tegu/...step154391-hf`. Aurora has no Tegu mount and no staged base. |
 
 The Grain anneal configs are also Sunspot-only as written: `_FINEWEB_EDU_DIR` points at `/lus/tegu/projects/datasets/datasets/fineweb-edu-100BT/sample/100BT` with no override, so the Aurora smoke cannot pass until those 16 shards are staged on flare or the smoke runs on Sunspot. With stub base checkpoints and 16 stub shards, `agpt_2b_grain_cpt_anneal`, `agpt_2b_grain_cpt_anneal_at` and `agpt_2b_mds_sft_mcq_template_probe_streaming` all parse through `ConfigManager` on a laptop.
+
+## Sunspot smokes (2026-11-19)
+
+2N, 24 ranks, `workq`, each from a pinned checkout under `/lus/tegu/.../torchtitan-smoke-p1213-<sha>`. Both scripts pass `--checkpoint.no-enable`, so the model trains from random init; these check the data pipeline and the training loop, not the anneal or SFT quality.
+
+| Job | Script | Commit | Verdict | Evidence |
+|---|---|---|---|---|
+| `12484916` | `grain_cpt_anneal_smoke_2n.sh` | `05a01e76a` | failed | `ValueError: Config name is missing` for `HuggingFaceTB/cosmopedia` (no default config) |
+| `12484917` | `sft_mcq_probe_smoke_2n.sh` | `05a01e76a` | failed | `Unrecognized options: --validator.no-enable` (the SFT config has no validator) |
+| `12484918` | `grain_cpt_anneal_smoke_2n.sh` | `d72fe9f58` | failed | `429 Too Many Requests` on the Hub API: 24 ranks listing olmo-mix (28,878 files) and cosmopedia |
+| `12484919`, `12484920` | `sft_mcq_probe_smoke_2n.sh` | `d72fe9f58`, `3191bf51d` | walltime | `cais/mmlu` `auxiliary_train` nests rows under `train`, so the MCQ filter dropped 100%; after that fix, the production 6144-sequence step (128 microbatches/rank) took 20.7 min per step |
+| `12484922` | `grain_cpt_anneal_smoke_2n.sh` | `eb9a47299` | **ok** | 200 steps, loss `12.94` -> `10.18`, 3,295 tps, 12.4% MFU, 11 min; olmo-mix and cosmopedia stream from frozen manifests |
+| `12484923` | `sft_mcq_probe_smoke_2n.sh` | `64e4dda7d` | **ok** | 20 steps at one microbatch/rank, loss `12.95` -> `8.42` |
+
+Open: the SFT mix is data-bound at 2-38 tps. Its five streaming sources have fewer files than 24 ranks, so `split_dataset_by_node` falls back to every rank reading every row and keeping 1/24.
