@@ -68,7 +68,11 @@ class AgptModel(Llama3Model):
             if config.parallelism.context_parallel_degree > 1:
                 from torchtitan.config.transform import ContextParallelTransform
                 from torchtitan.experiments.ezpz.agpt import AGPT_CP_INNER_ATTENTION
+                from torchtitan.experiments.ezpz.agpt.mup import MUP_CP_INNER_ATTENTION
 
                 ContextParallelTransform(
-                    inner_attention_map=AGPT_CP_INNER_ATTENTION
+                    inner_attention_map={
+                        **AGPT_CP_INNER_ATTENTION,
+                        **MUP_CP_INNER_ATTENTION,
+                    }
                 ).transform(self)
