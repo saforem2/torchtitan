@@ -8,11 +8,12 @@
 
 ## v2 — 20B @ 256N — SophiaG LR=2.28e-5 (fp32 master)
 
-> Last updated: 2026-11-17
+> Last updated: 2026-11-19
 >
-> **Current status (2026-11-17 03:40 UTC): running in umbrella
-> [`9094039`](../../../2026-11-16-umbrella-9094039.md) seat 1, persisted head
-> `step-22000` (1.11T tokens, 23.7% of 4.67T), live 22,100, loss 2.422, 18.3% MFU.**
+> **Current status (2026-11-19): persisted head `step-22800`.** Per-chain
+> `9092662` (Nov 18-19, 12h walltime) resumed `step-22700`; attempt 1 stopped
+> on the idle watchdog after step 22723, attempt 2 reached 22863 and saved
+> `step-22800`. Umbrella `9094039` (Nov 16-17) ended at `step-22700`.
 >
 > - **Nov 16-, umbrella `9094039`:** resumed `step-21700` (567.5 s load), saved
 >   `step-21800` (~22 min under `flare` contention), `step-21900`, `step-22000`.
@@ -148,6 +149,7 @@
 | `9053470` t1 | 2026-11-09/11 | 4h26m (umbrella) | 20,901 -> 21,143 (fixedpos) | 2.446 -> 2.440 | 328 | 16.4% | Persisted step-21,100 ([write-up](../../../2026-11-11-umbrella-2088n.md)). |
 | `9076346` | 2026-11-14/15 | 12h | 21,101 -> 21,750 | -> 2.430 | 359 | ~18% | 921 s saves; persisted through step-21,700 ([journal](../../../../journal.md)). |
 | `9094039` seat 1 | 2026-11-16- | 24h (umbrella) | 21,701 -> 22,100+ | -> 2.422 | -- | 4-18% | **Running.** 18% MFU when the 4B/10B reloads are idle, ~4% while they load. Persisted 21,800 / 21,900 / 22,000 as of 2026-11-17 03:40 UTC ([write-up](../../../2026-11-16-umbrella-9094039.md)). |
+| `9092662` (per-chain) | 2026-11-18/19 | 12h | 22,701 -> 22,863 | -- | -- | -- | Walltime. Attempt 1 idle-watchdog `rc=124` after 22,723; attempt 2 saved `step-22800`. |
 
 **Latest checkpoint:** step-22,000 in the fixedpos fork (disk-audited on Aurora 2026-11-17 03:40 UTC).
 

@@ -35,14 +35,15 @@
 ## Current — per-chain jobs after umbrella `9094039` (2026-11-19)
 
 Umbrella `9094039` hit its 24h walltime on 2026-11-17 18:15 UTC. The per-chain
-512N/256N continuations then ran 12h each (2026-11-18 20:10 -> 2026-11-19
-08:38 local) and moved the chains very little:
+512N/256N continuations started 2026-11-18 20:10-20:37 UTC; three ran to the
+12h walltime, the 10B ended after 3h32m, and the 2B is still queued. They moved
+the chains very little:
 
 | Chain | Job | Exit | Head (`.metadata`) | What happened |
 |---|---|---|---|---|
 | 20B 256N | `9092662` | walltime (`-29`) | `step-22800` | trained; attempt 1 stopped by the idle watchdog after step 22723 (`rc=124`); attempt 2 reached 22863 and saved `step-22800` |
 | 20B 512N | `9093715` | walltime (`-29`) | `step-10800` | 5 attempts, each `signal 11` in `dcp_save` writing `step-10810` |
-| 4B v2 512N | `9091877` | walltime (`-29`) | `step-20700` | 10 attempts, no training step: each hung loading `step-20700` until the idle watchdog (`rc=124`, ~5000 s) |
+| 4B v2 512N | `9091877` | walltime (`-29`) | `step-20700` | 10 attempts, no training step logged: all stalled loading `step-20700`; 6 hit the idle watchdog (`rc=124`, ~5000 s), 3 ended `rc=143` (~2600 s), the 10th was cut by walltime |
 | 10B v2 512N | `9091888` | `-14` after 3h32m | `step-4900` | 5 attempts, no training step: hung loading `step-4900` (`rc=124`/`127`/`143`) |
 | 2B 512N fork | `9101108` | queued | `step-42200` | `-REAL-fixedpos` chain; validator off |
 

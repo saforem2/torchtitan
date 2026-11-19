@@ -12,7 +12,7 @@ names use the geometry name `5b`. Its 9.48B twin is [agpt 10B](../10b/README.md)
 
 | Machine | Config | Shape | Head | Tokens | Now |
 |---|---|---|---|---:|---|
-| Aurora | `agpt_v2_4b_4k_olmo_mix` | 512N, GBS 6144 | `step-11700` | 294.4B | **running**, umbrella `9094039` seat 3 (live 11,800, loss 2.672) |
+| Aurora | `agpt_v2_4b_4k_olmo_mix` | 512N, GBS 6144 | `step-20700` | -- | stalled: per-chain `9091877` (Nov 18-19) never got past loading `step-20700` |
 | Sirius | `agpt_5b_olmo3_polaris` | 2N, GBS 8 | `step-7400` | 0.24B | finished, `33525` (`Exit_status=-29`, walltime) |
 | Polaris | `agpt_5b_olmo3_polaris` | 16N / 32N | -- | -- | queued since Nov 9, `7832130` / `7832131` |
 
@@ -34,6 +34,7 @@ Tokens are steps x GBS x 4096. The full olmo-mix-1124 budget is 4.67T.
 | `9053470` seat 3 (umbrella) | Nov 9-11 | `1 -> 2698` | `12.002 -> 3.311` | 781 TPS/GPU, 8.5% MFU, ~5 s/step | Training when PBS killed the umbrella for a GPU fault in another seat. Saved `step-2600`. |
 | `9076358` | Nov 14-15 | `2601 -> 8989` | `-> 2.727` | 1677 s load, 297 s saves | 12h walltime (`Exit_status=-29`). Saved `step-8900`. |
 | `9094039` seat 3 (umbrella) | Nov 16- | `8901 -> 11800+` | `-> 2.672` | 6-7% MFU | First reload ran 9305 s with no output; the 3600 s idle watchdog killed it (`rc=124`). The relaunch loaded alone and trained from 8979 at 23:17 UTC. Saved through `step-11700` as of 03:40 UTC. [Write-up](../../2026-11-16-umbrella-9094039.md). |
+| `9091877` (per-chain) | Nov 18-19 | none | -- | -- | 12h walltime. 10 attempts, no training step logged: all stalled loading `step-20700`; 6 hit the idle watchdog (`rc=124`, ~5000 s), 3 ended `rc=143` (~2600 s). Head stays `step-20700`. |
 
 Umbrella `9053470` (the manual 24h umbrella: 2088 nodes on `large`, launched in a
 placeholder job named `test.sh`) trained this seat from 03:07:54 to 07:01:41 UTC on
