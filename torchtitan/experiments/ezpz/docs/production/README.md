@@ -4,7 +4,7 @@
 > Run `scripts/refresh_all.sh` to regenerate the tables/charts below from
 > disk + W&B.
 >
-> Last updated: 2026-11-17 (umbrella `9094039` status as of 03:40 UTC; historical generated metrics remain labeled below)
+> Last updated: 2026-11-19 (per-chain jobs after umbrella `9094039`; historical generated metrics remain labeled below)
 
 > **Polaris (A100) production** is tracked separately (different hardware,
 > `dolma` dataset, `72xxxxx` job IDs): see
@@ -32,14 +32,32 @@
 [Other jobs](#other-jobs) · [Known issues](#known-issues) ·
 [Overview](#overview)
 
-## Current — umbrella `9094039` (2026-11-16, 2346N, 24h)
+## Current — per-chain jobs after umbrella `9094039` (2026-11-19)
+
+Umbrella `9094039` hit its 24h walltime on 2026-11-17 18:15 UTC. The per-chain
+512N/256N continuations started 2026-11-18 20:10-20:37 UTC; three ran to the
+12h walltime, the 10B ended after 3h32m, and the 2B is still queued. They moved
+the chains very little:
+
+| Chain | Job | Exit | Head (`.metadata`) | What happened |
+|---|---|---|---|---|
+| 20B 256N | `9092662` | walltime (`-29`) | `step-22800` | trained; attempt 1 stopped by the idle watchdog after step 22723 (`rc=124`); attempt 2 reached 22863 and saved `step-22800` |
+| 20B 512N | `9093715` | walltime (`-29`) | `step-10800` | 5 attempts, each `signal 11` in `dcp_save` writing `step-10810` |
+| 4B v2 512N | `9091877` | walltime (`-29`) | `step-20700` | 10 attempts, no training step logged: all stalled loading `step-20700`; 6 hit the idle watchdog (`rc=124`, ~5000 s), 3 ended `rc=143` (~2600 s), the 10th was cut by walltime |
+| 10B v2 512N | `9091888` | `-14` after 3h32m | `step-4900` | 5 attempts, no training step: hung loading `step-4900` (`rc=124`/`127`/`143`) |
+| 2B 512N fork | `9101108` | queued | `step-42200` | `-REAL-fixedpos` chain; validator off |
+
+The 4B and 10B reload stall now reproduces with the chain running alone, so
+it is not only contention between concurrent 6144-rank loads. Logs:
+`torchtitan-ezpz/logs/multi-autoretry-<job>/`.
+
+### Umbrella `9094039` (2026-11-16, 2346N, 24h)
 
 Started 2026-11-16 18:12 UTC with five seats. As of 2026-11-17 03:40 UTC:
 20B-256 at `step-22000`, 2B const-LR fork at `step-40700`, 4B at `step-11700`.
 The 20B-512 trains but its `step-10900` save segfaults ~40 min in every time
 (head stays `step-10800`); it is left looping. The 10B was stopped after three
-checkpoint reloads hit the 60-min idle watchdog. Per-seat jobs `9091877`,
-`9091888`, `9092662`, `9093715` are held until it ends. See the
+checkpoint reloads hit the 60-min idle watchdog. See the
 [umbrella write-up](2026-11-16-umbrella-9094039.md).
 
 > [!IMPORTANT]
@@ -102,7 +120,8 @@ per-seat jobs (2026-11-14) and umbrella `9094039` (2026-11-16) ran after it. See
 
 One row per trajectory; `% target` is against the 4.67T olmo-mix budget.
 The 20B, 2B-fork, 4B and 10B rows reflect umbrella `9094039` as of 2026-11-17
-03:40 UTC; the other rows are historical generated rows. Post-training stages (CPT / SFT /
+03:40 UTC; for heads after the 2026-11-18 per-chain jobs see
+[Current](#current--per-chain-jobs-after-umbrella-9094039-2026-11-19). The other rows are historical generated rows. Post-training stages (CPT / SFT /
 RL-GRPO) are in the [next table](#post-training-stages-cpt--sft--rl). Detail +
 per-dispatch history is in the linked pages.
 

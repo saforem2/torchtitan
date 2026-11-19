@@ -12,7 +12,7 @@ The agpt-v2 9.48B model: `10b_olmo2tok` geometry (dim 4096, 48 layers, 32 heads,
 
 | Machine | Config | Shape | Head | Now |
 |---|---|---|---|---|
-| Aurora | `agpt_v2_10b_4k_olmo_mix` | 512N, GBS 6144 | `step-4900` | stopped; umbrella `9094039` seat 4 could not reload `step-4900` within the 3600 s idle watchdog |
+| Aurora | `agpt_v2_10b_4k_olmo_mix` | 512N, GBS 6144 | `step-4900` | stalled: umbrella `9094039` seat 4 and per-chain `9091888` (Nov 18) both failed to reload `step-4900` before the idle watchdog |
 | Sirius | `agpt_10b_olmo3_polaris` | 8N (32 GPUs), GBS 32 | `step-100` | finished: `33527` (`Exit_status=1`), `33537` (`Exit_status=143`) |
 | Polaris | `agpt_10b_olmo3_polaris` | 16N / 32N | -- | queued since Nov 9, `7832132` / `7832133` |
 
@@ -34,6 +34,7 @@ Aurora `9076371` trained 1 -> 5000 at 512N and saved `step-4900` (loss 2.837). S
 | `9053470` seat 4 (umbrella) | Nov 9-11 | 768N, 9216 ranks, GBS 9216 | step-1 loss **17788**, **24202**, **38478** on three fresh attempts, then a oneCCL scale-out allreduce failure (`atl_comm->wait fails`) and `FAILOVER STOP: deterministic_failure`; two more attempts stuck before training |
 | `9076371` | Nov 14-15 | 512N, 6144 ranks, GBS 6144 | fresh start, `1 -> 5000`, loss `-> 2.837`; 12h walltime. Saved `step-4900`. Step-1 loss normal. |
 | `9094039` seat 4 (umbrella) | Nov 16 | 512N, 6144 ranks, GBS 6144 | three `step-4900` reloads, each killed by the 3600 s idle watchdog mid-load (`rc=143` after 4819 s, 4723 s, 4656 s); seat stopped with `trainer-4.nan-stop` at 21:52 UTC. [Write-up](../../2026-11-16-umbrella-9094039.md). |
+| `9091888` (per-chain) | Nov 18 | 512N, 6144 ranks, GBS 6144 | 5 attempts, no training step logged: each stalled loading `step-4900` (`rc=124`/`127`/`143`); PBS ended the job after 3h32m (`Exit_status=-14`) |
 
 - Unverified inference from the umbrella write-up: oneCCL scale-out allreduce is
   broken at 9216 ranks on this stack. The 4B trained normally at 6144 ranks, so

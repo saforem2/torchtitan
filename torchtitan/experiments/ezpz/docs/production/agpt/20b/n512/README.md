@@ -4,7 +4,11 @@
 >
 > **This is the canonical 20B production chain.**
 >
-> **Current status (2026-11-17 03:40 UTC): trains, cannot save.** Seat 0 of
+> **Current status (2026-11-19): trains, cannot save; head `step-10800`.**
+> Per-chain `9093715` (Nov 18-19, 12h) ran 5 attempts; each reached step 10810
+> and died with `signal 11` in `dcp_save` writing `step-10810`.
+>
+> Earlier, seat 0 of
 > umbrella [`9094039`](../../../2026-11-16-umbrella-9094039.md). Every save of
 > `step-10900` dies ~40 min after `Saving the checkpoint`, inside DCP save
 > planning: mass `Fatal Python error: Segmentation fault` through MPICH
@@ -206,6 +210,7 @@ optimizer-update or checkpoint acceptance gate can run.
 | `9053470` t0 | 2026-11-09/11 | 4h26m (umbrella) | 10,801 -> 10,882 (fixedpos) | 2.538 -> 2.462 | 278 | 13.9% | Hung once after 10,854; watchdog restart from step-10,800; no new checkpoint ([write-up](../../../2026-11-11-umbrella-2088n.md)). |
 | `9076330` | 2026-11-14/15 | 12h | 10,801 -> 10,900 (x4) | -> 2.461 | -- | -- | Every run died in the `step-10900` save; head unchanged at step-10,800 ([journal](../../../../journal.md)). |
 | `9094039` seat 0 | 2026-11-16- | 24h (umbrella) | 10,801 -> 10,900 (x2), then 10,801 -> 10,863+ | 2.538 -> 2.461 | -- | 1-15% | **Running, cannot save.** `step-10900` save segfaults ~40 min in (DCP save planning, `PMPI_Wait`); ezpz auto-retry, then supervisor attempt 2. Left looping ([write-up](../../../2026-11-16-umbrella-9094039.md)). |
+| `9093715` (per-chain) | 2026-11-18/19 | 12h | 10,801 -> 10,810 (x5) | -- | -- | -- | Walltime. Every attempt `signal 11` in `dcp_save` at `step-10810`; head stays `step-10800`. |
 
 **Latest checkpoint:** step-10,800 in the fixedpos fork (disk-audited on Aurora
 2026-11-17 03:40 UTC; every `step-10900` save since 2026-11-14 segfaulted). The previous constant-LR chain's last good checkpoint is step-11,100;
