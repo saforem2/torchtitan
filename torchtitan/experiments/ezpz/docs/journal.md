@@ -22,7 +22,7 @@ All ranks stalled in an FSDP backward-prefetch all-gather; oneCCL blocked in `cc
 
 ### Sunspot CPT resumed the wrong chain
 
-`12484882` (`cpt_fineweb_edu_4n.sh`, no `CKPT_DIR`) loaded a Tegu `step-71800` and trained 71800 -> 74451 while the `/home` chain was at `step-143400` (558 checkpoints). The script picked the Tegu folder whenever the Tegu checkout existed. Fixed on #99 (`afafc7e93`): keep the local chain when it has `step-*`. Left running.
+`12484882` (`cpt_fineweb_edu_4n.sh`, no `CKPT_DIR`) loaded a Tegu `step-71800` and trained 71800 -> 74451 while the `/home` chain was at `step-143400`. The script picked the Tegu folder whenever the Tegu checkout existed. Fixed on #99 (`afafc7e93`): keep the local chain when it has `step-*`. Left running.
 
 ### PRs
 
