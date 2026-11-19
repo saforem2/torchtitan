@@ -15,19 +15,44 @@ date: 2026-03-15
 
 ## Recently Updated
 
-The 25 most-recently-changed docs by git commit date (across all 356
+The 25 most-recently-changed docs by git commit date (across all 367
 docs, not just the curated tables below). Auto-generated -- do not edit
 by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 
 <!-- BEGIN recently-updated (auto-generated) -->
 | Modified | Doc |
 |---------:|-----|
+| 2026-11-19 | [13 — Aurora Grain CPT Anneal Smoke (2N PVC)](./run-ledger/13-aurora-smokes.md) |
+| 2026-11-19 | [12 — Grain-Native CPT Curriculum (olmo / FineWeb-Edu / Cosmopedia Anneal)](./run-ledger/12-cpt-grain-curriculum.md) |
+| 2026-11-19 | [Production Training — agpt 4B (4.64B), OLMo-3 tokenizer, 4K](./production/agpt/4b/README.md) |
+| 2026-11-19 | [Production Training — agpt 2B @ 512 nodes](./production/agpt/2b/n512/README.md) |
+| 2026-11-19 | [Production Training — agpt 20B @ 512 nodes](./production/agpt/20b/n512/README.md) |
+| 2026-11-19 | [Production Training — agpt 20B @ 256 nodes](./production/agpt/20b/n256/README.md) |
+| 2026-11-19 | [Production Training — agpt 10B (9.48B), OLMo-3 tokenizer, 4K](./production/agpt/10b/README.md) |
+| 2026-11-19 | [Production Training Runs — Aurora](./production/README.md) |
 | 2026-11-18 | [Upstream Sync Log](./upstream-sync.md) |
+| 2026-11-18 | [13 - SFT MCQ Template Probe Smoke (2N, 20 Steps, Grain Streaming)](./run-ledger/13-sft-mcq-smoke.md) |
+| 2026-11-18 | [13 — Launches 2026-11-18 (Grain CPT Anneal + SFT MCQ Probe)](./run-ledger/13-launches-20261118.md) |
+| 2026-11-18 | [13 — Grain CPT anneal smoke (2N)](./run-ledger/13-grain-cpt-smoke.md) |
+| 2026-11-18 | [13 — Eval Harness Closeout (CoT 136800 Final + MMLU Flat + Live CPT)](./run-ledger/13-eval-harness-closeout.md) |
+| 2026-11-18 | [12 — SFT MCQ Template Probe (Template Adherence Before Correctness)](./run-ledger/12-sft-mcq-template-probe.md) |
+| 2026-11-18 | [12 — CoT Eval at CPT Step 136800 (CPT Cannot Solve CoT)](./run-ledger/12-cot-136800-eval.md) |
+| 2026-11-18 | [11 — Eval Matrix (MMLU + Commonsense + CoT) — updated 2026-11-18 with CPT 136800](./run-ledger/11-eval-matrix.md) |
 | 2026-11-18 | [05 — Infra / RL / Storage Ledger](./run-ledger/05-infra-rl-storage.md) |
 | 2026-11-18 | [03 — Eval Harness Ledger (GSM8K-CoT + MMLU + Commonsense)](./run-ledger/03-eval-harness.md) |
+| 2026-11-18 | [agpt-2B post-training plan: best general instruct model](./production/POST-TRAINING-PLAN.md) |
 | 2026-11-18 | [Development Journal](./journal.md) |
+| 2026-11-18 | [Eval Matrix Plan — AGPT-2B across MDS / TT-256N / TT-512N / CPT-FWE + post-training](./evals/eval-matrix/eval-matrix-2026-11-16.md) |
+| 2026-11-18 | [Evaluation Results](./evals/README.md) |
+| 2026-11-18 | [Pre-Training AuroraGPT with TorchTitan + 🍋 ezpz](./README.md) |
 | 2026-11-17 | [10 — Infra Readiness — VENV, LD-first, PBS, Host Routing, Preflight](./run-ledger/10-infra-readiness.md) |
 | 2026-11-17 | [09 — Gate & RL Probe Ledger (150k Decision Gate + GRPO Probe + Ranked Next-Course Matrix)](./run-ledger/09-gate-rl-probe.md) |
+
+<details>
+<summary>Next 25 (#26-50)</summary>
+
+| Modified | Doc |
+|---------:|-----|
 | 2026-11-17 | [08 — SFT broad distill unpark (E7 Thread B §§4-5, SYNTHESIS E7, POST-TRAINING-PLAN phases 1-3)](./run-ledger/08-sft-broad-distill-unpark.md) |
 | 2026-11-17 | [07 — Eval Sweeps Unpark (E2 + E4-E6)](./run-ledger/07-eval-sweeps-unpark.md) |
 | 2026-11-17 | [06 — HF Ladder Unpark (E1 Scoring Ladder P0-P3, 14 Converts)](./run-ledger/06-hf-ladder-unpark.md) |
@@ -45,39 +70,14 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-11-17 | [OLMo-3-vocab LR finder: 5B / 10B at GBS=128 on Sirius (OLMo-3-1K)](./experiments/lr-finder/agpt/2026-11-12-olmo3-gbs128-sirius.md) |
 | 2026-11-17 | [LR Finder -- agpt 10B OLMo-tokenizer](./experiments/lr-finder/agpt/10b/README.md) |
 | 2026-11-16 | [Production Training — Dense (agpt) Models](./production/agpt/README.md) |
-| 2026-11-16 | [Production Training — agpt 4B (4.64B), OLMo-3 tokenizer, 4K](./production/agpt/4b/README.md) |
-| 2026-11-16 | [Production Training — agpt 2B @ 512 nodes](./production/agpt/2b/n512/README.md) |
-
-<details>
-<summary>Next 25 (#26-50)</summary>
-
-| Modified | Doc |
-|---------:|-----|
 | 2026-11-16 | [Production Training — agpt 2B](./production/agpt/2b/README.md) |
-| 2026-11-16 | [Production Training — agpt 20B @ 512 nodes](./production/agpt/20b/n512/README.md) |
-| 2026-11-16 | [Production Training — agpt 20B @ 256 nodes](./production/agpt/20b/n256/README.md) |
 | 2026-11-16 | [Production Training — agpt 20B](./production/agpt/20b/README.md) |
-| 2026-11-16 | [Production Training — agpt 10B (9.48B), OLMo-3 tokenizer, 4K](./production/agpt/10b/README.md) |
-| 2026-11-16 | [Production Training Runs — Aurora](./production/README.md) |
 | 2026-11-16 | [AuroraGPT-2B post-training: complete status](./production/POST-TRAINING-2B.md) |
 | 2026-11-16 | [Umbrella 9094039 -- 2346N, 24h, five seats (2026-11-16)](./production/2026-11-16-umbrella-9094039.md) |
-| 2026-11-16 | [Pre-Training AuroraGPT with TorchTitan + 🍋 ezpz](./README.md) |
 | 2026-11-15 | [sft_distill_cot_4n — Phase 2 broad CoT lever verification](./production/sft_distill_cot_4n_verification.md) |
 | 2026-11-15 | [RL guardrail — CoT-gated GRPO on agpt-2B](./production/rl_guardrail_note.md) |
 | 2026-11-15 | [Verified OLMo-3-1K GBS=128 Sirius evidence -- 2026-11-11 to 2026-11-15](./experiments/lr-finder/agpt/data/2026-11-12-olmo3-gbs128-sirius/README.md) |
 | 2026-11-14 | [Production Training Runs -- Polaris (A100)](./production/polaris/README.md) |
-| 2026-11-14 | [Continued Pre-Training (CPT) — 2B olmo x dolmino mixing-ratio sweep](./production/cpt/README.md) |
-| 2026-11-14 | [Sirius hedge: agpt 5B and 10B on the OLMo-3 tokenizer (Nov 2026)](./production/agpt/sirius-olmo3-5b-10b.md) |
-| 2026-11-14 | [Historical: AuroraGPT v1 (bf16-master, tainted) training runs](./production/agpt/historical/v1-bf16/README.md) |
-| 2026-11-14 | [agpt 5B (moved)](./production/agpt/5b/README.md) |
-| 2026-11-14 | [Frameworks RC (oneAPI 2026.1.0) -- validation status](./guides/frameworks-rc-validation.md) |
-| 2026-11-14 | [LR Finder -- agpt (Dense) -- index](./experiments/lr-finder/agpt/README.md) |
-| 2026-11-12 | [FineWeb-Edu 60/40 kind-shift: the next pre-training lever for agpt-2B](./production/sft/fineweb-edu-60-40-kind-shift.md) |
-| 2026-11-12 | [Production SFT](./production/sft/README.md) |
-| 2026-11-12 | [Production RL with Monarch, TorchStore, and vLLM on XPU](./production/rl/monarch.md) |
-| 2026-11-12 | [Aurora 2088N umbrella 9053470 and per-seat resubmission — 2026-11-09 to 2026-11-11](./production/2026-11-11-umbrella-2088n.md) |
-| 2026-11-12 | [XPU: intermittent FSDP all-gather hang after step 7 (2026-11-11)](./guides/known-bugs/xpu-fsdp-allgather-hang-after-step-7.md) |
-| 2026-11-12 | [MoE at TP>1: wo gets Shard(0) where row-parallel wants Partial(sum)](./guides/known-bugs/moe-tp2-wo-placement.md) |
 
 </details>
 <!-- END recently-updated (auto-generated) -->
@@ -89,15 +89,15 @@ going?" Tracking is per-model and per-node-count.
 
 | Page | Notes | Modified |
 |------|-------|---------:|
-| [Production Index](./production/README.md) | Top-level snapshot of every active trajectory | 2026-11-16 |
+| [Production Index](./production/README.md) | Top-level snapshot of every active trajectory | 2026-11-19 |
 | [Umbrella `9094039`](./production/2026-11-16-umbrella-9094039.md) | 2346N/24h five-seat umbrella: 4B/10B reload vs idle watchdog, 20B-512 `step-10900` save segfault, 2B fork from `step-39900` | 2026-11-16 |
 | [Dense (agpt) Production](./production/agpt/README.md) | 2B / 20B / 80B chains, v1-vs-v2 overlays | 2026-11-16 |
 | [2B 256N](./production/agpt/2b/n256/README.md) | step-**92,859** (4.674T tokens, 100.0% of 4.67T), loss 2.6524. | 2026-10-16 |
-| [2B 512N](./production/agpt/2b/n512/README.md) | step-**46429** (4.67T tokens, 100.0% of 4.67T), loss 2.6869. | 2026-11-16 |
-| [20B 512N](./production/agpt/20b/n512/README.md) | step-**10,800** (10,800 x 12,288 x 8,192 = **1,087.2B tokens**), loss 2.4606. | 2026-11-16 |
-| [20B 256N](./production/agpt/20b/n256/README.md) | step-**22,000** (22,000 x 6,144 x 8,192 = **1,107.3B tokens**), loss 2.4219. | 2026-11-16 |
-| [agpt 4B, OLMo-3, 4K](./production/agpt/4b/README.md) | Aurora 512N at step-11,700 (294.4B tokens), running in `9094039`; Sirius 2N finished; Polaris queued. | 2026-11-16 |
-| [agpt 10B, OLMo-3, 4K](./production/agpt/10b/README.md) | Aurora 512N at step-4,900 (123.3B tokens); umbrella seat stopped (reloads exceeded the idle watchdog). 768N diverged at step 1. Sirius 8N finished; Polaris queued. | 2026-11-16 |
+| [2B 512N](./production/agpt/2b/n512/README.md) | step-**46429** (4.67T tokens, 100.0% of 4.67T), loss 2.6869. | 2026-11-19 |
+| [20B 512N](./production/agpt/20b/n512/README.md) | step-**10,800** (10,800 x 12,288 x 8,192 = **1,087.2B tokens**), loss 2.4606. | 2026-11-19 |
+| [20B 256N](./production/agpt/20b/n256/README.md) | step-**22,000** (22,000 x 6,144 x 8,192 = **1,107.3B tokens**), loss 2.4219. | 2026-11-19 |
+| [agpt 4B, OLMo-3, 4K](./production/agpt/4b/README.md) | Aurora 512N at step-11,700 (294.4B tokens), running in `9094039`; Sirius 2N finished; Polaris queued. | 2026-11-19 |
+| [agpt 10B, OLMo-3, 4K](./production/agpt/10b/README.md) | Aurora 512N at step-4,900 (123.3B tokens); umbrella seat stopped (reloads exceeded the idle watchdog). 768N diverged at step 1. Sirius 8N finished; Polaris queued. | 2026-11-19 |
 | [agpt 80B](./production/agpt/80b/README.md) | **Blocked at scale by a high-dp NaN; root cause unknown.** Optimizer-independent (SophiaG 512N, mano 62N); the earlier "bf16 residual-stream overflow" diagnosis is refuted ([what we know](./guides/known-bugs/80b-nan-what-we-know.md)). fp32 activations prevent it at ~3.4x cost; fp32-residual alone still NaNs at dp=192; no live 80B production, fp32-residual work dormant. Wall 2 (256N init segfault) separate + open. | 2026-10-29 |
 | [80B 512N NaN incident (2026-07-03)](./experiments/agpt/aurora/20260703-80b-512n-sophiag-nan.md) | Incident record of the 512N NaN + NaN-abort guard. NOTE: the SophiaG-Hessian attribution was later disproven (2026-07-14, task #21) -- the NaN is optimizer-independent; the follow-on residual-overflow diagnosis is also refuted, root cause unknown (see `guides/known-bugs/80b-nan-what-we-know.md`). | 2026-10-16 |
 | [20B 1024N](./production/agpt/20b/n1024/README.md) | First attempt (8463183) crashed at startup; not retried | 2026-10-16 |
@@ -117,7 +117,7 @@ ARC-Challenge / Winogrande vs the (frozen-norm) v1 baseline.
 | [agpt 2B evals](./evals/agpt/2b/README.md) | v2 256N async sweep step 36K-45.5K (plateau at ARC-Easy ~0.645). v2 512N sync sweep step 14K-25K. v2 512N full sweep step 1K-13K + 256N-vs-512N per-batch. v2 ARC-Easy **0.6115** at step-13K (+33pp vs v1). | 2026-10-16 |
 | [agpt 20B evals](./evals/agpt/20b/README.md) | **🏁 20B 512N sync full sweep step 900-3,200: ARC-Easy 0.463→0.665 (+20pp), HellaSwag norm 0.296→0.574 (+28pp). Now beating 2B 256N async per token.** v1 vs v2 step 100-800 (ARC-Easy 0.27 → 0.44) + 256N-vs-512N comparator. | 2026-10-16 |
 | [agpt 2B-MDS evals](./evals/agpt/2b-mds/README.md) | Pre-torchtitan reference scores | 2026-10-16 |
-| [Eval Index](./evals/README.md) | Top-level eval landing page | 2026-11-12 |
+| [Eval Index](./evals/README.md) | Top-level eval landing page | 2026-11-18 |
 
 ## Big Findings (post-mortems and live workarounds)
 

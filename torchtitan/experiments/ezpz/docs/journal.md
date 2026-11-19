@@ -1,5 +1,38 @@
 # Development Journal
 
+## 2026-11-19: #104 smokes on Sunspot; manifest streaming; agpt CP; MoE EP fix; SFT row-group sharding
+
+Sunspot was up all day. SSH from the laptop fails at `bastion` (interactive auth); hop through Aurora instead. Sirius answers again but also wants interactive auth. Polaris `7860529` (duplicate 20B smoke) is still queued; the qdel was refused by the permission check.
+
+### #104 (merged `5d4ccbf79`)
+
+Merged `origin/ezpz` (#103, #105, #106) into the branch first. Sunspot 2N smokes, from random init:
+
+| Job | Script | Verdict | Cause / result |
+|---|---|---|---|
+| `12484916` | anneal | failed | `HuggingFaceTB/cosmopedia` has no default config |
+| `12484917` | SFT probe | failed | `--validator.no-enable` not accepted by the SFT config |
+| `12484918` | anneal | failed | Hub API `429`: 24 ranks listing olmo-mix (28,878 files) |
+| `12484919`/`20` | SFT probe | walltime | MMLU `auxiliary_train` nests rows under `train` (filter dropped 100%); then 128 microbatches/rank per production step |
+| `12484922` | anneal | ok | 200 steps, olmo-mix and cosmopedia from frozen manifests |
+| `12484923` | SFT probe | ok | 20 steps, loss `12.95` -> `8.42` |
+| `12484924` | anneal | ok | after pinning 524,288 tokens/step: loss `12.93` -> `10.19`, 13.1% MFU |
+
+Frozen manifests (`hf_manifest.py`, `scripts/freeze_hf_manifest.py`) pin a commit and file list; each rank streams `files[dp_rank::dp_world_size]` over `resolve/<commit>/<path>` with no Hub API calls. `load_dataset(..., data_files=[huggingface.co URLs])` does not avoid the API: `datasets` rewrites them to `hf://` and lists their directories.
+
+### Follow-ups (merged)
+
+- #107 `c269b6423`: agpt context parallelism via Ulysses around the agpt and muP SDPA classes. Sunspot `12484926`, `agpt_debugmodel`: CP=1 loss `10.876` -> `9.122`, CP=2 `10.882` -> `9.097` (different DP degree, so not bitwise).
+- #108 `ed3028af0`: production pages. The 18 Nov per-chain jobs barely moved: 4B (`9091877`, 10 attempts) and 10B (`9091888`, 5) never got past loading `step-20700`/`step-4900`; 20B-512 (`9093715`) segfaulted 5x in `dcp_save` at `step-10810`; 20B-256 (`9092662`) saved `step-22800`. 2B `9101108` queued.
+- #109 `85de4fba0`: SFT sources shard by parquet row group (none of the five has a file count divisible by 24). Training start -> step 1: 958 s (`12484923`) -> 66 s (`12484930`); step 20 at 98 s, 402 tps. aiohttp needs `trust_env=True` behind the ALCF proxy (`12484925` died on direct-connect timeouts).
+- #110 `b46660d65`: MoE EP. `moeModel.Config.__post_init__` re-applied the dense template on the `dataclasses.replace` copy `build()` makes, resetting EP experts to `{dp: R}`; FSDP rejected them (`default_pg`). Diagnosed with `12484929`. `12484931`: `moe_debugmodel_ep` loss `12.94` -> `10.48`, resume steps 4-10 exact.
+
+### Open
+
+- 4B/10B 6144-rank checkpoint load stalls past the idle watchdog even when alone.
+- 20B-512 `dcp_save` segfault, now at `step-10810`.
+- Polaris `7860529` still queued.
+
 ## 2026-11-18: Umbrella `9094039` ended; split of #96; upstream `fb1d2ba4` sync; per-chain jobs queued
 
 ### Umbrella `9094039`
