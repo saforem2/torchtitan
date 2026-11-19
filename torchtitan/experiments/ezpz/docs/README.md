@@ -30,6 +30,8 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-11-19 | [Production Training — agpt 20B @ 256 nodes](./production/agpt/20b/n256/README.md) |
 | 2026-11-19 | [Production Training — agpt 10B (9.48B), OLMo-3 tokenizer, 4K](./production/agpt/10b/README.md) |
 | 2026-11-19 | [Production Training Runs — Aurora](./production/README.md) |
+| 2026-11-19 | [Development Journal](./journal.md) |
+| 2026-11-19 | [Pre-Training AuroraGPT with TorchTitan + 🍋 ezpz](./README.md) |
 | 2026-11-18 | [Upstream Sync Log](./upstream-sync.md) |
 | 2026-11-18 | [13 - SFT MCQ Template Probe Smoke (2N, 20 Steps, Grain Streaming)](./run-ledger/13-sft-mcq-smoke.md) |
 | 2026-11-18 | [13 — Launches 2026-11-18 (Grain CPT Anneal + SFT MCQ Probe)](./run-ledger/13-launches-20261118.md) |
@@ -41,10 +43,8 @@ by hand; run `utils/refresh_docs_readme_table.py` (or `refresh_all.sh`).
 | 2026-11-18 | [05 — Infra / RL / Storage Ledger](./run-ledger/05-infra-rl-storage.md) |
 | 2026-11-18 | [03 — Eval Harness Ledger (GSM8K-CoT + MMLU + Commonsense)](./run-ledger/03-eval-harness.md) |
 | 2026-11-18 | [agpt-2B post-training plan: best general instruct model](./production/POST-TRAINING-PLAN.md) |
-| 2026-11-18 | [Development Journal](./journal.md) |
 | 2026-11-18 | [Eval Matrix Plan — AGPT-2B across MDS / TT-256N / TT-512N / CPT-FWE + post-training](./evals/eval-matrix/eval-matrix-2026-11-16.md) |
 | 2026-11-18 | [Evaluation Results](./evals/README.md) |
-| 2026-11-18 | [Pre-Training AuroraGPT with TorchTitan + 🍋 ezpz](./README.md) |
 | 2026-11-17 | [10 — Infra Readiness — VENV, LD-first, PBS, Host Routing, Preflight](./run-ledger/10-infra-readiness.md) |
 | 2026-11-17 | [09 — Gate & RL Probe Ledger (150k Decision Gate + GRPO Probe + Ranked Next-Course Matrix)](./run-ledger/09-gate-rl-probe.md) |
 
@@ -95,7 +95,7 @@ going?" Tracking is per-model and per-node-count.
 | [2B 256N](./production/agpt/2b/n256/README.md) | step-**92,859** (4.674T tokens, 100.0% of 4.67T), loss 2.6524. | 2026-10-16 |
 | [2B 512N](./production/agpt/2b/n512/README.md) | step-**46429** (4.67T tokens, 100.0% of 4.67T), loss 2.6869. | 2026-11-19 |
 | [20B 512N](./production/agpt/20b/n512/README.md) | step-**10,800** (10,800 x 12,288 x 8,192 = **1,087.2B tokens**), loss 2.4606. | 2026-11-19 |
-| [20B 256N](./production/agpt/20b/n256/README.md) | step-**22,800** (22,800 x 6,144 x 8,192 = **1,147.5B tokens**); per-chain `9092662` saved it 2026-11-19. | 2026-11-19 |
+| [20B 256N](./production/agpt/20b/n256/README.md) | step-**22,000** (22,000 x 6,144 x 8,192 = **1,107.3B tokens**), loss 2.4219. | 2026-11-19 |
 | [agpt 4B, OLMo-3, 4K](./production/agpt/4b/README.md) | Aurora 512N at step-20,700; per-chain `9091877` (Nov 18-19) never got past reloading it. Sirius 2N finished; Polaris queued. | 2026-11-19 |
 | [agpt 10B, OLMo-3, 4K](./production/agpt/10b/README.md) | Aurora 512N at step-4,900 (123.3B tokens); umbrella seat stopped (reloads exceeded the idle watchdog). 768N diverged at step 1. Sirius 8N finished; Polaris queued. | 2026-11-19 |
 | [agpt 80B](./production/agpt/80b/README.md) | **Blocked at scale by a high-dp NaN; root cause unknown.** Optimizer-independent (SophiaG 512N, mano 62N); the earlier "bf16 residual-stream overflow" diagnosis is refuted ([what we know](./guides/known-bugs/80b-nan-what-we-know.md)). fp32 activations prevent it at ~3.4x cost; fp32-residual alone still NaNs at dp=192; no live 80B production, fp32-residual work dormant. Wall 2 (256N init segfault) separate + open. | 2026-10-29 |
@@ -136,7 +136,7 @@ relevant guide before suggesting work that touches one of these.
 
 | Page | Notes | Modified |
 |------|-------|---------:|
-| [Development Journal](./journal.md) | Session-by-session log of what happened, with findings and incidents | 2026-11-18 |
+| [Development Journal](./journal.md) | Session-by-session log of what happened, with findings and incidents | 2026-11-19 |
 | [AuroraGPT Sync Notes](./meeting-notes/agpt-sync.md) | Recurring agendas + action items | 2026-10-16 |
 | [Meeting Notes Index](./meeting-notes/README.md) | Top-level meeting index | 2026-10-16 |
 | [Summary 2026-04-12 → 2026-04-27](./summaries/2026-04-27.md) | 2-week retrospective | 2026-10-16 |
