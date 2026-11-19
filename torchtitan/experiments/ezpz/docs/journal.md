@@ -1,5 +1,69 @@
 # Development Journal
 
+## 2026-11-18: Umbrella `9094039` ended; split of #96; upstream `fb1d2ba4` sync; per-chain jobs queued
+
+### Umbrella `9094039`
+
+Hit its 24h walltime at 2026-11-17 18:15 UTC (`Exit_status=-29`). Last checkpoints with `.metadata`:
+
+| Chain | Head | Note |
+|---|---|---|
+| 20B-512 | `step-10800` | `step-10900` save never completed (DCP save planning segfault) |
+| 20B-256 | `step-22700` | |
+| 2B fork | `step-42200` | `-REAL-fixedpos` |
+| 4B v2 | `step-20700` | `step-20800` partial |
+| 10B v2 | `step-4900` | `step-5000` partial |
+
+Per-chain continuations are queued in `small`: 4B `9091877`, 10B `9091888`, 20B-256 `9092662`, 20B-512 `9093715`, and the 2B as its own 512N job `9101108` (`submit/aurora/seat-2b-20261118.pbs`, validator off by default).
+
+### 2B collective hang
+
+All ranks stalled in an FSDP backward-prefetch all-gather; oneCCL blocked in `ccl_coll_create` -> `ccl_yield` (py-spy sweep, `/flare/AuroraGPT/foremans/scratch/umbrella-monitor/stacks-2b-step42053-20261117T142525Z/`). Only validator-enabled seats hung; the step count was not fixed (353 steps after one relaunch, 125 after the next). The oneCCL `pending requests` warning dumps kept the console fresh, so `IDLE_TIMEOUT` never fired. `9101108` runs with `--validator.no-enable` to test the validator hypothesis.
+
+### Sunspot CPT resumed the wrong chain
+
+`12484882` (`cpt_fineweb_edu_4n.sh`, no `CKPT_DIR`) loaded a Tegu `step-71800` and trained 71800 -> 74451 while the `/home` chain was at `step-143400` (558 checkpoints). The script picked the Tegu folder whenever the Tegu checkout existed. Fixed on #99 (`afafc7e93`): keep the local chain when it has `step-*`. Left running.
+
+### PRs
+
+#96 closed after a file-level check: 88 of 90 changed files identical in #97/#98/#99 or already on `ezpz`; three eval commits added after the split were cherry-picked onto #99. Review fixes that changed behavior:
+
+- #97: standalone plot scripts imported `torchtitan.experiments.ezpz` (needs `ezpz` + torch); `apply_style()` silently fell back to matplotlib defaults.
+- #98: `submit_lr_finder_sirius.sh` never passed `LRF_DUMP_FOLDER`, so 5B and 10B runs shared `./outputs/lr_finder/ezpz/AgptModel/<opt>`; `num_tokens_per_train_step=-1` produced `gbs-1`; both readers missed the per-GBS level.
+- #99: the CPT root above; `eval_cpt_fwe_mmlu_aurora.sh` tested `bin/activate` with `-d` (never true) under `set -u`; `aggregate_eval_matrix.py` read `acc` instead of lm-eval's `acc,none` and copied one checkpoint's scores into every row.
+- #101: TODO linked to saforem2/ezpz#308. #102: `ezpz submit` rule in `AGENTS.md`.
+
+### Upstream `fb1d2ba4` (#103)
+
+18 commits, no conflicts. `validate_model_training_config` now checks declared mesh axes in `Trainer.Config.__post_init__`, before `FaultTolerantTrainer.__init__` applied the final sharding: every MoE EP config failed at parse time. MoE EP on XPU already failed on `7ebad1d6` (accelerator-graph check vs the all-to-all dispatcher). Both fixed by running `update_from_config` and `maybe_disable_accelerator_graphs` in `Config.__post_init__` (`d6785184`, `bd20b261`). See `upstream-sync.md`.
+
+### Integration smokes
+
+`ezpz-integration-20261118` `4103a65a1d` (= `ezpz` + #97-#103), in-tree harness:
+
+| Config | Aurora | Polaris (A100 40 GB) |
+|---|---|---|
+| `agpt_2b_real` | ok `9101302` | ok `7860343` |
+| `agpt_v2_4b_4k_olmo_mix` | ok `9101343` | ok `7860397` |
+| `agpt_v2_10b_4k_olmo_mix` | ok `9101671` (`9101375`: resume rank rc `137`) | ok `7860453` |
+| `agpt_20b_real` | ok `9101414` | ok `7861136` (8N, `debug-scaling`) |
+| `agpt_debugmodel` TP=2 | ok `9101585` | -- |
+| `moe_debugmodel_ep` EP=2 | fails `9101603` | -- |
+
+Each run: 10 seeded steps, checkpoint at 5, resume; steps 6-10 matched on every passing arm (Polaris 20B steps 9-10: `10.07179`, `9.63661` both times). MoE EP=2 now parses and fails at FSDP setup: `spmd_types annotation on axis default_pg, which is neither a non-FSDP storage-mesh axis nor contained in the FSDP DP mesh`. Open.
+
+Polaris was full (3 of 561 nodes free); the 20B ran in `debug-scaling` at 20:32 local. A duplicate in `preemptable` (`7860529`) is still queued.
+
+Sunspot and Sirius were down for maintenance.
+
+### Merged into `ezpz`
+
+#97 `b2a79f1c4`, #100 `efd1a69f2`, #101 `9006be16a`, #102 `701bbd893`, #98 `ab73f38f3`, #99 `c03660813`, #103 `7594bdaa7`.
+
+### Open: #104 (Phase 12/13 CPT anneal + SFT probes)
+
+The remaining `ezpz-cpt111k-eval-sft` work, rebased onto `ezpz`. Aurora smokes: `9101507` failed on a probe that imported a nonexistent private name (fixed); `9101512` raised the expected config-time `ValueError` because the Grain anneal configs read the base DCP and `_FINEWEB_EDU_DIR` from `/lus/tegu`. Needs `grain_cpt_anneal_smoke_2n.sh` and `sft_mcq_probe_smoke_2n.sh` on Sunspot after maintenance.
+
 ## 2026-11-17: Umbrella `9094039` at 9.5h; production docs refreshed
 
 As of 03:40 UTC, 9h26m into 24h:
