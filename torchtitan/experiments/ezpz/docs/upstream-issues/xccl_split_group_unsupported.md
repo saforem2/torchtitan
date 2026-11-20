@@ -12,7 +12,7 @@
 `ProcessGroupXCCL` inherits `Backend::supportsSplitting()` from
 [`Backend.hpp`](https://github.com/pytorch/pytorch/blob/main/torch/csrc/distributed/c10d/Backend.hpp),
 which defaults to `false`. `ProcessGroupNCCL` overrides it to `true` (see
-[`ProcessGroupNCCL.hpp`](https://github.com/pytorch/pytorch/blob/main/torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp)).
+[`ProcessGroupNCCL.hpp`](https://github.com/pytorch/pytorch/blob/main/torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.hpp)).
 xccl does not.
 
 Combined with `DeviceMesh._init_one_process_group`'s gate (torch 2.13,
