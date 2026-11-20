@@ -40,6 +40,9 @@
 #   SMOKE_RESUME_AT  checkpoint step (default 3); SMOKE_RESUME_TOL (default 1e-3)
 #   SMOKE_RESUME_EXTRA  extra flags for both resume runs ("{NPROC}" substituted)
 #   SEED             debug seed (default 42)
+#   SMOKE_LOG_TAG    suffix for the log dir; set it per run when one job runs the
+#                    harness more than once, or later resume runs reuse the earlier
+#                    run's checkpoints
 #   SMOKE_CUDA_GRAPHS  0 to run eager on CUDA (default 1: upstream accelerator graph capture)
 
 set -o pipefail
@@ -189,7 +192,7 @@ fi
 
 JOBID_SHORT="${PBS_JOBID%%.*}"
 [[ -z "${JOBID_SHORT}" ]] && JOBID_SHORT="$(date +%Y%m%d-%H%M%S)"
-LOG_DIR="logs/ezpz-sync-smoke-${MACHINE}-${JOBID_SHORT}"
+LOG_DIR="logs/ezpz-sync-smoke-${MACHINE}-${JOBID_SHORT}${SMOKE_LOG_TAG:+-${SMOKE_LOG_TAG}}"
 mkdir -p "${LOG_DIR}"
 LOG="${LOG_DIR}/run.log"
 strip_ansi() { sed 's/\x1b\[[0-9;]*m//g' "$@"; }
