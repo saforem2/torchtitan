@@ -1,5 +1,206 @@
 # Upstream Sync Log
 
+## 2026-11-19 (draft, not merged): upstream `cc020983`, 12 commits
+
+Trial merge of `pytorch/torchtitan` `main` at `cc020983a4` into `ezpz` `9904597a`
+(#113), on branch `sync/upstream-cc020983a-trial`. Merge base `fb1d2ba4`: the head of
+the last sync (#103), so nothing upstream had been merged since. Upstream is linear over
+the range (12 commits, 0 merges), not the ~50 expected.
+
+No textual conflicts. Two files changed on both sides and auto-merged:
+
+- `components/checkpointer/dcp.py`: ezpz's `_native_storage_reader` and the
+  `legacy_native_dcp` load path (both in `load`) vs upstream moving `async_mode` from
+  `CheckpointManager.Config` to `BaseCheckpointManager.Config` (#6196). Disjoint hunks.
+- `models/common/attention/cp_linear_attention.py`: ezpz's EOF alias
+  `prepare_linear_attention_cp_metadata = prepare_cp_linear_attention_metadata` vs
+  upstream's fixed-capacity CP routing in the function body (#5680). The alias still
+  resolves for ezpz's `cp_gdn`/`cp_kda` importers.
+
+One commit needs a replay onto both `agpt/` and `moe/`: #5721 changes `RoPE.Config.scaling`
+from a string to a typed config. As merged, every agpt and MoE config fails.
+
+### What the 12 commits change for us
+
+| Upstream (PR) | Effect on ezpz |
+|---|---|
+| `RoPE.Config.scaling: str` -> `RoPEScalingConfig \| None` (`Llama3ScalingConfig`, `YaRNScalingConfig`); flat `rope_factor`/`beta_fast`/`beta_slow`/`original_seq_len`/`scaling_factor` removed; `softmax_scale` uses `rope.attention_factor(mscale=)`; vision RoPE per attention layer (#5721) | **Breaks every agpt and MoE config.** Touches `models/llama3/flavors.py` and `models/deepseek_v3/{flavors,attention}.py`. Replay below |
+| `Decoder._parallelize` re-ties `tok_embeddings.weight` to `lm_head.weight`; `Decoder.Config.__post_init__` requires both to declare the same weight sharding when tied (#6144) | `agpt/parallelize.py` calls `model._parallelize`, so tied agpt models now stay tied through FSDP; the ezpz tied branch already puts `tok_embeddings`+`norm`+`lm_head` in one `fully_shard` group. Only `agpt_2b_tied` (arch experiment, not production) sets `enable_weight_tying`; it builds and stays tied. No production config is tied |
+| `async_mode` moves to `BaseCheckpointManager.Config`; `TorchCheckpointingManager` default flips from always-async to sync (#6196) | Same values, default and validation for the DCP manager. `GrainStreamingCheckpointManager` subclasses `TorchFTCheckpointManager` (DCP) and has no `Config.__post_init__` override. `competition/configs.py` sets `async_mode` on the DCP manager. No behavior change for ezpz |
+| Quantized FSDP wrappers survive async checkpoint staging (#6187) | ezpz does not use quantized FSDP |
+| `GrainDataLoader.Config.per_sample_pad_multiple` (default `1`), new `Config.__post_init__`; `DatasetBuildContext.per_sample_pad_multiple` (#6059) | Default is a no-op; the Grain anneal and SFT configs parse. ezpz reads `DatasetBuildContext` but never constructs one |
+| Linear-attention CP metadata registered with pytree, fixed-shape CP routing; `PTRRFlexAttentionCPLoadBalancer` rejected for linear attention (#5680) | agpt Ulysses CP uses softmax attention; ezpz configures no PTRR balancer. CP2 parses |
+| `apply_overrides` groups equivalent startup log lines (#6180) | Log format only; the return value `trainer.py` ignores is unchanged |
+| LoRA `expert_adapter_layout="shared_outer"` for routed experts (#5738) | New field with a default; `rl/model_configs.py` and `rl/xpu_trial/alphabet_sort.py` kwargs (`rank`, `alpha`, `target_modules`) unchanged |
+| deepseek_v4 sparse-attention geometry built once (#6181) | ezpz MoE derives from deepseek_v3, not v4 |
+| RL allocator env aliases (#5662), RL README (#6016), graph_trainer fusion_finder (#6171) | Not used by ezpz |
+
+### Required replay (#5721)
+
+Four sites, all inside `experiments/ezpz/`, committed on this branch as `6612da93`
+(15 insertions, 57 deletions).
+
+| File | Change |
+|---|---|
+| `agpt/__init__.py` `_build_agpt_config` | `scaling: Literal["none", "llama", "yarn"] = "none"` -> `scaling: RoPEScalingConfig \| None = None`. No caller passes a value, so every agpt flavor was `"none"` and is now `None` |
+| `moe/__init__.py`, 11 flavors | `scaling="yarn", rope_factor=40.0, beta_fast=32.0, beta_slow=1.0, original_seq_len=4096` -> `scaling=YaRNScalingConfig(factor=40.0)`, as upstream did to `deepseek_v3/flavors.py` |
+| `moe/__init__.py` `_agpt_2b_50k_moe_sdpa_aurora_full_sonic` | `scaling="none"` -> `scaling=None` |
+| `eval/hf_agpt_moe/assets.py` `_validate_semantics` | `attention.rope.scaling != "none"` -> `is not None`. Unchanged, the HF export would reject every config once scaling is `None` |
+
+The MoE `Attention` subclasses `DeepSeekMLAAttention.Config` and inherits its
+`softmax_scale`, so the `attention_factor` change needs no ezpz edit. The two
+rope-backend flippers (`_set_rope_backend`, the `CosSinRoPE` swap in `agpt/__init__.py`)
+copy fields generically and carry the typed value over.
+
+With the patch, `softmax_scale` and the SHA-1 of the built RoPE cache match `origin/ezpz`
+for all 15 entries in the MoE model registry (`0.11425195291833387` for the `mscale=0.70`
+flavors, `0.1352337788608801` for 236B/671B). The replay is numerics-neutral at config
+level.
+
+### Laptop checks
+
+`mbph`, CPU, meta-device model builds only. Venv: Python 3.12, torch `2.15.0`,
+`spmd_types` `0.3.1`, repo `requirements.txt`, `tyro`, local `ezpz`. Artifact gates were
+pointed at stub files (`MDS_ANNEAL_BASE`, `MDS154391_SFT_BASE`, `MDS154391_SFT_DCP`,
+`AGPT_V2_DATA_MANIFEST`, a patched `_FINEWEB_EDU_DIR`), so these checks test config
+parsing and model construction, not data.
+
+Each config was parsed with `ConfigManager` the way `train.py` does, then `cfg.model.build()`
+on meta:
+
+| Config | `origin/ezpz` | trial merge | trial + replay |
+|---|---|---|---|
+| `agpt_debugmodel`, `agpt_2b_real`, `agpt_20b_real` | ok | `'str' object has no attribute 'inv_freq'` | ok |
+| `agpt_v2_4b_4k_olmo_mix`, `agpt_v2_10b_4k_olmo_mix` | ok | same | ok |
+| `agpt_debugmodel` TP=2, CP=2 | ok | same | ok |
+| `agpt_2b_grain_cpt_anneal`, `agpt_2b_grain_cpt_anneal_at` | ok | same | ok |
+| `agpt_2b_mds_sft_mcq_template_probe_streaming` | ok | same | ok |
+| `moe_debugmodel`, `moe_debugmodel_ep` | ok | `unexpected keyword argument 'rope_factor'` | ok |
+
+The agpt configs parse on the trial merge and fail only at build, because nothing
+type-checks `scaling` at config time. A parse-only smoke would miss this.
+
+Tests (`test_config_validation_order.py`, `test_moe_spmd_sharding.py`,
+`test_moe_mla_flat_layout.py`, `test_agpt_model_contract.py`,
+`test_trainer_init_parity.py`, `agpt/test_mup.py`):
+
+| Tree | Result |
+|---|---|
+| `origin/ezpz` | 43 passed, 1 failed |
+| trial merge | 30 passed, 14 failed |
+| trial + replay | 43 passed, 1 failed |
+
+The one failure on every tree,
+`test_model_owns_adapter_pipeline_fragment_and_xpu_parallelization`, predates this sync.
+Also predating it: `tests/moe/test_agpt_moe_hf_*.py` and `eval/hf_agpt_moe` fail to import
+`RouterGateLinear` from `models/common/linear`, so the `assets.py` edit is untested, and
+`test_ckpt_key_compat.py` needs an Aurora path.
+
+### Smoke results
+
+Tree `6612da93`, pinned clean clones on each machine. Each run: 10 seeded deterministic
+steps, then a resume check (checkpoint at step 3, an uninterrupted 10-step run and a run
+resumed from step 3, compared on steps 4-10). Small configs use
+`--training.max-context-length=512 --training.num-tokens-per-microbatch-per-dp-rank=512`.
+2 nodes unless noted. Torch `2.16.0.dev20261015+xpu` (Sunspot, Aurora), `2.15.0+cu132`
+(Polaris, Sirius).
+
+| Config | Sunspot | Aurora | Polaris (A100 40 GB) | Sirius (H100) |
+|---|---|---|---|---|
+| `agpt_2b_real` | intermittent `ur_die`, see below | ok `9105491` | ok `7865139` | ok `33886` |
+| `agpt_v2_4b_4k_olmo_mix` | ok `12484940` | ok `9106730` | ok `7867375` (4N) | ok `33887` (4N) |
+| `agpt_v2_10b_4k_olmo_mix` | ok `12484974` | ok `9106777` | ok `7868156` (4N) | ok `33889` (4N) |
+| `agpt_20b_real` (8N) | ok `12484975` | ok `9108501` | ok `7868262` | ok `33890` |
+| `agpt_debugmodel` TP=2 | ok `12484943` | ok `9106819` | ok `7867260` | ok `33888` |
+| `agpt_debugmodel` CP=2 | ok `12484944` | ok `9106854` | ok `7867920` | ok `33888` |
+| `moe_debugmodel_ep` EP=2 | ok `12484945` | ok `9106926` | ok `7868147` | ok `33888` |
+
+Loss, step 1 -> 10, of the first 10-step run:
+
+| Config | Sunspot | Aurora | Polaris | Sirius |
+|---|---|---|---|---|
+| `agpt_2b_real` | 12.88247 -> 12.45318 (`12484978`) | 12.88247 -> 12.45318 | 12.94489 -> 9.57615 | 12.94318 -> 8.19822 |
+| `agpt_v2_4b_4k_olmo_mix` | 12.01617 -> 10.14911 | 12.00635 -> 8.25650 | 12.00943 -> 8.81364 | 12.02376 -> 10.24320 |
+| `agpt_v2_10b_4k_olmo_mix` | 11.99995 -> 10.48947 | 12.00496 -> 11.15326 | 12.01073 -> 10.47324 | 12.02447 -> 11.21457 |
+| `agpt_20b_real` | 12.94795 -> 11.76136 | 12.94795 -> 11.76136 | 12.96308 -> 9.63661 | 12.96719 -> 10.08218 |
+| `agpt_debugmodel` TP=2 | 10.86006 -> 9.02420 | 10.86006 -> 9.02420 | 10.86842 -> 9.50705 | 10.85575 -> 9.37850 |
+| `agpt_debugmodel` CP=2 | 10.88189 -> 9.09735 | 10.88189 -> 9.09735 | 10.85987 -> 9.51827 | 10.88160 -> 9.44687 |
+| `moe_debugmodel_ep` EP=2 | 12.93532 -> 10.48273 | 12.93532 -> 10.48273 | 12.98223 -> 10.54844 | 12.97502 -> 10.54998 |
+
+On every arm marked ok, the resumed run matched the uninterrupted run exactly
+(max abs diff `0`, 7/7 steps). Sunspot and Aurora print identical losses for 2B, 20B,
+TP=2, CP=2 and MoE EP=2. Sirius 20B matches the pre-sync Sirius run on `13223cc38`
+(`33751`) at every step.
+
+Sirius needs two harness settings, neither a code change:
+
+- `--comm.train-timeout-seconds=600` on the resume runs. At these node counts each rank
+  writes a ~3 GB shard to `/home`; with the default 100 s the watchdog aborts the
+  step-3 save (2B `33882`: 4 of 8 ranks finished writing ~67 s after the others, no
+  `.metadata`). Not a sync change: `async_mode` was `disabled` on `13223cc38` too.
+- Pinned `ezpz` utils `4a2aba37` and a login shell. Compute nodes cannot reach
+  `ezpz.cool`, and the older `f7deda79` pin loads no MPI module on Sirius
+  (`libmpi.so.12` -> `libfabric.so.1` not found).
+
+Sirius nodes `x3200c0s13`, `s31` and `s37` (b0n0 and b1n0) fail every launch in
+`torch.cuda.set_device` with `CUDA-capable device(s) is/are busy or unavailable`
+(`33881`, `33884`). Jobs on `s1`, `s7`, `s19` and `s25` pass. Reported to ALCF
+support 2026-11-20; the passing debug, 10B and 20B runs are pinned to the good nodes.
+
+Sunspot 2B is not a sync failure. It aborts in the Level Zero runtime:
+
+```
+ur_die: urEventWait must not be called for an internal event
+terminate called without an active exception
+```
+
+the same Intel fault tracked in
+[upstream-issues/intel-ur-die-urEventWait-a2a.md](upstream-issues/intel-ur-die-urEventWait-a2a.md).
+It is intermittent, and `SYCL_UR_USE_LEVEL_ZERO_V2=1` removes it. Control vs v2 on the
+same tree, venv and settings, 2N:
+
+| Jobs | Control crashes | v2 crashes |
+|---|---:|---:|
+| `12484977` / `12484978` (separate jobs, 3 launches each) | 1 / 3 | 0 / 3 |
+| `12484980`, `12484981` (one allocation each, 3 rounds, arm order alternating), first 10-step run of each trial | 5 / 6 | 0 / 6 |
+| same jobs, round-1 resume launches | 2 / 2 | 0 / 4 |
+| **total** | **8 / 11** | **0 / 13** |
+
+Every control crash is rc `137` at step 1. The `ur_die` signature is confirmed in
+`12484977`'s logs; the trial jobs share one log directory per job, so later trials
+overwrote the per-launch logs and only the rc survives. From round 2 on, the resume
+launches in `12484980`/`12484981` resumed the previous trial's step-10 checkpoint and
+are excluded. The v2 runs' losses are identical to Aurora's (12.88247 -> 12.45318) and
+resume exactly. Throughput under v2 is not measured. The pre-sync tree `4103a65a1`
+fails the same way (`12484899`), so this predates the sync.
+
+Not code failures:
+
+- **Sunspot 10B and 20B, first attempts: `/lus/tegu` quota.** The `datascience` project
+  was at its hard limit (33T used, 33T limit); `Errno 122` killed 10B in the resume
+  check (`12484941`) and 20B at step 8 (`12484942`). After cleanup (22.41T) both pass.
+- **Aurora 20B, first attempt `9106838`: walltime.** PBS killed it at the 1 h
+  `debug-scaling` limit during the resume check; the 8-node venv copy took 1,485 s.
+  The rerun without the copy (`PS_YEET=0`) passed in 55 min.
+- **Aurora MoE EP=2, first attempt `9106882`:** trained all 10 steps, then the resume
+  launch failed with `start failed on x4615c0s1b0n0: No reply from shepherd after 108s`
+  before any rank started. The rerun `9106926` passed.
+- **Polaris MoE EP=2, first attempt `7868103`:** the Polaris copy of the smoke wrapper
+  hardcoded `ezpz.agpt`, so the run looked up `moe_debugmodel_ep` in the agpt registry
+  and stopped before training. With the wrapper fixed, the rerun `7868147` passed. This
+  is the first MoE EP run on Polaris.
+
+10B is not run-to-run deterministic on XPU: on both Sunspot and Aurora the uninterrupted
+resume run drifts from the first run after step 3 (Aurora step 7: `19.26706` vs
+`20.00462`). The resumed run still matches the uninterrupted run exactly. On Polaris
+the two runs are identical.
+
+20B spikes in the first 10 steps on every machine (no warmup in the smoke): Polaris
+steps 2 and 7 print `24.93495` and `29.40991`, and the resumed run reproduces both.
+
+`moe_debugmodel_ep` failed at FSDP setup on Aurora in the last sync (`9101603`). It
+trains here on every XPU attempt; #110 (in the `9904597a` base) targeted that failure.
+
 ## 2026-11-18: upstream `fb1d2ba4`, 18 commits
 
 Merge of `pytorch/torchtitan` `main` at `fb1d2ba4` into `ezpz` `7ebad1d6`. Merge base
