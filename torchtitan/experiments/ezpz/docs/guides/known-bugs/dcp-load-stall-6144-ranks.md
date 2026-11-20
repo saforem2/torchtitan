@@ -3,6 +3,17 @@
 > Status: root cause found (2026-11-19), fix in testing. Tracked in #114.
 >
 > **Root cause: HSDP read amplification, not the plan exchange.** The 4B/10B chains use HSDP (`dp_shard=12`, `dp_replicate=512`); every model/optimizer tensor in the checkpoint has 12 chunks, and `dcp.load` has each of the 512 replicas read its own copy: ~29 TB per 4B load (56.85 GB x 512), ~59 TB per 10B load. The 2B (FSDP over the world) reads each byte once and loads fine. The plan-exchange steps in the original write-up below are superseded. Fix: replica-aware load (only `dp_replicate=0` reads, then broadcasts), on branches `ezpz-dcp-gloo-planning` and `ezpz-replica-aware-load-6ad208b`; see the 2026-11-19 journal entry.
+>
+> Load-time ladder on Aurora, loading the 4B production `step-20700` with `dp_shard=12`, `dp_replicate=N` (backport on the `6ad208b` tree):
+>
+> | Nodes | Job | Fix | `dcp.load` + broadcast | Bytes read |
+> |---|---|---|---|---|
+> | 64 | `9105700` | yes | 147 s | ~57 GB |
+> | 64 | `9105991` | no | ~318 s | ~3.6 TB |
+> | 128 | `9106167` | yes | 197 s | ~57 GB |
+> | 256 | `9106856` | yes | 346 s | ~57 GB |
+>
+> The 256N run excluded the dataloader state (its `dp_replicate` differs from the checkpoint's) and trained steps 20701-20702 at loss 2.56936 / 2.58342. The CPU regression test is `tests/test_replica_aware_load.py`.
 
 ## Problem
 

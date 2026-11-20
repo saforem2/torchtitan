@@ -13,7 +13,6 @@ from typing import Any, Literal
 import ezpz
 import ezpz.distributed
 
-from torchtitan.components.checkpointer import CheckpointManager
 from torchtitan.components.data import (
     ConcatThenSplitPackingConfig,
     GrainDataLoader,
@@ -49,6 +48,7 @@ from torchtitan.experiments.ezpz.optimizer.containers import (
     default_muon,
     default_sophiag,
 )
+from torchtitan.experiments.ezpz.replica_aware_load import ReplicaAwareCheckpointManager
 from torchtitan.experiments.ezpz.trainer import (
     FaultTolerantTrainer,
     set_max_context_length,
@@ -391,7 +391,7 @@ def _base_config(flavor: str) -> FaultTolerantTrainer.Config:
         ),
         dataloader=BlendCorpusDataLoader.Config(dataset="c4_test"),
         metrics=EzpzMetricsConfig(log_freq=10),
-        checkpointer=CheckpointManager.Config(
+        checkpointer=ReplicaAwareCheckpointManager.Config(
             interval=500,
             last_save_model_only=False,
         ),
@@ -806,7 +806,7 @@ def _cot_sft_config(
 
     # debugmodel smoke: train from scratch (no DCP to load).
     if flavor == "debugmodel":
-        cfg.checkpointer = CheckpointManager.Config(
+        cfg.checkpointer = ReplicaAwareCheckpointManager.Config(
             interval=300, last_save_model_only=False
         )
         cfg.checkpointer.folder = folder

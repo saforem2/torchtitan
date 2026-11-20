@@ -12,13 +12,12 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-import torch.distributed.checkpoint as dcp
 from torch.distributed.checkpoint import FileSystemReader
 from torch.distributed.checkpoint._nested_dict import flatten_state_dict
-from torch.distributed.checkpoint.default_planner import DefaultLoadPlanner
 from torch.distributed.checkpoint.state_dict_saver import _stateful_to_state_dict
 
 from torchtitan.components.checkpointer.base import MODEL
+from torchtitan.experiments.ezpz.replica_aware_load import replica_aware_dcp_load
 from torchtitan.experiments.torchft.checkpoint import TorchFTCheckpointManager
 
 
@@ -96,10 +95,8 @@ class GrainStreamingCheckpointManager(TorchFTCheckpointManager):
                 "were verified present.",
                 len(optional_missing),
             )
-        dcp.load(
-            state_dict,
-            storage_reader=reader,
-            planner=DefaultLoadPlanner(allow_partial_load=True),
+        replica_aware_dcp_load(
+            state_dict, storage_reader=reader, allow_partial_load=True
         )
 
         # Match the base DCP manager's flattened-model restore behavior.
