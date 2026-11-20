@@ -1,5 +1,72 @@
 # Development Journal
 
+## 2026-11-20: #114 load ladder; umbrella resubmitted with a step-3000 20B fork; #120 merged; Sunspot quota cleared
+
+### #114 load ladder (PR #118)
+
+4B `step-20700`, `dp_shard=12`, `dp_replicate=N`, `debug-scaling`:
+
+| Run | Job | Load |
+|---|---|---|
+| fix, 64N | `9105700` | 147 s |
+| control, 64N | `9105991` | ~318 s |
+| fix, 128N | `9106167` | 197 s |
+| fix, 256N | `9106856` | 346 s |
+
+Bytes read stay flat at ~57 GB with the fix. 256N trained steps 20701/20702 (loss `2.56936`/`2.58342`). The dataloader state does not restore when the DP degree changes; `--checkpoint.exclude-from-loading dataloader` works around it. 512N `9107456` is queued on `small`. The ladder table is in `docs/guides/known-bugs/dcp-load-stall-6144-ranks.md`.
+
+### #115 plan-exchange benchmark at 3072 ranks
+
+xccl `reduce_scatter`, synthetic plans: 256 KB 17.8 s, 512 KB 5.1 s (1.6 GB gathered), 1 MB 178.5 s (3.2 GB). The first attempt `9107039` crashed in the timing reduce (gloo group was `None`); fixed by always creating the group. The 20B-512 gather is ~2.6 GB at 6144 ranks, and the September stack saved at that size, so size alone does not explain the segfault. No fix designed yet.
+
+### Umbrella `9107532` (PR #119)
+
+`umbrella-20261120.pbs`, 2346N on `large`, 24h. Kept above 2048N for the Monday large-run boost. Six seats:
+
+- 20B-512 moved to 256N (`NNODES_20B512=256`, GBS still 12288).
+- New seat 5: 20B fork from `step-3000` of the 512N independent chain, 256N, pin `dc6c150`, `RESUME_SAMPLES_20B3K=10653696`, checkpoint dir `...-n256-gbs12288-from3000-fixedpos`.
+- 4B/10B v2 on `e106d3aac` (the replica-aware load backport).
+
+Why `step-3000`: the 20B-512 chain resumed 73 times, each restarting the data stream at sample 0, so ~89% of its tokens are replays. The first loss spike is at step 4410 and the oscillation starts near step 6000. `step-3000` and `step-10800` share the `qkv_linear.wq/wk/wv` schema, so `dc6c150` loads both. Resume samples: longest segment (301 -> 1125, 825 steps) x 1.05, ceiled to GBS -> 867 x 12288.
+
+Queued as of this entry.
+
+### Upstream `cc020983` sync (#120, merged `6e786a7af`)
+
+Smoked on all four machines; the matrix is in `upstream-sync.md`. Every config passes with an exact 7/7 resume except Sunspot `agpt_2b_real`.
+
+- Sunspot 2B: intermittent Level Zero `ur_die: urEventWait must not be called for an internal event` at step 1, also on the pre-sync tree. Control 8/11 launches crash; `SYCL_UR_USE_LEVEL_ZERO_V2=1` 0/13 (`12484977`/`78`, `12484980`, `12484981`). v2 losses match Aurora's. Throughput under v2 not measured.
+- Sirius: nodes `x3200c0s13`, `s31`, `s37` fail `torch.cuda.set_device` with `CUDA-capable device(s) is/are busy or unavailable` (`33881`, `33884`); `s1`/`s7`/`s19`/`s25` pass. Emailed `help@alcf.anl.gov`.
+- Sirius resume runs need `--comm.train-timeout-seconds=600`: the step-3 save to `/home` outlasts the 100 s watchdog at 2N/4N.
+
+Corrections, same shape every time: hand-built job wrappers instead of the reference argv. `-- /bin/bash wrapper.sh` drops the `--login` shebang (no `module`, no proxy) and cost three Sirius batches and two Sunspot jobs; the Sunspot wrappers also dropped the olmo-mix manifest and `--parallelism.data-parallel-replicate-degree=3` (20B OOM). The fixed runs reuse `prod_smoke.sh` with the Nov 19 settings.
+
+PR #121 (`f068e09fb`) fixed the dead NCCL link that failed lychee on #118-#120.
+
+### Sunspot quota
+
+Project `datascience` on `/lus/tegu`: **33T -> 22.41T**, under the 30T soft limit (it had a 5d 9h grace timer running at 30.51T). Deleted from two frozen, hashed manifests, each path rechecked before `rm`: checkpoint `step-*` dirs only (`.distcp`/`.metadata`/`.pt`, none hard-linked or tracked) plus one 12 GB ELF core.
+
+| Manifest | Folders | Size |
+|---|---|---|
+| 1 | `torchtitan-agpt-replicated-20261031-perf/outputs`, `torchtitan-upstream-7cc86ebc.../outputs` | 2,553 GiB |
+| 2 | `torchtitan-pr90-{919e2eeb3c,1fc1fce71c}/logs`, `torchtitan-smoke-6612da935/logs`, `scratch/ckpt-async-sunspot`, `scratch/ckpt-sweep-dpshard` | 8,293 GiB |
+
+Logs, traces, TensorBoard and the scratch clones stay. Tier 2 untouched.
+
+### Checkouts
+
+`ezpz` checkouts on Aurora (`torchtitan-ezpz`), Sunspot (`torchtitan`, moved off a detached `e796d6dd2`) and mbpr are at `6e786a7af`. Not moved: mbph's main checkout and Sirius `~/torchtitan` (`ezpz-cpt111k-eval-sft`, 20+ commits not on `ezpz`).
+
+### Open
+
+- Umbrella `9107532` and 512N load test `9107456` queued.
+- 20B-512 save segfault (#115) not fixed.
+- `ezpz-cpt111k-eval-sft` commits need a PR.
+- Whether production sets `SYCL_UR_USE_LEVEL_ZERO_V2=1` (Aurora is not crashing; measure throughput first).
+- Smoke harness: per-trial log dir, so repeated trials in one job do not share checkpoints.
+- Follow-up upstream sync (8 newer commits).
+
 ## 2026-11-19: #104 smokes on Sunspot; manifest streaming; agpt CP; MoE EP fix; SFT row-group sharding
 
 Sunspot was up all day. SSH from the laptop fails at `bastion` (interactive auth); hop through Aurora instead. Sirius answers again but also wants interactive auth. Polaris `7860529` (duplicate 20B smoke) is still queued; the qdel was refused by the permission check.
