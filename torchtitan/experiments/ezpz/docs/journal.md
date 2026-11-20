@@ -27,6 +27,41 @@ Frozen manifests (`hf_manifest.py`, `scripts/freeze_hf_manifest.py`) pin a commi
 - #109 `85de4fba0`: SFT sources shard by parquet row group (none of the five has a file count divisible by 24). Training start -> step 1: 958 s (`12484923`) -> 66 s (`12484930`); step 20 at 98 s, 402 tps. aiohttp needs `trust_env=True` behind the ALCF proxy (`12484925` died on direct-connect timeouts).
 - #110 `b46660d65`: MoE EP. `moeModel.Config.__post_init__` re-applied the dense template on the `dataclasses.replace` copy `build()` makes, resetting EP experts to `{dp: R}`; FSDP rejected them (`default_pg`). Diagnosed with `12484929`. `12484931`: `moe_debugmodel_ep` loss `12.94` -> `10.48`, resume steps 4-10 exact.
 
+### Afternoon: #114 root cause and fix, #115 benchmarks, upstream sync smokes
+
+**#114 (4B/10B cannot resume): HSDP read amplification.** The 4B and 10B chains train with HSDP (`dp_shard=12`, `dp_replicate=512`). Every model/optimizer tensor in `step-20700` (4B) and `step-4900` (10B) has exactly 12 chunks, and `dcp.load` has each of the 512 replicas read its own copy:
+
+| checkpoint | chunks per tensor | model+optim | read per load |
+|---|---|---|---|
+| 4B `step-20700` | 12 | 56.85 GB | ~29 TB |
+| 10B `step-4900` | 12 | 115.57 GB | ~59 TB |
+| 2B `step-42200` | 2049-6100 (FSDP over the world) | 25.2 GB | 25.2 GB |
+
+At the ~8.6 GB/s aggregate seen in `9094039`, 29 TB is ~56 min, past the watchdog. The 2B loads fine at the same rank count (`9101108` resumed from `step-42200` and trains at ~42.8k). The `.metadata` sizes (4B/10B 17 MB vs 2B 147 MB) rule out the plan-exchange theory.
+
+Fix (not on `ezpz` yet; on the branches below): `torchtitan/experiments/ezpz/replica_aware_load.py` (`ReplicaAwareLoadPlanner` + `replica_aware_dcp_load` + `ReplicaAwareCheckpointManager`). Only `dp_replicate=0` ranks read DTensors replicated over `dp_replicate`; the rest get them by broadcast before Stateful `load_state_dict`. Branches `ezpz-dcp-gloo-planning` (current `ezpz`) and `ezpz-replica-aware-load-6ad208b` (`e106d3aac`, backport to the 4B/10B production pin, +209/-15, keeps that pin's EMA reseed).
+
+- Laptop, 4 CPU ranks, 2x2 mesh: replica-1 ranks skip all 4 replicated reads; every rank restores exactly (including a Stateful and a scalar). Same on the backport.
+- Aurora `9105587` (2N HSDP 12x2): resume through the new path (117 tensors broadcast), steps 4-10 exact.
+- Aurora `9105632` (2N FSDP control): path not taken, steps 4-10 exact, losses identical to Sunspot `12484935`.
+- Next: 4B resume load-time ladder on `debug-scaling` from the production `step-20700` (read-only, `--checkpoint.load-only`): fix 64N (`9105700`), control 64N, fix 128N, fix 256N. 512N needs approval.
+
+**#115 (20B-512 save segfault): DCP plan-exchange benchmark.** `_DistWrapper.reduce_scatter` (DCP's save/load plan exchange) with synthetic plans; a real 20B plan is ~417 KB/rank (~2.6 GB gathered at 6144 ranks).
+
+| ranks | bytes/rank | xccl | gloo |
+|---|---|---|---|
+| 768 (`9105401`) | 256 KB / 512 KB / 1 MB | 16.2 / 1.0 / 5.1 s | 16.3 / 18.1 / 36.0 s |
+| 3072 (`9105532`) | 256 KB | not reached | 71.5 s |
+| 3072 | 512 KB | not reached | did not finish in ~23 min (walltime) |
+
+Both backends pass at 768 ranks; rank 0 XPU peak tracks the gathered size on xccl. Gloo stalls or scales badly at 3072 ranks, so routing DCP planning through gloo is not a fix. Next: 256N rerun with xccl first and a 1 h walltime. (`9105374` died before measuring: gloo `new_group` on XPU needs `maybe_install_gloo_new_group_workaround()`.)
+
+**Upstream sync scoping** (trial branch `sync/upstream-cc020983a-trial`): 12 upstream commits since `fb1d2ba4`, no conflicts; #5721 (typed RoPE `scaling`) broke all 12 ezpz configs until a 4-site replay (`6612da9` on `sync/upstream-cc020983a-trial`). Sunspot smokes on that head: TP=2 `12484943`, CP=2 `12484944`, MoE EP=2 `12484945`, 4B `12484940` ok with exact resume; 10B `12484941` and 20B `12484942` hit `Errno 122` (quota); 2B `12484939` aborts in the first FSDP all-gather, same as the #103 tree (`12484899`). The 20B's 12.95 -> 26.22 -> 19.39 losses through step 8 are bitwise identical to the #90 baseline `12483922` (which recovers to 11.76 at step 10): a property of the smoke (random init, 512-token batch, production LR), not the sync.
+
+**Quota.** Sunspot `/lus/tegu` project `datascience`: 33 TB used, 30 TB quota, 33 TB hard limit. Under `foremans/`: `scratch/` 2740 GB, `reproductions/` 1655 GB, three `agpt50k-sonic-dcp-real-1247838{1,2,3}/` 138 GB each; `projects/` did not finish sizing in 15 min. Aurora `/lus/flare` AuroraGPT: 1.916 PB of 1.953 PB. Nothing deleted.
+
+**Also:** Sunspot smoke of `ezpz` head `9904597a6` (`12484935`): debugmodel, TP=2, CP=2, MoE, MoE EP=2 all ok, resume exact. Polaris `7860529` qdel was refused by the permission check twice. Issues #114, #115, #116 opened (issues were disabled on the repo until the user enabled them).
+
 ### Open
 
 - 4B/10B 6144-rank checkpoint load stalls past the idle watchdog even when alone.

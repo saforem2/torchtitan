@@ -1,6 +1,8 @@
 # 20B 512N cannot save: DCP save-plan scatter_object_list segfaults at 6144 ranks
 
-> Status: open (2026-11-19). Handoff write-up; issues are disabled on this repo.
+> Status: open (2026-11-19). Tracked in #115.
+>
+> **Benchmark update (2026-11-19):** DCP's plan exchange (`_DistWrapper.reduce_scatter`) passes on both xccl and gloo at 768 ranks (Aurora `9105401`). At 3072 ranks gloo took 71.5 s for 256 KB/rank and did not finish 512 KB/rank within ~23 min (`9105532`), so suggestion 2 below (route planning through gloo) is not viable at production scale. xccl at 3072 ranks is the next measurement.
 
 ## Problem
 
