@@ -37,8 +37,8 @@ from a string to a typed config. As merged, every agpt and MoE config fails.
 
 ### Required replay (#5721)
 
-Four sites, all inside `experiments/ezpz/`. The full diff (15 insertions, 57 deletions)
-was applied as a scratch patch and reverted; it is not on this branch.
+Four sites, all inside `experiments/ezpz/`, committed on this branch as `6612da93`
+(15 insertions, 57 deletions).
 
 | File | Change |
 |---|---|
@@ -96,26 +96,72 @@ Also predating it: `tests/moe/test_agpt_moe_hf_*.py` and `eval/hf_agpt_moe` fail
 `RouterGateLinear` from `models/common/linear`, so the `assets.py` edit is untested, and
 `test_ckpt_key_compat.py` needs an Aurora path.
 
-### Smoke plan for the sync PR
+### Smoke results
 
-Same harness as the `fb1d2ba4` entry: 10 seeded deterministic steps, checkpoint at 5,
-resume, compare steps 6-10 against the pre-sync tree in the same allocation.
+Tree `6612da93`, pinned clean clones on each machine. Each run: 10 seeded deterministic
+steps, then a resume check (checkpoint at step 3, an uninterrupted 10-step run and a run
+resumed from step 3, compared on steps 4-10). Small configs use
+`--training.max-context-length=512 --training.num-tokens-per-microbatch-per-dp-rank=512`.
+2 nodes unless noted. Torch `2.16.0.dev20261015+xpu` (Sunspot, Aurora), `2.15.0+cu132`
+(Polaris).
 
-| Config | Aurora | Polaris |
-|---|---|---|
-| `agpt_2b_real` | yes | yes |
-| `agpt_v2_4b_4k_olmo_mix` | yes | yes |
-| `agpt_v2_10b_4k_olmo_mix` | yes | yes |
-| `agpt_20b_real` | yes | yes (8N) |
-| `agpt_debugmodel` TP=2 | yes | -- |
-| `agpt_debugmodel` CP=2 | yes | -- |
-| `moe_debugmodel` | yes | -- |
-| `moe_debugmodel_ep` EP=2 | yes | -- |
+| Config | Sunspot | Aurora | Polaris (A100 40 GB) |
+|---|---|---|---|
+| `agpt_2b_real` | fails `12484939`, pre-existing | ok `9105491` | ok `7865139` |
+| `agpt_v2_4b_4k_olmo_mix` | ok `12484940` | ok `9106730` | ok `7867375` (4N) |
+| `agpt_v2_10b_4k_olmo_mix` | quota `12484941` | ok `9106777` | ok `7868156` (4N) |
+| `agpt_20b_real` (8N) | quota `12484942` | trains `9106838`, resume not checked | ok `7868262` |
+| `agpt_debugmodel` TP=2 | ok `12484943` | ok `9106819` | ok `7867260` |
+| `agpt_debugmodel` CP=2 | ok `12484944` | ok `9106854` | ok `7867920` |
+| `moe_debugmodel_ep` EP=2 | ok `12484945` | ok `9106926` | ok `7868147` |
 
-Expected: loss and grad_norm bitwise equal to pre-sync on every agpt and MoE arm (the
-replay changes no numerics; #6144 only affects tied models). Resume must match the
-uninterrupted run. `moe_debugmodel_ep` on Aurora failed at FSDP setup in the last sync;
-#110 targeted that failure, so this run also checks #110.
+Loss, step 1 -> 10, of the first 10-step run:
+
+| Config | Sunspot | Aurora | Polaris |
+|---|---|---|---|
+| `agpt_2b_real` | -- | 12.88247 -> 12.45318 | 12.94489 -> 9.57615 |
+| `agpt_v2_4b_4k_olmo_mix` | 12.01617 -> 10.14911 | 12.00635 -> 8.25650 | 12.00943 -> 8.81364 |
+| `agpt_v2_10b_4k_olmo_mix` | 11.99995 -> 10.51290 | 12.00496 -> 11.15326 | 12.01073 -> 10.47324 |
+| `agpt_20b_real` | 12.94795 -> 19.38503 (step 8) | 12.94795 -> 11.76136 | 12.96308 -> 9.63661 |
+| `agpt_debugmodel` TP=2 | 10.86006 -> 9.02420 | 10.86006 -> 9.02420 | 10.86842 -> 9.50705 |
+| `agpt_debugmodel` CP=2 | 10.88189 -> 9.09735 | 10.88189 -> 9.09735 | 10.85987 -> 9.51827 |
+| `moe_debugmodel_ep` EP=2 | 12.93532 -> 10.48273 | 12.93532 -> 10.48273 | 12.98223 -> 10.54844 |
+
+On every arm marked ok, the resumed run matched the uninterrupted run exactly
+(max abs diff `0`, 7/7 steps). Sunspot and Aurora print identical losses for TP=2, CP=2,
+MoE EP=2 and 20B steps 1-8.
+
+Not code failures:
+
+- **Sunspot 10B and 20B: `/lus/tegu` quota.** The `datascience` project is over its hard
+  limit (33T used, 33T limit). 10B trained all 10 steps and the first resume run
+  finished; the second died writing the step-3 checkpoint with `OSError: [Errno 122]
+  Disk quota exceeded` (rc `143`). 20B died at step 8 when ranks hit `Errno 122`
+  writing logs (rc `120`).
+- **Sunspot 2B: pre-existing.** Signal 6 abort in the first FSDP all-gather
+  (`forward_embeddings`), rc `137`. The pre-sync integration tree `4103a65a1` fails the
+  same way (`12484899`).
+- **Aurora 20B: walltime.** Trained all 10 steps (rc `0`); PBS killed the job at the
+  1 h `debug-scaling` limit during the resume check (Exit `-29`). The 8-node venv copy
+  took about 25 of the 60 minutes. 20B resume is not checked on this sync.
+- **Aurora MoE EP=2, first attempt `9106882`:** trained all 10 steps, then the resume
+  launch failed with `start failed on x4615c0s1b0n0: No reply from shepherd after 108s`
+  before any rank started. The rerun `9106926` passed.
+- **Polaris MoE EP=2, first attempt `7868103`:** the Polaris copy of the smoke wrapper
+  hardcoded `ezpz.agpt`, so the run looked up `moe_debugmodel_ep` in the agpt registry
+  and stopped before training. With the wrapper fixed, the rerun `7868147` passed. This
+  is the first MoE EP run on Polaris.
+
+10B is not run-to-run deterministic on XPU: on both Sunspot and Aurora the uninterrupted
+resume run drifts from the first run after step 3 (Aurora step 7: `19.26706` vs
+`20.00462`). The resumed run still matches the uninterrupted run exactly. On Polaris
+the two runs are identical.
+
+20B spikes in the first 10 steps on every machine (no warmup in the smoke): Polaris
+steps 2 and 7 print `24.93495` and `29.40991`, and the resumed run reproduces both.
+
+`moe_debugmodel_ep` failed at FSDP setup on Aurora in the last sync (`9101603`). It
+trains here on every XPU attempt; #110 (in the `9904597a` base) targeted that failure.
 
 ## 2026-11-18: upstream `fb1d2ba4`, 18 commits
 
