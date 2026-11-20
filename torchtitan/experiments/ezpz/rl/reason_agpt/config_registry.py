@@ -124,7 +124,6 @@ def _gsm8k_rollouter(
                     AnswerCloseReward.Config(weight=0.20),
                     AnswerCorrectReward.Config(weight=0.55),
                 ],
-                truncation_reward=0.0,
             ),
             message_env=GSM8KReasonEnv.Config(),
             token_env=TokenEnv.Config(max_rollout_tokens=2048, max_num_turns=1),
