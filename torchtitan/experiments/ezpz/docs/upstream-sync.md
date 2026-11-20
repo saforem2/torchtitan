@@ -103,47 +103,85 @@ steps, then a resume check (checkpoint at step 3, an uninterrupted 10-step run a
 resumed from step 3, compared on steps 4-10). Small configs use
 `--training.max-context-length=512 --training.num-tokens-per-microbatch-per-dp-rank=512`.
 2 nodes unless noted. Torch `2.16.0.dev20261015+xpu` (Sunspot, Aurora), `2.15.0+cu132`
-(Polaris).
+(Polaris, Sirius).
 
-| Config | Sunspot | Aurora | Polaris (A100 40 GB) |
-|---|---|---|---|
-| `agpt_2b_real` | fails `12484939`, pre-existing | ok `9105491` | ok `7865139` |
-| `agpt_v2_4b_4k_olmo_mix` | ok `12484940` | ok `9106730` | ok `7867375` (4N) |
-| `agpt_v2_10b_4k_olmo_mix` | quota `12484941` | ok `9106777` | ok `7868156` (4N) |
-| `agpt_20b_real` (8N) | quota `12484942` | trains `9106838`, resume not checked | ok `7868262` |
-| `agpt_debugmodel` TP=2 | ok `12484943` | ok `9106819` | ok `7867260` |
-| `agpt_debugmodel` CP=2 | ok `12484944` | ok `9106854` | ok `7867920` |
-| `moe_debugmodel_ep` EP=2 | ok `12484945` | ok `9106926` | ok `7868147` |
+| Config | Sunspot | Aurora | Polaris (A100 40 GB) | Sirius (H100) |
+|---|---|---|---|---|
+| `agpt_2b_real` | intermittent `ur_die`, see below | ok `9105491` | ok `7865139` | ok `33886` |
+| `agpt_v2_4b_4k_olmo_mix` | ok `12484940` | ok `9106730` | ok `7867375` (4N) | ok `33887` (4N) |
+| `agpt_v2_10b_4k_olmo_mix` | ok `12484974` | ok `9106777` | ok `7868156` (4N) | ok `33889` (4N) |
+| `agpt_20b_real` (8N) | ok `12484975` | ok `9108501` | ok `7868262` | ok `33890` |
+| `agpt_debugmodel` TP=2 | ok `12484943` | ok `9106819` | ok `7867260` | ok `33888` |
+| `agpt_debugmodel` CP=2 | ok `12484944` | ok `9106854` | ok `7867920` | ok `33888` |
+| `moe_debugmodel_ep` EP=2 | ok `12484945` | ok `9106926` | ok `7868147` | ok `33888` |
 
 Loss, step 1 -> 10, of the first 10-step run:
 
-| Config | Sunspot | Aurora | Polaris |
-|---|---|---|---|
-| `agpt_2b_real` | -- | 12.88247 -> 12.45318 | 12.94489 -> 9.57615 |
-| `agpt_v2_4b_4k_olmo_mix` | 12.01617 -> 10.14911 | 12.00635 -> 8.25650 | 12.00943 -> 8.81364 |
-| `agpt_v2_10b_4k_olmo_mix` | 11.99995 -> 10.51290 | 12.00496 -> 11.15326 | 12.01073 -> 10.47324 |
-| `agpt_20b_real` | 12.94795 -> 19.38503 (step 8) | 12.94795 -> 11.76136 | 12.96308 -> 9.63661 |
-| `agpt_debugmodel` TP=2 | 10.86006 -> 9.02420 | 10.86006 -> 9.02420 | 10.86842 -> 9.50705 |
-| `agpt_debugmodel` CP=2 | 10.88189 -> 9.09735 | 10.88189 -> 9.09735 | 10.85987 -> 9.51827 |
-| `moe_debugmodel_ep` EP=2 | 12.93532 -> 10.48273 | 12.93532 -> 10.48273 | 12.98223 -> 10.54844 |
+| Config | Sunspot | Aurora | Polaris | Sirius |
+|---|---|---|---|---|
+| `agpt_2b_real` | 12.88247 -> 12.45318 (`12484978`) | 12.88247 -> 12.45318 | 12.94489 -> 9.57615 | 12.94318 -> 8.19822 |
+| `agpt_v2_4b_4k_olmo_mix` | 12.01617 -> 10.14911 | 12.00635 -> 8.25650 | 12.00943 -> 8.81364 | 12.02376 -> 10.24320 |
+| `agpt_v2_10b_4k_olmo_mix` | 11.99995 -> 10.48947 | 12.00496 -> 11.15326 | 12.01073 -> 10.47324 | 12.02447 -> 11.21457 |
+| `agpt_20b_real` | 12.94795 -> 11.76136 | 12.94795 -> 11.76136 | 12.96308 -> 9.63661 | 12.96719 -> 10.08218 |
+| `agpt_debugmodel` TP=2 | 10.86006 -> 9.02420 | 10.86006 -> 9.02420 | 10.86842 -> 9.50705 | 10.85575 -> 9.37850 |
+| `agpt_debugmodel` CP=2 | 10.88189 -> 9.09735 | 10.88189 -> 9.09735 | 10.85987 -> 9.51827 | 10.88160 -> 9.44687 |
+| `moe_debugmodel_ep` EP=2 | 12.93532 -> 10.48273 | 12.93532 -> 10.48273 | 12.98223 -> 10.54844 | 12.97502 -> 10.54998 |
 
 On every arm marked ok, the resumed run matched the uninterrupted run exactly
-(max abs diff `0`, 7/7 steps). Sunspot and Aurora print identical losses for TP=2, CP=2,
-MoE EP=2 and 20B steps 1-8.
+(max abs diff `0`, 7/7 steps). Sunspot and Aurora print identical losses for 2B, 20B,
+TP=2, CP=2 and MoE EP=2. Sirius 20B matches the pre-sync Sirius run on `13223cc38`
+(`33751`) at every step.
+
+Sirius needs two harness settings, neither a code change:
+
+- `--comm.train-timeout-seconds=600` on the resume runs. At these node counts each rank
+  writes a ~3 GB shard to `/home`; with the default 100 s the watchdog aborts the
+  step-3 save (2B `33882`: 4 of 8 ranks finished writing ~67 s after the others, no
+  `.metadata`). Not a sync change: `async_mode` was `disabled` on `13223cc38` too.
+- Pinned `ezpz` utils `4a2aba37` and a login shell. Compute nodes cannot reach
+  `ezpz.cool`, and the older `f7deda79` pin loads no MPI module on Sirius
+  (`libmpi.so.12` -> `libfabric.so.1` not found).
+
+Sirius nodes `x3200c0s13`, `s31` and `s37` (b0n0 and b1n0) fail every launch in
+`torch.cuda.set_device` with `CUDA-capable device(s) is/are busy or unavailable`
+(`33881`, `33884`). Jobs on `s1`, `s7`, `s19` and `s25` pass. Reported to ALCF
+support 2026-11-20; the passing debug, 10B and 20B runs are pinned to the good nodes.
+
+Sunspot 2B is not a sync failure. It aborts in the Level Zero runtime:
+
+```
+ur_die: urEventWait must not be called for an internal event
+terminate called without an active exception
+```
+
+the same Intel fault tracked in
+[upstream-issues/intel-ur-die-urEventWait-a2a.md](upstream-issues/intel-ur-die-urEventWait-a2a.md).
+It is intermittent, and `SYCL_UR_USE_LEVEL_ZERO_V2=1` removes it. Control vs v2 on the
+same tree, venv and settings, 2N:
+
+| Jobs | Control crashes | v2 crashes |
+|---|---:|---:|
+| `12484977` / `12484978` (separate jobs, 3 launches each) | 1 / 3 | 0 / 3 |
+| `12484980`, `12484981` (one allocation each, 3 rounds, arm order alternating), first 10-step run of each trial | 5 / 6 | 0 / 6 |
+| same jobs, round-1 resume launches | 2 / 2 | 0 / 4 |
+| **total** | **8 / 11** | **0 / 13** |
+
+Every control crash is rc `137` at step 1. The `ur_die` signature is confirmed in
+`12484977`'s logs; the trial jobs share one log directory per job, so later trials
+overwrote the per-launch logs and only the rc survives. From round 2 on, the resume
+launches in `12484980`/`12484981` resumed the previous trial's step-10 checkpoint and
+are excluded. The v2 runs' losses are identical to Aurora's (12.88247 -> 12.45318) and
+resume exactly. Throughput under v2 is not measured. The pre-sync tree `4103a65a1`
+fails the same way (`12484899`), so this predates the sync.
 
 Not code failures:
 
-- **Sunspot 10B and 20B: `/lus/tegu` quota.** The `datascience` project is over its hard
-  limit (33T used, 33T limit). 10B trained all 10 steps and the first resume run
-  finished; the second died writing the step-3 checkpoint with `OSError: [Errno 122]
-  Disk quota exceeded` (rc `143`). 20B died at step 8 when ranks hit `Errno 122`
-  writing logs (rc `120`).
-- **Sunspot 2B: pre-existing.** Signal 6 abort in the first FSDP all-gather
-  (`forward_embeddings`), rc `137`. The pre-sync integration tree `4103a65a1` fails the
-  same way (`12484899`).
-- **Aurora 20B: walltime.** Trained all 10 steps (rc `0`); PBS killed the job at the
-  1 h `debug-scaling` limit during the resume check (Exit `-29`). The 8-node venv copy
-  took about 25 of the 60 minutes. 20B resume is not checked on this sync.
+- **Sunspot 10B and 20B, first attempts: `/lus/tegu` quota.** The `datascience` project
+  was at its hard limit (33T used, 33T limit); `Errno 122` killed 10B in the resume
+  check (`12484941`) and 20B at step 8 (`12484942`). After cleanup (22.41T) both pass.
+- **Aurora 20B, first attempt `9106838`: walltime.** PBS killed it at the 1 h
+  `debug-scaling` limit during the resume check; the 8-node venv copy took 1,485 s.
+  The rerun without the copy (`PS_YEET=0`) passed in 55 min.
 - **Aurora MoE EP=2, first attempt `9106882`:** trained all 10 steps, then the resume
   launch failed with `start failed on x4615c0s1b0n0: No reply from shepherd after 108s`
   before any rank started. The rerun `9106926` passed.
