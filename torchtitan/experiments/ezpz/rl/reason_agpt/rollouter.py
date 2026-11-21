@@ -43,7 +43,6 @@ class GSM8KReasonWorker(MessageEnvRolloutWorker):
                     AnswerCloseReward.Config(weight=0.20),
                     AnswerCorrectReward.Config(weight=0.70),
                 ],
-                truncation_reward=0.0,
             )
         )
         message_env: GSM8KReasonEnv.Config = field(
