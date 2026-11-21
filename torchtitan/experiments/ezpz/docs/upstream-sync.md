@@ -59,7 +59,7 @@ count run in one allocation, one `SMOKE_LOG_TAG` per config. Sunspot 2B sets
 | `agpt_2b_real` | ok `12484996` | ok `9109576` | ok `33893` |
 | `agpt_v2_4b_4k_olmo_mix` | ok `12484996` | ok `9109832` | ok `33894` (4N) |
 | `agpt_v2_10b_4k_olmo_mix` | ok `12484996` | ok `9109832` | ok `33894` (4N) |
-| `agpt_20b_real` (8N) | ok `12484997` | ok `9109577` | pending, see below |
+| `agpt_20b_real` (8N) | ok `12484997` | ok `9109577` | ok `33899` |
 | `agpt_debugmodel` TP=2 | ok `12484996` | ok `9109576` | ok `33893` |
 | `agpt_debugmodel` CP=2 | ok `12484996` | ok `9109832` | ok `33896` |
 | `moe_debugmodel_ep` EP=2 | ok `12484996` | ok `9109576` | ok `33893` |
@@ -84,10 +84,10 @@ Not code failures:
   the uninterrupted run's step-3 save to `/home` ran past the 600 s train timeout
   (save started 00:34:10, watchdog abort with signal 6 about 600 s later). The same
   save finished inside 600 s in `33895`, so `/home` write time varies by more than
-  that between runs. A third attempt with both timeouts at 1800 s is `33899`. The
-  first 10-step run matched the cc020983 Sirius losses in both attempts
-  (`12.96719 -> 10.08218`), and 20B save/resume passed on Sunspot and Aurora on this
-  tree.
+  that between runs. The third attempt, with both timeouts at 1800 s (`33899`),
+  passed. Its step-3 save took 337 s, later saves 34-59 s, and the resume load 63 s.
+  Losses match the cc020983 Sirius run (`12.96719 -> 10.08218`). On Sirius, 20B
+  resume checks need `--comm.train-timeout-seconds=1800 --comm.init-timeout-seconds=1800`.
 
 ## 2026-11-19: upstream `cc020983`, 12 commits (merged as #120, `6e786a7a`)
 
