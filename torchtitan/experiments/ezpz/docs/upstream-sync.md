@@ -1,6 +1,95 @@
 # Upstream Sync Log
 
-## 2026-11-19 (draft, not merged): upstream `cc020983`, 12 commits
+## 2026-11-20: upstream `078bdc6a`, 10 commits
+
+Merge of `pytorch/torchtitan` `main` at `078bdc6acb` into `ezpz` `6e786a7a` (#120), on
+branch `sync/upstream-078bdc6ac` (merge commit `7f90823f`). Merge base `cc020983`: the
+head of the last sync. Upstream is linear over the range, 51 files, +2,982/-355.
+
+No conflicts, and no upstream commit touches `experiments/ezpz/`, `models/llama3/` or
+`models/deepseek_v3/`, so the agpt and MoE models need no replay. One RL commit breaks
+both `reason_agpt` rubrics.
+
+### What the 10 commits change for us
+
+| Upstream (PR) | Effect on ezpz |
+|---|---|
+| `Rubric.Config.truncation_reward` deleted, `truncation_penalty` (default `0`) added (#5451) | **Breaks `rl/reason_agpt`**: both rubrics set `truncation_reward=0.0` and now raise `TypeError`. Replay below |
+| torchmonarch `0.8.0` (`requirements-rl.txt` `torchmonarch>=0.8.0`); `monarch/actor.py` imports `InvalidReferenceReason`, `UndeliverableMessageEnvelope`; `rdma_microbatch.py` log workaround removed (#6199) | ezpz RL venvs pin torchmonarch `0.6`/`0.7` and must be rebuilt before the next RL run. No ezpz code imports the changed names |
+| Activation offload on `torch_remat` saved-tensor hooks; `BlockRematPolicy`; `Module` gains `_remat_block_fqn` (#6020, #6137) | Additive. `agpt/parallelize.py` keeps its existing AC modes; offload is opt-in and no ezpz config enables it. Smoke losses below are unchanged |
+| RL: weight push finishes before forward/backward (#5235), validation at temperature 1 with optional best-of-n (#6266), batcher token budget need not divide the context (#6264), SGLang Mooncake master on the controller (#6254) | Core RL loop. ezpz RL is not exercised by this sync's smokes |
+| CI B200 Dist-MoE with EP and PP (#6263), 1M context for `@claude` (#6260) | Not used by ezpz |
+
+### Required replay (#5451)
+
+Committed as `8deb2d3a`: delete `truncation_reward=0.0,` from
+`rl/reason_agpt/config_registry.py` and `rl/reason_agpt/rollouter.py`, as upstream did in
+`torchtitan_recipes/rl/search_r1.py`.
+
+This changes behavior. A truncated rollout used to score a flat `0.0`; it now keeps
+its weighted reward-fn score (`ThinkFormatReward`, `AnswerExtractableReward`,
+`AnswerCloseReward`, `AnswerCorrectReward`), less a `truncation_penalty` of `0`. Upstream has
+no way to restore the flat score; a positive `truncation_penalty` is the replacement
+knob, and we have not picked a value.
+
+### Harness fix: `SMOKE_LOG_TAG`
+
+Committed as `5015a21c`. `scripts/sync_smoke_alcf.sh` named its log directory after the
+PBS job only, so every launch in one allocation shared one directory: later runs
+overwrote earlier logs, and a resume run could load an earlier run's checkpoint. This is why only the first-launch
+counts from the cc020983 `ur_die` trials survived (see below). The optional
+`SMOKE_LOG_TAG` now suffixes the directory name. Without the variable, nothing changes.
+
+### Laptop checks
+
+Not run. The existing `mbph` venv has an older `spmd_types` (`no attribute 'rules'`), so
+it fails before reaching ezpz code, and a rebuild was not done for this sync. With no
+model or config changes upstream, the hardware smokes below exercise more of the
+changed surface than meta builds would have.
+
+### Smoke results
+
+Tree `5015a21c`, pinned clean clones, same harness and settings as the cc020983 section
+(10 seeded steps, resume from step 3, steps 4-10 compared). Configs that share a node
+count run in one allocation, one `SMOKE_LOG_TAG` per config. Sunspot 2B sets
+`SYCL_UR_USE_LEVEL_ZERO_V2=1`. Polaris was not run.
+
+| Config | Sunspot | Aurora | Sirius (H100) |
+|---|---|---|---|
+| `agpt_2b_real` | ok `12484996` | ok `9109576` | ok `33893` |
+| `agpt_v2_4b_4k_olmo_mix` | ok `12484996` | ok `9109832` | ok `33894` (4N) |
+| `agpt_v2_10b_4k_olmo_mix` | ok `12484996` | ok `9109832` | ok `33894` (4N) |
+| `agpt_20b_real` (8N) | ok `12484997` | ok `9109577` | pending, see below |
+| `agpt_debugmodel` TP=2 | ok `12484996` | ok `9109576` | ok `33893` |
+| `agpt_debugmodel` CP=2 | ok `12484996` | ok `9109832` | ok `33896` |
+| `moe_debugmodel_ep` EP=2 | ok `12484996` | ok `9109576` | ok `33893` |
+
+On every arm marked ok, the resumed run matched the uninterrupted run exactly
+(max abs diff `0`, 7/7 steps). Step 1 and step 10 losses of the first run match the
+cc020983 table on every machine and config, except 10B on XPU (Sunspot `10.49838` vs
+`10.48947`, Aurora `11.33080` vs `11.15326`), which is not run-to-run deterministic
+there. Sirius 10B, which is deterministic, matches exactly (`12.02447 -> 11.21457`).
+
+Not code failures:
+
+- **Sirius CP=2, first attempt `33893`:** the first run and the uninterrupted run passed;
+  the resumed run failed before training with `EADDRINUSE` on TCPStore port `49717`,
+  most likely still held by the previous launch on the same node. Rerun alone as
+  `33896`.
+- **Sirius 20B, first attempt `33895`:** the resumed run spent more than 300 s loading
+  the step-3 checkpoint from `/home` (23:24:04 to 23:29:52), and the NCCL watchdog
+  aborted it on `comm.init_timeout_seconds` (default `300`), which applies until the
+  first training step. `--comm.train-timeout-seconds=600` does not cover the load.
+  The rerun with `--comm.init-timeout-seconds=1800` (`33898`) failed one step earlier:
+  the uninterrupted run's step-3 save to `/home` ran past the 600 s train timeout
+  (save started 00:34:10, watchdog abort with signal 6 about 600 s later). The same
+  save finished inside 600 s in `33895`, so `/home` write time varies by more than
+  that between runs. A third attempt with both timeouts at 1800 s is `33899`. The
+  first 10-step run matched the cc020983 Sirius losses in both attempts
+  (`12.96719 -> 10.08218`), and 20B save/resume passed on Sunspot and Aurora on this
+  tree.
+
+## 2026-11-19: upstream `cc020983`, 12 commits (merged as #120, `6e786a7a`)
 
 Trial merge of `pytorch/torchtitan` `main` at `cc020983a4` into `ezpz` `9904597a`
 (#113), on branch `sync/upstream-cc020983a-trial`. Merge base `fb1d2ba4`: the head of
